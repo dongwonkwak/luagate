@@ -1,0 +1,32 @@
+# Version control
+.git
+.gitignore
+
+# Nix
+.direnv/
+result
+result-*
+flake.lock
+
+# Build artifacts
+csrc/build/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# Dev / editor
+.claude/
+.vscode/
+.idea/
+*.swp
+*~
+
+# Secrets / env
+.env
+.env.*
+
+# Test output
+tests/.output/
+*.log
+luacov.stats.out
+luacov.report.out

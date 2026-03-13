@@ -1,0 +1,11 @@
+return {
+  default = {
+    lua = "luajit",
+    lpath = {
+      "./lua/?.lua",
+      "./lua/?/init.lua",
+      "./?.lua",
+      "./?/init.lua",
+    },
+  },
+}

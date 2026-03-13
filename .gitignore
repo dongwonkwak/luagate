@@ -1,0 +1,40 @@
+# Build artifacts
+csrc/build/
+*.so
+*.o
+*.a
+*.out
+
+# Lua
+luacov.stats.out
+luacov.report.out
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Nix
+.direnv/
+result
+result-*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
+.docker/
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Test output
+tests/.output/
+*.log
