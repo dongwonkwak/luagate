@@ -41,6 +41,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 ```
 
 - **master process**: 설정 파싱, worker 관리, 시그널 처리
+  - HUP 시그널 수신 시: nginx.conf 재로드 + 새 worker 기동 + 기존 worker graceful shutdown (full config reload, ADR-002 §3.3)
 - **worker process**: 실제 요청 처리. 각자 독립 Lua VM 보유. 이벤트 기반 비동기 처리
 - **shared dict**: worker 간 정책 버전, 메트릭, 연결 수 공유 (ADR-001)
 - **C/Rust FFI**: `.so` 파일을 각 worker에서 `ffi.load()`로 로드. IPC 없음 (ADR-001)
@@ -88,17 +89,24 @@ Client TCP Connect
   │
   ▼
 [stream preread_by_lua] ── 프로토콜 탐지 (HTTP/TLS/SSH/unknown)
-  │                        SNI 추출 (TLS)
+  │                        ngx.req.socket()으로 첫 N 바이트 peek
+  │                        SNI 추출 (TLS ClientHello)
+  │                        탐지 결과 → ngx.ctx.luagate_stream에 저장
   ▼
 [stream access_by_lua] ── 스트림 정책 평가
-  │                       ├─ deny → 연결 종료, 로그 기록
+  │                       src_ip/dst_port/detected_protocol/sni 기반 매칭
+  │                       ├─ deny → 연결 종료 (ngx.exit), 로그 기록
   │                       └─ proxy → 다음 단계
   ▼
-[stream proxy_pass] ── TCP 프록시
-  │
+[stream proxy_pass] ── Nginx native TCP 프록시
+  │                    (content_by_lua가 아닌 proxy_pass 지시자 사용)
   ▼
 [stream log_by_lua] ── 세션 로그 기록 (12필드, ADR-004)
 ```
+
+> **설계 원칙**: stream 파이프라인은 `content_by_lua`가 아닌 Nginx native `proxy_pass`를 사용한다.
+> Lua는 `preread_by_lua`(탐지)와 `access_by_lua`(정책 판정)에만 관여하며, 실제 바이트 전달은 Nginx가 담당한다.
+> `ngx.req.get_body_data()`는 stream context에서 사용하지 않는다. 데이터 peek은 `ngx.req.socket()`의 `receive(N, "keep")`으로 수행한다.
 
 ## 4. 기술 스택
 

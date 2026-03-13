@@ -74,18 +74,44 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `policy_version` | string | No | SHA256 정책 버전 해시 |
 | `worker_pid` | number | No | 처리 worker의 PID |
 
-### 2.3 X-Forwarded-For 처리
+### 2.3 X-Forwarded-For 처리 — Trusted Proxy 기반 파싱
+
+XFF 헤더의 최좌측 IP를 무조건 신뢰하면 IP 스푸핑에 취약하다.
+LuaGate는 **right-to-left** 파싱 방식을 사용한다:
+신뢰하는 프록시 수(`LUAGATE_TRUSTED_PROXIES`)만큼 오른쪽에서 건너뛰고,
+그 다음 IP를 실제 클라이언트 IP로 사용한다.
 
 ```lua
--- 신뢰할 수 있는 프록시 수: LUAGATE_TRUSTED_PROXIES 환경변수로 설정
-local forwarded_for = ngx.req.get_headers()["X-Forwarded-For"]
-if forwarded_for then
-    -- 최좌측 IP가 실제 클라이언트
-    src_ip = forwarded_for:match("^([^,]+)")
+-- LUAGATE_TRUSTED_PROXIES: 신뢰하는 프록시 홉 수 (기본값: 0)
+-- 예: L4 LB 1개 뒤에 배치 → LUAGATE_TRUSTED_PROXIES=1
+local trusted_proxies = tonumber(os.getenv("LUAGATE_TRUSTED_PROXIES")) or 0
+local real_ip
+
+if trusted_proxies == 0 then
+    -- 프록시 없음: remote_addr 직접 사용 (XFF 무시)
+    real_ip = ngx.var.remote_addr
 else
-    src_ip = ngx.var.remote_addr
+    local xff = ngx.req.get_headers()["X-Forwarded-For"]
+    if xff then
+        local ips = {}
+        for ip in xff:gmatch("[^,%s]+") do
+            table.insert(ips, ip)
+        end
+        -- right-to-left: 신뢰 프록시 수만큼 오른쪽에서 건너뜀
+        local idx = #ips - trusted_proxies
+        real_ip = (idx >= 1) and ips[idx] or ngx.var.remote_addr
+    else
+        real_ip = ngx.var.remote_addr
+    end
 end
+
+-- real_ip_module 대안: ngx_http_realip_module을 사용하면
+-- nginx.conf에서 set_real_ip_from + real_ip_header로 동일 효과
+-- 단, Lua 로직과 중복되지 않도록 하나만 선택해야 함
 ```
+
+> **권장**: 프로덕션 환경에서는 Nginx `ngx_http_realip_module`을 우선 사용하고,
+> `$realip_remote_addr`을 `src_ip` 필드에 사용한다. Lua 기반 파싱은 모듈 사용이 불가할 때의 대안이다.
 
 ## 3. TCP 세션 로그 (`stream.log`)
 
@@ -177,22 +203,30 @@ end
 ## 5. Nginx 로그 설정
 
 ```nginx
-# conf/nginx.http.conf
+# Nginx-managed logging 방식 (권장):
+# log_by_lua에서 ngx.var를 사용하여 JSON을 구성하고,
+# nginx log_format + access_log 지시자로 파일에 기록한다.
+# 이 방식은 Nginx의 log buffering, rotation 시그널(USR1) 처리를 활용한다.
+
 log_format luagate_json escape=json
-    '{'
-    '"timestamp":"$time_iso8601",'
-    '"request_id":"$request_id",'
-    '"src_ip":"$remote_addr",'
-    ...
-    '}';
+    '{"timestamp":"$time_iso8601",'
+    '"request_id":"$http_x_request_id",'
+    '"src_ip":"$realip_remote_addr",'
+    '"method":"$request_method",'
+    '"path_raw":"$request_uri",'
+    '"response_status":$status,'
+    '"latency_ms":$request_time,'
+    '"worker_pid":$pid}';
 
-# log_by_lua_block이 JSON 생성을 담당하므로
-# nginx access_log는 비활성화
-access_log off;
-
-# Lua가 직접 파일에 기록
-# lua/luagate/log/http.lua → /var/log/luagate/access.log
+# log_by_lua에서 ngx.var.luagate_log_json 변수에 전체 JSON을 설정하거나,
+# Nginx log_format으로 구조화된 필드를 조합한다.
+access_log /var/log/luagate/access.log luagate_json buffer=64k flush=5s;
 ```
+
+> **Lua 직접 파일 쓰기(`io.open`/`io.write`) 사용 금지**:
+> - Lua에서 `io.open`으로 직접 파일에 쓰면 Nginx의 non-blocking I/O 모델을 우회하여 worker 이벤트 루프를 블로킹할 수 있다.
+> - 파일 rotate 시 `kill -USR1` 시그널이 Nginx 관리 파일 핸들에만 작용하므로, Lua가 직접 연 파일 핸들은 rotate 후에도 구 파일에 계속 쓰게 된다.
+> - **대안**: Nginx `access_log`(위 설정), 또는 non-blocking socket logger(syslog/UDP), 또는 per-worker in-memory buffer + 주기적 flush 방식을 사용한다.
 
 ## 6. 로그 로테이션 권장 설정
 

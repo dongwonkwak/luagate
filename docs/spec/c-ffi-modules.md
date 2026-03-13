@@ -41,7 +41,10 @@ serde_yaml = "0.9"
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"  # .so에서 Rust panic이 프로세스를 종료하지 않도록
+panic = "abort"  # Crash-fail-fast 전략: Rust panic 시 worker를 즉시 abort.
+                 # C stack에서 Rust panic unwinding은 UB 유발 가능 → abort가 안전함.
+                 # catch_unwind는 이 프로젝트에서 사용하지 않는다.
+                 # worker abort 시 Nginx master가 자동 재시작 (ADR-001 §1.2 참조).
 ```
 
 ```toml
@@ -157,6 +160,8 @@ end
 | Rust가 할당한 메모리 | 반드시 Rust의 `*_free()` 함수로 해제 |
 | Lua 문자열 → C | `ffi.cast`로 포인터 전달. Lua GC가 문자열 소유 |
 | 구조체 수명 | FFI 함수 반환 후 즉시 Lua 값으로 복사, C 포인터 저장 금지 |
+| `luagate_scan_result_free()` 내부 문자열 ownership | `ScanResult.threat_type`과 `ScanResult.matched_pattern`은 Rust `CString`으로 heap 할당됨. `drop(Box::from_raw(result))` 호출 시 구조체와 내부 `*mut c_char` 필드 모두 해제됨. Lua에서 `ffi.string()`으로 복사한 후에만 `free()` 호출할 것 |
+| Nested allocation 해제 계약 | `Box::from_raw(result)` drop 순서: 1) `ScanResult.threat_type` (`*mut c_char`) drop, 2) `ScanResult.matched_pattern` (`*mut c_char`) drop, 3) `ScanResult` 구조체 자체 drop. Rust Drop 트레잇이 이 순서를 보장한다 |
 
 **메모리 누수 방지 패턴:**
 

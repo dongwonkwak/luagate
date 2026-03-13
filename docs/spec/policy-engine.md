@@ -48,6 +48,33 @@ stream_rules:                   # TCP 스트림 규칙
     upstream: string            # proxy 시 업스트림 주소
 ```
 
+### 2.1 Canonical Scope 키 정의
+
+아래 scope 키는 LuaGate의 공식(canonical) 키다. 이 외의 scope 확장은 별도 ADR을 통해 추가한다.
+
+**HTTP 규칙 scope:**
+
+| scope 키 | 타입 | 설명 | 예시 |
+|----------|------|------|------|
+| `path` | string (glob) | URL 경로 패턴 | `/api/v1/*`, `/health` |
+| `method` | string \| list | HTTP 메서드 | `GET`, `["GET", "POST"]` |
+| `src_ip` | string | 단일 클라이언트 IP | `192.168.1.1` |
+| `src_ip_cidr` | string | CIDR 범위 | `10.0.0.0/8` |
+| `query_param` | map | 쿼리 파라미터 키=값 | `{q: "admin"}` |
+| `header` | map | 요청 헤더 키=값 | `{X-Role: "admin"}` |
+
+**Stream 규칙 scope:**
+
+| scope 키 | 타입 | 설명 | 예시 |
+|----------|------|------|------|
+| `src_ip_cidr` | string | CIDR 범위 | `0.0.0.0/0` |
+| `dst_port` | number | 목적지 포트 | `443`, `22` |
+| `detected_protocol` | string (enum) | 탐지된 프로토콜 | `tls`, `http`, `ssh`, `unknown` |
+| `sni` | string | TLS SNI 값 (exact match) | `api.example.com` |
+
+**`threat_type` 등 스캐너 출력 기반 scope 필드**는 현재 canonical scope에 포함되지 않는다.
+향후 도입 시 별도 ADR/appendix로 정의한다 (`<!-- ADR 필요 -->` 마커 유지).
+
 ## 3. 정책 평가 알고리즘 (ADR-002)
 
 ### 3.1 HTTP 규칙 평가
@@ -128,14 +155,38 @@ end
 Worker 버전 확인 로직 (`access_by_lua` 진입 시):
 
 ```lua
-local current_version = ngx.shared.luagate_policy:get("policy_version")
-if current_version ~= ngx.ctx._local_policy_version then
-    -- 새 정책 로드
-    local policy = ngx.shared.luagate_policy:get("policy_tree")
-    ngx.ctx._local_policy = cjson.decode(policy)
-    ngx.ctx._local_policy_version = current_version
+-- lua/luagate/policy/evaluator.lua (module-level upvalue)
+-- ngx.ctx는 요청 단위 스코프이므로 policy 캐시에 사용하지 않는다.
+-- Worker-level Lua module state (upvalue)로 캐시한다.
+local _cached_policy = nil          -- worker-level 캐시
+local _cached_version = nil         -- 캐시된 정책 버전
+
+local function get_policy()
+    local current_version = ngx.shared.luagate_policy:get("active_policy_version")
+
+    if _cached_version == current_version and _cached_policy ~= nil then
+        -- 버전 동일 → 캐시 사용 (shared dict 접근 최소화)
+        return _cached_policy
+    end
+
+    -- 버전 변경 → shared dict에서 새 정책 로드
+    local blob_key = "policy:" .. current_version .. ":blob"
+    local policy_json = ngx.shared.luagate_policy:get(blob_key)
+    if not policy_json then
+        ngx.log(ngx.ERR, "policy blob not found for version: ", current_version)
+        return _cached_policy  -- last-known-good 유지
+    end
+
+    _cached_policy = cjson.decode(policy_json)
+    _cached_version = current_version
+    return _cached_policy
 end
 ```
+
+> **중요**: `ngx.ctx`는 요청(request) 단위 스코프로, 요청 종료 시 GC된다.
+> 정책 캐시를 `ngx.ctx`에 저장하면 매 요청마다 shared dict를 조회하게 된다.
+> Module-level upvalue(`_cached_policy`, `_cached_version`)는 worker 프로세스 수명 동안 유지되므로,
+> 버전이 바뀌지 않는 한 shared dict 조회를 건너뛸 수 있다.
 
 ## 5. 충돌 감지기 (ADR-002)
 

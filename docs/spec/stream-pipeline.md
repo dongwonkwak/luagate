@@ -7,6 +7,12 @@
 
 ## 1. 개요
 
+> **HTTP vs Stream 용어 차이**:
+> - HTTP 파이프라인의 허용 action: `allow` / 차단 action: `deny`
+> - Stream 파이프라인의 허용 action: **`proxy`** / 차단 action: `deny`
+>
+> Stream에서 `allow` 대신 `proxy`를 사용하는 이유: TCP 스트림은 단순 허용이 아니라 반드시 업스트림으로 **프록시**해야 하기 때문이다. 정책 스키마의 `action` 필드에 `proxy`를 명시함으로써 업스트림 지정(`upstream: ...`)과의 연관성을 명확히 한다.
+
 LuaGate Stream 파이프라인은 TCP/UDP 레벨 스트림 연결을 처리한다.
 HTTP와 달리 L4 레벨에서 연결을 수신하여 프로토콜을 탐지하고 정책 기반으로 프록시 또는 차단한다.
 
@@ -19,12 +25,19 @@ Nginx `stream {}` 블록 (`conf/nginx.stream.conf`)에서 구성한다.
 **목적**: 첫 N 바이트를 읽어 애플리케이션 프로토콜을 탐지한다.
 
 ```lua
--- preread 단계: 데이터를 소비하지 않고 peek
-local data = ngx.req.get_body_data()  -- preread buffer
+-- preread 단계: ngx.req.socket()으로 데이터를 소비하지 않고 peek
+local sock = assert(ngx.req.socket())
+-- "keep" 옵션: 버퍼를 소비하지 않고 peek (preread buffer에 유지)
+local data, err = sock:receive(16, "keep")
+if not data then
+    -- peek 실패 → "unknown"으로 처리
+    ngx.ctx.luagate_stream.detected_protocol = "unknown"
+    return
+end
 
 -- 프로토콜 탐지 순서
 1. TLS ClientHello 탐지 (0x16 0x03 ...)
-   └─ SNI 추출
+   └─ SNI 추출: TLS Extension(server_name) 파싱
 2. HTTP 메서드 탐지 (GET/POST/... 으로 시작)
 3. SSH 배너 탐지 (SSH-2.0-...)
 4. 기타 → "unknown"

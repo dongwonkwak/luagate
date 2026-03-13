@@ -107,15 +107,23 @@ Content-Type: application/x-yaml
 1. Schema 검증
 2. 충돌/음영 감지 (경고 수집)
 3. `conf/policies.yaml` atomic write (ADR-003)
-4. 감사 로그 기록
-5. **reload는 별도로 트리거** (이 엔드포인트는 파일만 저장)
+4. `staged_policy_version` 계산 (SHA256 of new policy)
+5. 감사 로그 기록 (`policy_update` 이벤트, `staged_policy_version` 포함)
+6. **reload는 별도로 트리거** — 이 엔드포인트는 파일만 저장하며 active_policy_version은 변경하지 않음
+
+> **staged vs active 구분**:
+> - `staged_policy_version`: `PUT /api/v1/policies`로 저장된 정책의 버전 해시. 아직 활성화되지 않음.
+> - `active_policy_version`: 현재 요청을 처리하는 정책 버전. `POST /api/v1/policies/reload` 성공 후 변경됨.
+>
+> 저장과 활성화를 하나의 트랜잭션으로 처리하려면 `PUT /api/v1/policies?activate=true` 쿼리 파라미터를 사용한다 (저장 + 즉시 reload를 원자적으로 수행, 실패 시 rollback).
 
 **응답 200:**
 ```json
 {
   "ok": true,
   "data": {
-    "policy_version": "b4e3f2a1...",
+    "staged_policy_version": "b4e3f2a1...",
+    "active_policy_version": "a3f2c1d4...",
     "warnings": [
       {
         "type": "conflict",
@@ -214,16 +222,16 @@ Prometheus text format (OpenMetrics 호환).
 ```
 # HELP luagate_requests_total Total HTTP requests processed
 # TYPE luagate_requests_total counter
-luagate_requests_total{action="allow",method="GET",path_normalized="/api/v1/users",policy_version="a3f2c1d4"} 12345
-luagate_requests_total{action="deny",method="GET",path_normalized="/admin",policy_version="a3f2c1d4"} 23
+luagate_requests_total{action="allow",method="GET",route="/api/v1/users"} 12345
+luagate_requests_total{action="deny",method="GET",route="/admin"} 23
 
 # HELP luagate_blocked_total Total blocked requests
 # TYPE luagate_blocked_total counter
 luagate_blocked_total{threat_type="sqli",deny_reason="policy: deny-sqli"} 145
 
-# HELP luagate_latency_histogram_seconds Request latency
-# TYPE luagate_latency_histogram_seconds histogram
-luagate_latency_histogram_seconds_bucket{le="0.001"} 9000
+# HELP luagate_latency_seconds Request latency
+# TYPE luagate_latency_seconds histogram
+luagate_latency_seconds_bucket{le="0.001"} 9000
 ...
 
 # HELP luagate_active_connections Active connections
@@ -270,8 +278,12 @@ Authorization: Bearer <token>
 add_header Access-Control-Allow-Origin $LUAGATE_DASHBOARD_ORIGIN always;
 add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
 add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+add_header Vary "Origin" always;  # CDN/프록시 캐시가 Origin별로 응답을 구분하도록
 
+# OPTIONS preflight는 인증(Bearer token) 없이 허용
+# preflight에는 Authorization 헤더가 없으므로 auth 미들웨어에서 OPTIONS를 예외 처리해야 함
 if ($request_method = 'OPTIONS') {
+    add_header Access-Control-Max-Age 86400;
     return 204;
 }
 ```

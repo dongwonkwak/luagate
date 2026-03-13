@@ -51,10 +51,12 @@ docs/
 
 | 항목 | 내용 |
 |------|------|
-| **Status** | Proposed | Accepted | Deprecated | Superseded by ADR-NNN |
+| **Status** | Proposed \| Accepted \| Deprecated \| Superseded by ADR-NNN |
 | **Date** | YYYY-MM-DD |
 | **Deciders** | 관련자 |
 | **Issue** | Linear 이슈 링크 |
+| **Depends on** | ADR-NNN, ADR-NNN (이 ADR이 전제하는 결정) — 해당 없으면 생략 |
+| **Supersedes** | ADR-NNN (이 ADR이 대체하는 결정) — 해당 없으면 생략 |
 
 ## Status
 현재 상태 설명.
@@ -163,15 +165,18 @@ PR에서 다음을 확인한다:
 
 Epic 2에서 식별된 `<!-- ADR 필요 -->` 항목:
 
-| 위치 | 기능 |
-|------|------|
-| `architecture.md` | 멀티 인스턴스 정책 동기화 |
-| `architecture.md` | C FFI 타임아웃 강제 메커니즘 |
-| `http-pipeline.md` | C FFI 타임아웃 강제 메커니즘 |
-| `security-scanner.md` | threat_score 기반 자동 차단 scope |
-| `security-scanner.md` | 패턴 핫 업데이트 |
-| `stream-pipeline.md` | TLS 터미네이션 지원 |
-| `test-strategy.md` | 카오스 엔지니어링 테스트 전략 |
+| 위치 | 기능 | 우선순위 |
+|------|------|----------|
+| `architecture.md` | 멀티 인스턴스 정책 동기화 | Low |
+| `architecture.md` | C FFI 타임아웃 강제 메커니즘 | Medium |
+| `http-pipeline.md` | C FFI 타임아웃 강제 메커니즘 | Medium |
+| `security-scanner.md` | threat_score 기반 자동 차단 scope | Medium |
+| `security-scanner.md` | 패턴 핫 업데이트 | Low |
+| `stream-pipeline.md` | TLS 터미네이션 지원 | Low |
+| `test-strategy.md` | 카오스 엔지니어링 테스트 전략 | Medium |
+| **신규** `admin-api.md` + `adr/` | **policy-activation-and-concurrency**: 저장(staged)과 활성화(active) 분리, 동시 reload race condition 처리, atomic replace 보장 | **High** |
+| **신규** `adr/` + `log-schema.md` | **metrics-cardinality-and-export**: low-cardinality 레이블 정책, route 정규화 전략, Prometheus export 형식 | **High** |
+| **신규** `adr/` + `log-schema.md` | **log-redaction-and-retention**: 민감정보 마스킹 대상/방법, 로그 보존 기간, 파기 정책 | **High** |
 
 ## 8. 의존성
 

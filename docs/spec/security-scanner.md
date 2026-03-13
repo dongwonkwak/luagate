@@ -40,7 +40,14 @@ typedef struct {
 } ScanResult;
 
 // 주요 스캔 함수
+// path_raw: 디코딩 전 원본 경로 (raw 인코딩 우회 탐지용)
+// path_normalized: 정규화된 경로 (정책 평가 기준)
+// raw 검사 책임: 디코더가 path_raw를 먼저 처리하여 인코딩 우회 패턴을 탐지하고,
+//               스캐너는 path_normalized 기준으로 위협을 확인한다.
+//               단, 스캐너도 path_raw를 수신하여 디코더가 놓친 raw 패턴을 이중 검사한다.
 ScanResult* luagate_scan_http(
+    const char* path_raw,         // 원본 요청 경로 (디코딩 전)
+    size_t      path_raw_len,
     const char* path_normalized,  // 정규화된 경로
     size_t      path_len,
     const char* query_string,     // 쿼리 스트링
@@ -71,6 +78,7 @@ typedef struct {
 } ScanResult;
 
 ScanResult* luagate_scan_http(
+    const char* path_raw, size_t path_raw_len,
     const char* path_normalized, size_t path_len,
     const char* query_string, size_t query_len,
     const char* body, size_t body_len,
@@ -86,6 +94,7 @@ local M = {}
 
 function M.scan(ctx)
     local result = lib.luagate_scan_http(
+        ctx.path_raw, #ctx.path_raw,
         ctx.path_normalized, #ctx.path_normalized,
         ctx.query_string or "", #(ctx.query_string or ""),
         ctx.body or nil, ctx.body and #ctx.body or 0,
@@ -161,22 +170,29 @@ return M
 | 0.7 - 0.9 | 높음 | deny 권장 |
 | 0.9 - 1.0 | 매우 높음 | deny |
 
-**중요**: 스캐너의 위협 점수는 정책 평가의 **입력값**이 될 수 있지만,
-최종 판정은 항상 정책 규칙이 결정한다 (ADR-002).
+> **중요**: 스캐너의 위협 점수는 정책 평가의 **입력값**이 될 수 있지만,
+> 최종 판정은 항상 정책 규칙이 결정한다 (ADR-002).
 
-스코어 기반 자동 차단 정책 예시:
+## 5b. 미래 확장 (Future Extension)
+
+다음 기능은 현재 구현 범위 밖이며, 별도 ADR을 통해 결정한다.
+
+### threat_score 기반 자동 차단 scope
+
+`threat_score_min` scope 필드를 통해 스코어 임계값을 정책 규칙에 연결하는 방식:
 
 ```yaml
+# 미래 예시 — 현재 미구현
 rules:
   - id: deny-high-threat-score
     scope:
-      threat_score_min: 0.9   # 확장 scope 필드
+      threat_score_min: 0.9   # 확장 scope 필드 (ADR 미결)
     priority: 1
     action: deny
 ```
 
 <!-- ADR 필요 -->
-> **TODO**: threat_score 기반 자동 차단 scope 필드 구현 시 ADR 필요
+> **TODO**: threat_score 기반 자동 차단 scope 필드 구현 시 ADR 필요 (policy-engine.md §2.1 canonical scope 키 참조)
 
 ## 6. 패턴 파일 구조
 

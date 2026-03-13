@@ -160,11 +160,13 @@ rules:
     priority: 1
     action: allow
 
-  - id: deny-sqli
-    scope:
-      threat_type: sqli     # 확장 scope (구현 후 활성화)
-    priority: 2
-    action: deny
+  # deny-sqli: threat_type scope는 현재 미구현 (policy-engine.md §2.1 canonical scope 외)
+  # 구현 후 활성화 예정 (ADR 필요)
+  # - id: deny-sqli
+  #   scope:
+  #     threat_type: sqli
+  #   priority: 2
+  #   action: deny
 
   - id: allow-api
     scope:
@@ -228,6 +230,59 @@ class TestAdminAPI:
         )
         assert resp.status_code == 200
         assert "luagate_requests_total" in resp.text
+
+class TestReloadFailure:
+    """정책 reload 실패 시 last-known-good 유지 검증"""
+    headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+
+    def test_reload_failure_keeps_last_known_good(self):
+        # 1. 현재 정상 정책 버전 확인
+        status = requests.get(f"{ADMIN_URL}/api/v1/policies/status", headers=self.headers)
+        original_version = status.json()["data"]["active_policy_version"]
+
+        # 2. 잘못된 정책 업로드 (검증 통과하지만 reload 실패 유발)
+        bad_policy = "global:\n  default_action: invalid_value\n"
+        requests.put(f"{ADMIN_URL}/api/v1/policies", headers=self.headers,
+                     data=bad_policy, content_type="application/x-yaml")
+
+        # 3. reload 시도 → 실패 예상
+        reload_resp = requests.post(f"{ADMIN_URL}/api/v1/policies/reload", headers=self.headers)
+        assert reload_resp.status_code == 500
+
+        # 4. 기존 버전이 유지되었는지 확인
+        status_after = requests.get(f"{ADMIN_URL}/api/v1/policies/status", headers=self.headers)
+        assert status_after.json()["data"]["active_policy_version"] == original_version
+
+    def test_concurrent_reload(self):
+        """동시 reload 요청 시 race condition 없음 검증"""
+        import threading
+        results = []
+
+        def do_reload():
+            resp = requests.post(f"{ADMIN_URL}/api/v1/policies/reload", headers=self.headers)
+            results.append(resp.status_code)
+
+        threads = [threading.Thread(target=do_reload) for _ in range(5)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        # 모든 요청이 200 또는 500 (race condition으로 오류 없음)
+        assert all(r in (200, 500) for r in results)
+        # 최소 1개는 성공
+        assert 200 in results
+
+class TestSharedDictExhaustion:
+    """shared dict 용량 초과 시 메트릭 손실 허용, 요청 처리 계속 검증"""
+    headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+
+    def test_metrics_loss_on_dict_full(self):
+        # shared dict 초과는 환경 재현이 어려우므로 단위 테스트에서 mock으로 검증
+        # 통합 테스트: 메트릭 엔드포인트가 항상 응답함을 확인
+        resp = requests.get(f"{ADMIN_URL}/metrics", headers=self.headers)
+        assert resp.status_code == 200
+        # 정상 요청이 계속 처리되는지 확인
+        data_resp = requests.get(f"{BASE_URL}/api/v1/users")
+        assert data_resp.status_code in (200, 403)
 ```
 
 ## 4. 부하 테스트 (§7.3)

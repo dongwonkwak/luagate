@@ -151,6 +151,44 @@ rules:
 - 감사 로그에도 충돌 정보 기록
 - 관리 API(`GET /api/v1/policies/status`)에서 충돌 목록 조회 가능
 
+### §3.3 정책 활성화 시맨틱스
+
+**HUP 시그널과 POST /reload의 의미 차이:**
+
+| 트리거 | 동작 주체 | 처리 흐름 | 의미 |
+|--------|----------|-----------|------|
+| `kill -HUP <master_pid>` | Nginx master | 설정 파일 재파싱 → 새 worker 기동 → 기존 worker graceful shutdown | **config reload** (nginx.conf 포함) |
+| `POST /api/v1/policies/reload` | Worker context (Lua) | `conf/policies.yaml` 읽기 → validate → shared dict에 저장 → `active_policy_version` 포인터 교체 | **정책 only reload** (nginx 재시작 없음) |
+
+> **중요**: HUP은 Nginx 설정 전체를 재로드하므로 worker가 재시작된다. 반면 `POST /reload`는 worker context 내에서 정책만 교체하며 Nginx 프로세스는 유지된다.
+
+### §3.4 Atomic Policy Replace 모델
+
+정책 교체는 "버전드 keyspace 완성 후 active version pointer만 교체"하는 atomic replace 패턴을 사용한다:
+
+```
+1. 새 정책 파싱/검증 완료
+   │
+   ▼
+2. versioned keyspace에 새 정책 기록
+   luagate_policy["policy:<new_version>:blob"] = serialized_policy
+   luagate_policy["policy:<new_version>:meta"] = metadata
+   │
+   ▼
+3. active pointer 교체 (atomic single-key write)
+   luagate_policy["active_policy_version"] = <new_version>
+   │
+   ▼
+4. 각 worker가 다음 요청 진입 시 버전 변경 감지
+   └─ 새 버전의 blob을 shared dict에서 읽어 module-level upvalue에 캐시
+```
+
+**보장 사항:**
+- pointer 교체 전까지 기존 worker는 old version을 계속 사용 (무중단)
+- pointer 교체 후 첫 요청부터 새 버전이 적용됨 (worker별 독립적 전환)
+- 실패 시 old version의 blob/meta가 그대로 유지됨 (last-known-good 보장)
+- 이전 버전 keyspace는 새 버전이 모든 worker에 전파된 후 정리 가능
+
 ---
 
 ## Consequences

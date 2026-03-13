@@ -53,7 +53,11 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
       query_normalized = "id=1'OR'1'='1"
 ```
 
-**중요**: `path_raw`는 항상 원본 그대로 보존 (로그 기록 목적, ADR-004)
+**중요**:
+- `path_raw`는 항상 원본 그대로 보존 (로그 기록 목적, ADR-004)
+- URL 정규화는 **`rewrite_by_lua` 단계에서만** 수행한다. `access_by_lua` 이후 단계에서는 정규화 로직을 중복 실행하지 않는다.
+- `rewrite_by_lua` 완료 후 결과는 `ngx.ctx.luagate.path_normalized`에 저장된다. 이후 모든 단계(`access_by_lua`, `log_by_lua`)는 이 값만 읽고 재정규화하지 않는다.
+- `access_by_lua` 내 URL 디코더 FFI 호출 (`2. C FFI: URL 디코더`) 항목을 제거한다. 디코딩/정규화는 `rewrite_by_lua`에서 완료된 상태다.
 
 ### 2.3 access_by_lua (핵심 처리 — 정책 평가 + 위협 탐지)
 
@@ -64,26 +68,33 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 │  1. 정책 버전 확인 (shared dict)             │
 │     └─ 변경됨 → 새 정책 로드               │
 │                                             │
-│  2. C FFI: URL 디코더 (§5)                  │
-│     └─ path_raw → path_normalized           │
-│                                             │
-│  3. C FFI: 보안 스캐너 (§5)                 │
+│  2. C FFI: 보안 스캐너 (§5)                 │
 │     입력: path_normalized, query, body      │
 │     출력: { threat_type, threat_score }     │
 │                                             │
-│  4. 정책 평가 (ADR-002)                     │
+│  3. 정책 평가 (ADR-002)                     │
 │     priority 정렬 → first-match-wins        │
 │     ├─ allow → 통과                        │
 │     └─ deny  → 403 반환                    │
 │                │                            │
 │                ▼                            │
-│  5. deny 처리:                              │
+│  4. deny 처리:                              │
 │     - ngx.status = 403                     │
 │     - ngx.say(JSON 에러 응답)               │
 │     - ngx.exit(403)                        │
 │     - 로그: action=deny 기록 예약           │
 └─────────────────────────────────────────────┘
 ```
+
+**Body 검사 계약:**
+
+| 항목 | 계약 |
+|------|------|
+| `ngx.req.read_body()` | access_by_lua 진입 전 Nginx 설정(`lua_need_request_body on`)으로 자동 읽기. 또는 body 검사가 필요한 경우에만 명시적으로 `ngx.req.read_body()` 호출 |
+| Inspection limit | 본문 크기 ≤ `client_body_buffer_size` (기본 16KB). 초과 시 임시 파일로 spill — 이 경우 body 검사를 수행하지 않음 (검사 불가 사유 로그 기록) |
+| Chunked / streaming body | `Transfer-Encoding: chunked` 요청은 Nginx가 버퍼링 후 Lua에 전달. 청크 단위 스트리밍 검사는 이 스펙 범위 밖 |
+| Large body (초과) | **fail-open**: body 검사를 건너뛰고 정책 평가만으로 판정. 로그에 `body_inspected: false` 기록 |
+| Body 없는 요청 (GET 등) | `body`는 `nil`로 전달. 스캐너에 `body_len = 0`으로 호출 |
 
 **에러 응답 형식 (deny):**
 
