@@ -1,0 +1,41 @@
+services:
+  luagate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luagate
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+      - "9090:9090"   # Admin API
+    volumes:
+      # Mount only our app subdir — keeps OpenResty's bundled resty/* intact
+      - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
+      # Mount specific config file, not the whole conf/ dir
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ./policies:/etc/luagate/policies:ro
+    environment:
+      - LUAGATE_ENV=development
+    depends_on:
+      - upstream-mock
+    networks:
+      - luagate-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  upstream-mock:
+    image: nginx:1.25-alpine
+    container_name: upstream-mock
+    volumes:
+      - ./tests/fixtures:/usr/share/nginx/html:ro
+    networks:
+      - luagate-net
+    restart: unless-stopped
+
+networks:
+  luagate-net:
+    driver: bridge

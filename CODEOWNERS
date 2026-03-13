@@ -1,0 +1,23 @@
+# CODEOWNERS — automatic PR review assignment
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global default: all files
+*                   @dongwonkwak
+
+# Lua core
+/lua/               @dongwonkwak
+
+# C extensions
+/csrc/              @dongwonkwak
+
+# Infrastructure / CI
+/Dockerfile         @dongwonkwak
+/docker-compose.yml @dongwonkwak
+/flake.nix          @dongwonkwak
+/.github/           @dongwonkwak
+
+# Policies
+/policies/          @dongwonkwak
+
+# Docs
+/docs/              @dongwonkwak
