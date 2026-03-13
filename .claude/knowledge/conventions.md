@@ -29,10 +29,17 @@
 describe("정책 평가기", function()
     describe("HTTP 규칙 평가", function()
         it("deny 규칙이 allow보다 낮은 priority면 먼저 매칭된다", function()
-            -- 참조: lua/luagate/policy/evaluator.lua
+            -- 참조: lua/luagate/policy/evaluator.lua:45-89
+            -- 테스트: tests/unit/policy/evaluator_test.lua
         end)
     end)
 end)
+```
+
+테스트 링크 패턴 — 코드 예시에 항상 포함:
+```lua
+-- 구현: lua/luagate/<subsystem>/<module>.lua:<line_range>
+-- 테스트: tests/unit/<subsystem>/<module>_test.lua
 ```
 
 ## 커밋 메시지 형식

@@ -23,10 +23,10 @@
 ## 로깅 규칙
 
 - [ ] ✅ `log_by_lua`에서 cosocket (네트워크 I/O) 사용 없음
-- [ ] ✅ Lua `io.open`/`io.write`로 access_log 직접 작성 금지
-- [ ] ✅ Nginx native access_log + `log_format luagate_json` 사용
-- [ ] ✅ log phase에서 외부 I/O 금지 (파일/소켓 쓰기 불가)
-- [ ] ✅ native access_log + hot reload semantics: USR1 시그널은 Nginx 관리 파일 핸들에만 작용
+- [ ] ✅ Lua로 access_log를 대체하지 않는다 — Nginx native `access_log` + `log_format luagate_json` 사용
+- [ ] ✅ log phase에서 외부 I/O 금지 (파일/소켓 쓰기 불가 — OpenResty 제약)
+- [ ] ✅ Lua `io.open`/`io.write`로 access_log 직접 작성 금지 (rotate 후 구 파일에 계속 씀)
+- [ ] ✅ native access_log hot reload semantics: USR1 시그널은 Nginx 관리 파일 핸들에만 작용. Lua가 직접 연 파일 핸들은 rotate 영향을 받지 않는다.
 - [ ] ⚠️ PII 필드 redaction 적용 (Authorization, Cookie, password 파라미터)
 
 ## FFI 코드

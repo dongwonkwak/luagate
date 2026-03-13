@@ -1,7 +1,5 @@
 # LuaGate 면접 어필 포인트
 
-> 이 파일은 `docs/human/interview-points.md`로 이동 예정 (DON-116)
-> 현재는 knowledge 디렉토리에 임시 위치
 
 ## 프로젝트 한 줄 설명
 

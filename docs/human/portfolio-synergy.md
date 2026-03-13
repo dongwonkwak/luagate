@@ -1,6 +1,5 @@
 # 포트폴리오 시너지: ironpost → dbgate → LuaGate
 
-> 이 파일은 `docs/human/portfolio-synergy.md`로 이동 예정 (DON-116)
 
 ## 프로젝트 계층 구조
 
