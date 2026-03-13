@@ -1,0 +1,87 @@
+# LuaGate 코딩 & 커밋 & 브랜치 컨벤션
+
+## 코딩 컨벤션
+
+### Lua
+- 포매터: **StyLua** (`stylua --indent-type Spaces --indent-width 4`)
+- 린터: **luacheck** (`.luacheckrc` 설정 기준)
+- 모듈 구조: `lua/luagate/<subsystem>/` 아래 기능별 분리
+- 전역 변수 금지: 모든 상태는 module-level upvalue 또는 `ngx.ctx.luagate` (요청 범위)
+- blocking I/O 금지: `io.open`, `os.execute` 등 Lua 표준 blocking I/O는 핸들러에서 사용 금지
+- `ngx.ctx` 사용 범위: 요청 단위(request-scoped) 데이터만 저장. 정책 캐시는 module-level upvalue 사용
+
+### C / Rust
+- C 헤더 포매터: **clang-format** (`.clang-format` 기준)
+- Rust: `cargo fmt` + `cargo clippy --deny warnings`
+- FFI 함수 명명: `luagate_<module>_<action>` (예: `luagate_scan_http`)
+- Panic 전략: `panic = "abort"` — Rust panic 시 worker 즉시 abort (UB 방지)
+
+### 테스트
+- Lua 단위 테스트: **busted** 프레임워크, 한국어 서술형 BDD 스타일
+- 통합 테스트: **Test::Nginx** (Docker 기반)
+- C 단위 테스트: **CMocka**
+- 커버리지 목표: 핵심 패스(policy evaluation, scanner) 80%+
+- OWASP 페이로드 픽스처: `tests/fixtures/` 에 저장
+
+예시:
+```lua
+-- tests/unit/policy/evaluator_test.lua
+describe("정책 평가기", function()
+    describe("HTTP 규칙 평가", function()
+        it("deny 규칙이 allow보다 낮은 priority면 먼저 매칭된다", function()
+            -- 참조: lua/luagate/policy/evaluator.lua
+        end)
+    end)
+end)
+```
+
+## 커밋 메시지 형식
+
+```
+<type>(<scope>): <description> [DON-XX]
+
+[optional body]
+```
+
+### type 종류
+| type | 설명 |
+|------|------|
+| `feat` | 새 기능 |
+| `fix` | 버그 수정 |
+| `docs` | 문서만 변경 |
+| `test` | 테스트 추가/수정 |
+| `refactor` | 리팩터링 |
+| `chore` | 빌드/의존성/기타 |
+| `perf` | 성능 개선 |
+
+### scope 예시
+`lua`, `ffi`, `policy`, `scanner`, `admin`, `stream`, `docker`, `claude`, `spec`
+
+### 예시
+```
+feat(policy): add conflict detection for stream rules [DON-42]
+fix(scanner): handle NULL body in luagate_scan_http [DON-55]
+docs(spec): add stream preread invariant [DON-90]
+```
+
+## 브랜치 전략
+
+| 브랜치 패턴 | 용도 |
+|------------|------|
+| `main` | 항상 빌드 가능한 stable 상태 |
+| `epic/NN-<name>` | Epic 단위 작업 |
+| `dongwonkwak/don-NN-<slug>` | 개별 이슈 작업 |
+| `hotfix/<description>` | 긴급 수정 |
+
+- PR: Epic 브랜치 → main
+- 이슈 브랜치: Linear 자동 생성 패턴(`gitBranchName`) 사용
+- merge strategy: squash merge (epic → main), merge commit (issue → epic)
+
+## 파일 경로 포인터 컨벤션
+
+코드와 문서 변경은 같은 PR에 포함 (same-PR 규칙).
+Linear 코멘트에 파일 경로 포인터 포함:
+```
+구현 파일: lua/luagate/policy/evaluator.lua:45-89
+테스트 파일: tests/unit/policy/evaluator_test.lua
+```
