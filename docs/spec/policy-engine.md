@@ -129,8 +129,8 @@ load_policy(filepath):
        - 충돌 → WARN 로그, 계속 진행
     5. SHA256 해시 계산 (전체 파일 내용)
     6. 정렬된 규칙 트리 생성
-    7. luagate_policy shared dict에 atomic 저장
-    8. policy_version 업데이트
+    7. luagate_policy["policy:<version>:blob"] / meta 저장
+    8. active_policy_version 포인터 교체
 ```
 
 ### 4.2 Schema Validation
@@ -227,7 +227,7 @@ function detect_shadowed(rules):
 
 | 엔드포인트 | 기능 |
 |-----------|------|
-| `GET /api/v1/policies` | 현재 정책 YAML 반환 |
+| `GET /api/v1/policies` | staged 정책 YAML 반환 (파일 기준 canonical source) |
 | `PUT /api/v1/policies` | 새 정책 저장 + 검증 (reload 미포함) |
 | `POST /api/v1/policies/reload` | 즉시 reload 트리거 |
 | `GET /api/v1/policies/status` | 버전, 충돌 목록, 마지막 reload 시각 |

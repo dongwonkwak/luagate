@@ -53,13 +53,13 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 |------|------|----------|------|
 | `timestamp` | string (ISO-8601 UTC) | No | 요청 수신 시각 |
 | `request_id` | string (UUID v4) | No | 요청 고유 ID. `X-Request-ID` 응답 헤더로도 전달 |
-| `src_ip` | string | No | 클라이언트 IP. `X-Forwarded-For` 최좌측 값 |
+| `src_ip` | string | No | 클라이언트 IP. trusted proxy 기준으로 계산된 실제 원본 IP |
 | `src_port` | number | No | 클라이언트 원본 포트 |
 | `dst_port` | number | No | LuaGate 수신 포트 |
 | `method` | string | No | HTTP 메서드 (대문자) |
 | `path_raw` | string | No | 원본 요청 경로 (디코딩 전) |
 | `path_normalized` | string | No | 정규화된 경로 |
-| `query_string` | string | No | 원본 쿼리 스트링 (비어있으면 "") |
+| `query_string` | string | No | redaction 적용된 raw 쿼리 스트링 (비어있으면 "") |
 | `http_version` | string | No | "1.0", "1.1", "2.0" |
 | `user_agent` | string | No | User-Agent 헤더값 |
 | `content_length` | number | Yes | 요청 본문 크기. 없으면 null |
@@ -161,8 +161,8 @@ end
   "timestamp": "2026-03-13T12:34:56Z",
   "event": "policy_update",
   "src_ip": "127.0.0.1",
-  "policy_version_before": "a3f2c1d4...",
-  "policy_version_after": "b4e3f2a1...",
+  "staged_policy_version": "b4e3f2a1...",
+  "active_policy_version": "a3f2c1d4...",
   "warnings_count": 0
 }
 ```

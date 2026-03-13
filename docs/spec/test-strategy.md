@@ -240,14 +240,22 @@ class TestReloadFailure:
         status = requests.get(f"{ADMIN_URL}/api/v1/policies/status", headers=self.headers)
         original_version = status.json()["data"]["active_policy_version"]
 
-        # 2. 잘못된 정책 업로드 (검증 통과하지만 reload 실패 유발)
-        bad_policy = "global:\n  default_action: invalid_value\n"
-        requests.put(f"{ADMIN_URL}/api/v1/policies", headers=self.headers,
-                     data=bad_policy, content_type="application/x-yaml")
+        # 2. 검증은 통과하지만 apply 단계에서 실패하도록 shared dict write mock 또는 fault injection 사용
+        bad_policy = """
+global:
+  default_action: deny
+rules:
+  - id: large-rule-set
+    scope: { path: /api/v1/* }
+    priority: 1
+    action: allow
+"""
+        put_headers = {**self.headers, "Content-Type": "application/x-yaml"}
+        requests.put(f"{ADMIN_URL}/api/v1/policies", headers=put_headers, data=bad_policy)
 
-        # 3. reload 시도 → 실패 예상
+        # 3. fault injection 활성화 후 reload 시도 → shared dict write failure 예상
         reload_resp = requests.post(f"{ADMIN_URL}/api/v1/policies/reload", headers=self.headers)
-        assert reload_resp.status_code == 500
+        assert reload_resp.status_code in (500, 507)
 
         # 4. 기존 버전이 유지되었는지 확인
         status_after = requests.get(f"{ADMIN_URL}/api/v1/policies/status", headers=self.headers)
@@ -266,10 +274,9 @@ class TestReloadFailure:
         for t in threads: t.start()
         for t in threads: t.join()
 
-        # 모든 요청이 200 또는 500 (race condition으로 오류 없음)
-        assert all(r in (200, 500) for r in results)
-        # 최소 1개는 성공
+        # 첫 요청만 성공, 나머지는 lock 충돌로 409
         assert 200 in results
+        assert all(r in (200, 409) for r in results)
 
 class TestSharedDictExhaustion:
     """shared dict 용량 초과 시 메트릭 손실 허용, 요청 처리 계속 검증"""
@@ -333,19 +340,26 @@ export default function () {
 
 OWASP Top 10 기반 공격 벡터 테스트:
 
+> **주의**: 현재 canonical policy scope에는 `threat_type`가 없으므로, 스캐너 탐지가 자동 차단을 의미하지 않는다.
+> 통합 테스트는 "차단"과 "탐지"를 분리해 검증한다.
+
 ```python
 # tests/integration/test_security.py
-ATTACK_VECTORS = [
+def test_path_traversal_blocked_by_normalization_and_default_deny():
+    resp = requests.get(f"{BASE_URL}/api/v1/%2e%2e/admin")
+    assert resp.status_code == 403
+
+@pytest.mark.parametrize("path,params,expected_threat", [
     ("/api/v1/search", {"q": "1' OR '1'='1"}, "sqli"),
     ("/api/v1/search", {"q": "<script>alert(1)</script>"}, "xss"),
-    ("/api/v1/%2e%2e/admin", {}, "path-traversal"),
     ("/api/v1/cmd", {"cmd": "; ls -la"}, "cmd-injection"),
-]
-
-@pytest.mark.parametrize("path,params,threat_type", ATTACK_VECTORS)
-def test_attack_blocked(path, params, threat_type):
-    resp = requests.get(f"{BASE_URL}{path}", params=params)
-    assert resp.status_code == 403
+])
+def test_scanner_detection_logged(path, params, expected_threat):
+    requests.get(f"{BASE_URL}{path}", params=params)
+    # access.log를 읽어 threat_type이 기록되었는지 검증
+    # read_last_access_log_line() helper는 테스트 컨테이너/볼륨에 마운트된 access.log를 파싱한다.
+    last_log = read_last_access_log_line()
+    assert last_log["threat_type"] == expected_threat
 ```
 
 ## 6. CI 파이프라인

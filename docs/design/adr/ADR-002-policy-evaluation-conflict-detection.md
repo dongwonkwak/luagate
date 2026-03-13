@@ -43,7 +43,8 @@ LuaGate는 YAML로 정의된 정책 규칙을 평가하여 요청을 허용(allo
 
 3. **동률(tie) 처리** — 동일 priority인 규칙이 존재할 경우:
    - 정책 로드 시점에 경고(WARN) 로그 발생
-   - 평가 순서: YAML 파일 내 선언 순서(declaration order)를 따름
+   - 평가 순서: `priority ASC` 후 `rule.id ASC`의 안정 정렬(stable sort)을 적용
+   - 동일 priority + 동일 `rule.id`는 schema validation error로 간주
    - 런타임 에러로 처리하지 않음
 
 4. **기본 정책(default)** — 모든 규칙에 매칭되지 않는 요청에 적용.
@@ -104,7 +105,10 @@ rules:
 
 **충돌(conflict) 정의:**
 
-동일 scope + 동일 priority + 상반 action을 가진 규칙이 2개 이상 존재하는 경우.
+충돌은 두 단계로 구분한다.
+
+1. **Exact conflict**: 동일 scope + 동일 priority + 상반 action
+2. **Overlap conflict**: scope가 완전히 같지는 않지만 교집합이 존재하고, 동일 priority에서 상반 action으로 인해 평가 순서에 따라 운영자 기대와 다른 결과를 만들 수 있는 경우
 
 ```yaml
 # 충돌 케이스 예시
@@ -121,6 +125,18 @@ rules:
     priority: 5
     action: deny           # ← 상반 action → CONFLICT WARN
 ```
+
+**scope 비교 기준:**
+
+| 키 | `scopes_equal` 기준 | `scope_contains` 기준 |
+|----|---------------------|-----------------------|
+| `path` | 정규화된 glob 문자열 동일 | broad glob이 narrow glob 전체를 포함할 때만 true. 불명확하면 false |
+| `method` | 대문자 정규화 후 집합 동일 | broad method 집합이 narrow 집합의 상위집합 |
+| `src_ip` / `src_ip_cidr` | 동일 IP/CIDR | CIDR 상위집합 또는 동일 IP 포함 |
+| `query_param` | 동일 key/value map | broad map이 narrow map의 부분집합 |
+| `header` | 헤더명 소문자 정규화 후 동일 map | broad map이 narrow map의 부분집합 |
+
+> **제한**: glob 교집합, CIDR 혼합, 다중 조건 조합이 복잡하여 포함관계를 확정할 수 없는 경우 감지는 **best-effort WARN**으로 낮춘다. 미탐 가능성을 문서화된 한계로 인정한다.
 
 **shadowed rule(음영 규칙) 정의:**
 
@@ -203,8 +219,8 @@ rules:
 
 - **경고 무시 위험**: 차단하지 않으므로 운영자가 충돌 경고를 방치할 수 있음.
   → 모니터링 알림(충돌 카운터 > 0) 권장
-- **동률 규칙의 비결정성**: declaration order는 YAML 편집 순서에 의존.
-  CI에서 충돌/동률 검증 단계 추가 권장
+- **동률 규칙 운영 부담**: stable secondary key를 두더라도 동일 priority 규칙은 운영자 이해를 어렵게 만든다.
+  CI에서 동률 규칙 경고를 실패로 승격하는 strict mode 추가 권장
 
 ### 향후 고려
 

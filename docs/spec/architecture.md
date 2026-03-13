@@ -15,7 +15,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 │                                                             │
 │  ┌─────────────┐                                           │
 │  │   Master    │  - 설정 로드, worker 스폰/재시작            │
-│  │   Process   │  - HUP 시그널 처리 (정책 리로드)            │
+│  │   Process   │  - HUP 시그널 처리 (config reload)          │
 │  └──────┬──────┘                                           │
 │         │ fork                                             │
 │  ┌──────┴──────────────────────────────────────┐           │
@@ -88,25 +88,21 @@ Client Response
 Client TCP Connect
   │
   ▼
-[stream preread_by_lua] ── 프로토콜 탐지 (HTTP/TLS/SSH/unknown)
-  │                        ngx.req.socket()으로 첫 N 바이트 peek
-  │                        SNI 추출 (TLS ClientHello)
-  │                        탐지 결과 → ngx.ctx.luagate_stream에 저장
-  ▼
-[stream access_by_lua] ── 스트림 정책 평가
-  │                       src_ip/dst_port/detected_protocol/sni 기반 매칭
-  │                       ├─ deny → 연결 종료 (ngx.exit), 로그 기록
-  │                       └─ proxy → 다음 단계
+[stream preread_by_lua] ── 프로토콜 탐지 + 스트림 정책 평가
+  │                        ngx.req.socket() 기반 preread buffer 조회
+  │                        src_ip/dst_port/detected_protocol/sni 기반 매칭
+  │                        ├─ deny → 연결 종료, 로그 기록
+  │                        └─ proxy → 다음 단계
   ▼
 [stream proxy_pass] ── Nginx native TCP 프록시
-  │                    (content_by_lua가 아닌 proxy_pass 지시자 사용)
+  │                    (Lua가 아닌 Nginx native data plane)
   ▼
 [stream log_by_lua] ── 세션 로그 기록 (12필드, ADR-004)
 ```
 
-> **설계 원칙**: stream 파이프라인은 `content_by_lua`가 아닌 Nginx native `proxy_pass`를 사용한다.
-> Lua는 `preread_by_lua`(탐지)와 `access_by_lua`(정책 판정)에만 관여하며, 실제 바이트 전달은 Nginx가 담당한다.
-> `ngx.req.get_body_data()`는 stream context에서 사용하지 않는다. 데이터 peek은 `ngx.req.socket()`의 `receive(N, "keep")`으로 수행한다.
+> **설계 원칙**: stream 파이프라인은 `content_by_lua`나 가상의 `stream access_by_lua`가 아니라 Nginx native `proxy_pass`를 사용한다.
+> Lua는 `preread_by_lua`(탐지 + 정책 판정)와 `log_by_lua`에만 관여하며, 실제 바이트 전달은 Nginx가 담당한다.
+> `ngx.req.get_body_data()`는 stream context에서 사용하지 않는다. preread buffer 조회는 `ngx.req.socket()` 기반 접근을 기준으로 설명한다.
 
 ## 4. 기술 스택
 

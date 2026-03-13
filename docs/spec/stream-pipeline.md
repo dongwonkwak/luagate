@@ -20,15 +20,14 @@ Nginx `stream {}` 블록 (`conf/nginx.stream.conf`)에서 구성한다.
 
 ## 2. 처리 단계
 
-### 2.1 preread_by_lua (프로토콜 탐지)
+### 2.1 preread_by_lua (프로토콜 탐지 + 스트림 정책 평가)
 
 **목적**: 첫 N 바이트를 읽어 애플리케이션 프로토콜을 탐지한다.
 
 ```lua
--- preread 단계: ngx.req.socket()으로 데이터를 소비하지 않고 peek
+-- preread 단계: ngx.req.socket() 기반으로 preread buffer를 소비하지 않고 조회
 local sock = assert(ngx.req.socket())
--- "keep" 옵션: 버퍼를 소비하지 않고 peek (preread buffer에 유지)
-local data, err = sock:receive(16, "keep")
+local data, err = peek_preread_bytes(sock, 16)  -- 의사 코드
 if not data then
     -- peek 실패 → "unknown"으로 처리
     ngx.ctx.luagate_stream.detected_protocol = "unknown"
@@ -54,11 +53,14 @@ end
 
 탐지 결과는 `ngx.ctx.luagate_stream` 컨텍스트에 저장.
 
-### 2.2 access_by_lua (스트림 정책 평가)
+> **중요**: stream 파이프라인에는 HTTP 모듈의 `access_by_lua`와 동일한 단계를 가정하지 않는다.
+> 탐지와 정책 평가는 모두 `preread_by_lua`에서 수행하고, 판정 결과만 `ngx.ctx.luagate_stream`에 저장한다.
+
+### 2.2 preread 내 정책 판정
 
 ```
 ┌──────────────────────────────────────────┐
-│  stream access_by_lua 처리 순서           │
+│  stream preread_by_lua 처리 순서          │
 │                                          │
 │  1. 정책 버전 확인 (shared dict)          │
 │     └─ 변경됨 → 새 정책 로드            │
@@ -71,7 +73,7 @@ end
 │       - sni (TLS인 경우)                 │
 │                                          │
 │  3. 판정:                                │
-│     ├─ allow/proxy → 연결 계속           │
+│     ├─ proxy → 연결 계속                 │
 │     └─ deny → 연결 종료                 │
 │              + luagate_connections 감소  │
 └──────────────────────────────────────────┘
@@ -100,7 +102,7 @@ stream_rules:
 
 ### 2.3 proxy_pass (TCP 프록시)
 
-- `access_by_lua`에서 allow/proxy 판정된 연결만 도달
+- `preread_by_lua`에서 `proxy` 판정된 연결만 도달
 - Nginx stream `proxy_pass` 지시자로 업스트림 TCP 서버에 연결
 - 양방향 트래픽 투명 전달
 - `bytes_tx`, `bytes_rx` 추적: `$bytes_sent`, `$upstream_bytes_received` 변수 활용

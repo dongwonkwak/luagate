@@ -15,7 +15,7 @@ LuaGate는 고성능 처리가 필요한 두 모듈을 Rust로 구현하고 LuaJ
 ## 2. FFI 통합 원칙 (ADR-001)
 
 1. **동일 worker 내 동기 호출**: IPC 없음. `ffi.load()` 후 직접 함수 호출
-2. **pcall 래핑**: 모든 FFI 호출을 `pcall`로 감싸 Lua 패닉 방지
+2. **pcall 래핑**: Lua 레벨 예외는 `pcall`로 감싼다. 단, native abort/segfault는 복구되지 않는다
 3. **실패 처리**: FFI 오류 시 deny 처리 후 에러 로그 기록 (ADR-001 §1.2)
 4. **타임아웃**: FFI 함수는 < 1ms 완료 보장. worker 이벤트 루프 블로킹 금지
 
@@ -80,6 +80,8 @@ pub struct ScanResult {
 
 #[no_mangle]
 pub extern "C" fn luagate_scan_http(
+    path_raw: *const c_char,
+    path_raw_len: usize,
     path_normalized: *const c_char,
     path_len: usize,
     query_string: *const c_char,
@@ -93,8 +95,20 @@ pub extern "C" fn luagate_scan_http(
 
 #[no_mangle]
 pub extern "C" fn luagate_scan_result_free(result: *mut ScanResult) {
-    if !result.is_null() {
-        unsafe { drop(Box::from_raw(result)) }
+    if result.is_null() {
+        return;
+    }
+
+    unsafe {
+        let result = Box::from_raw(result);
+
+        if !result.threat_type.is_null() {
+            let _ = CString::from_raw(result.threat_type);
+        }
+        if !result.matched_pattern.is_null() {
+            let _ = CString::from_raw(result.matched_pattern);
+        }
+        // result Box는 scope 종료 시 자동 해제
     }
 }
 ```
@@ -160,8 +174,8 @@ end
 | Rust가 할당한 메모리 | 반드시 Rust의 `*_free()` 함수로 해제 |
 | Lua 문자열 → C | `ffi.cast`로 포인터 전달. Lua GC가 문자열 소유 |
 | 구조체 수명 | FFI 함수 반환 후 즉시 Lua 값으로 복사, C 포인터 저장 금지 |
-| `luagate_scan_result_free()` 내부 문자열 ownership | `ScanResult.threat_type`과 `ScanResult.matched_pattern`은 Rust `CString`으로 heap 할당됨. `drop(Box::from_raw(result))` 호출 시 구조체와 내부 `*mut c_char` 필드 모두 해제됨. Lua에서 `ffi.string()`으로 복사한 후에만 `free()` 호출할 것 |
-| Nested allocation 해제 계약 | `Box::from_raw(result)` drop 순서: 1) `ScanResult.threat_type` (`*mut c_char`) drop, 2) `ScanResult.matched_pattern` (`*mut c_char`) drop, 3) `ScanResult` 구조체 자체 drop. Rust Drop 트레잇이 이 순서를 보장한다 |
+| `luagate_scan_result_free()` 내부 문자열 ownership | `ScanResult.threat_type`과 `ScanResult.matched_pattern`은 Rust `CString::into_raw()`로 heap 할당된다. free 함수 안에서 `CString::from_raw()`로 각 포인터를 명시 해제한 뒤 구조체 `Box`를 drop한다 |
+| Nested allocation 해제 계약 | 해제 순서: 1) `threat_type` 포인터 복구 후 free, 2) `matched_pattern` 포인터 복구 후 free, 3) `ScanResult` 구조체 자체 free. raw pointer는 자동 drop되지 않으므로 명시 해제가 필수다 |
 
 **메모리 누수 방지 패턴:**
 
@@ -208,6 +222,7 @@ cd src/decoder && cargo test
 describe("Scanner FFI", function()
     it("detects SQL injection", function()
         local result = scanner.scan({
+            path_raw = "/search",
             path_normalized = "/search",
             query_string = "id=1' OR '1'='1",
         })

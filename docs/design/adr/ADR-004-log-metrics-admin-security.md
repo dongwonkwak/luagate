@@ -182,7 +182,7 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 
 | 이벤트 | 기록 필드 |
 |--------|----------|
-| 정책 변경 (`PUT /api/v1/policies`) | timestamp, event=policy_update, src_ip, policy_version_before, policy_version_after |
+| 정책 변경 (`PUT /api/v1/policies`) | timestamp, event=policy_update, src_ip, staged_policy_version, active_policy_version |
 | 정책 리로드 (`POST /api/v1/policies/reload`) | timestamp, event=policy_reload, src_ip, trigger=api\|hup, status, policy_version |
 | 인증 실패 | timestamp, event=auth_failure, src_ip, path, reason |
 | 서버 기동/종료 | timestamp, event=startup\|shutdown, policy_version |
@@ -210,6 +210,8 @@ Admin API에 대한 주요 위협과 완화 방안:
 - Preflight(`OPTIONS`) 요청에 올바른 CORS 헤더 응답
 - `Access-Control-Allow-Methods`: GET, POST, PUT, DELETE, OPTIONS
 - `Access-Control-Allow-Headers`: Authorization, Content-Type
+- `Vary: Origin` 헤더를 항상 추가하여 캐시 오염 방지
+- Preflight(`OPTIONS`)는 인증 헤더가 없으므로 auth 예외 처리 필요
 
 ---
 

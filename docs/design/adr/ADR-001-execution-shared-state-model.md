@@ -41,11 +41,11 @@ OpenResty는 master 프로세스가 N개의 worker 프로세스를 관리하며,
 │  │  Master  │──────────────────────────┐   │
 │  └──────────┘                          │   │
 │       │         ┌──────────────────────▼─┐ │
-│  ┌────▼────┐    │  policy_version (str)  │ │
-│  │Worker 1 │◄──►│  req_counter   (num)  │ │
-│  └─────────┘    │  blocked_counter(num) │ │
-│  ┌─────────┐    │  active_conns  (num)  │ │
-│  │Worker 2 │◄──►│  latency_buckets(arr) │ │
+│  ┌────▼────┐    │ active_policy_version │ │
+│  │Worker 1 │◄──►│ policy:<ver>:blob     │ │
+│  └─────────┘    │ req:total / blocked   │ │
+│  ┌─────────┐    │ latency:bucket:<ms>   │ │
+│  │Worker 2 │◄──►│ active_http/stream    │ │
 │  └─────────┘    └────────────────────────┘ │
 │       ⋮                                     │
 │  ┌─────────┐                               │

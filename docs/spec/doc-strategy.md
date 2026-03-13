@@ -174,7 +174,6 @@ Epic 2에서 식별된 `<!-- ADR 필요 -->` 항목:
 | `security-scanner.md` | 패턴 핫 업데이트 | Low |
 | `stream-pipeline.md` | TLS 터미네이션 지원 | Low |
 | `test-strategy.md` | 카오스 엔지니어링 테스트 전략 | Medium |
-| **신규** `admin-api.md` + `adr/` | **policy-activation-and-concurrency**: 저장(staged)과 활성화(active) 분리, 동시 reload race condition 처리, atomic replace 보장 | **High** |
 | **신규** `adr/` + `log-schema.md` | **metrics-cardinality-and-export**: low-cardinality 레이블 정책, route 정규화 전략, Prometheus export 형식 | **High** |
 | **신규** `adr/` + `log-schema.md` | **log-redaction-and-retention**: 민감정보 마스킹 대상/방법, 로그 보존 기간, 파기 정책 | **High** |
 

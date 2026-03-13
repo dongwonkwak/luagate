@@ -78,7 +78,10 @@ GET /api/v1/policies
 Authorization: Bearer <token>
 ```
 
-현재 활성 정책 YAML 반환.
+현재 staged 정책 YAML 반환.
+
+> **의미**: canonical source는 `conf/policies.yaml` 파일이므로, `GET /api/v1/policies`는 디스크에 저장된 **staged 정책**을 조회한다.
+> 현재 트래픽에 적용 중인 버전은 `GET /api/v1/policies/status`의 `active_policy_version`으로 확인한다.
 
 **응답 200:**
 ```
@@ -114,8 +117,6 @@ Content-Type: application/x-yaml
 > **staged vs active 구분**:
 > - `staged_policy_version`: `PUT /api/v1/policies`로 저장된 정책의 버전 해시. 아직 활성화되지 않음.
 > - `active_policy_version`: 현재 요청을 처리하는 정책 버전. `POST /api/v1/policies/reload` 성공 후 변경됨.
->
-> 저장과 활성화를 하나의 트랜잭션으로 처리하려면 `PUT /api/v1/policies?activate=true` 쿼리 파라미터를 사용한다 (저장 + 즉시 reload를 원자적으로 수행, 실패 시 rollback).
 
 **응답 200:**
 ```json
@@ -177,6 +178,15 @@ Authorization: Bearer <token>
 }
 ```
 
+**응답 409 (동시 reload 충돌):**
+```json
+{
+  "ok": false,
+  "error": "ReloadInProgress",
+  "message": "another reload is already in progress"
+}
+```
+
 ---
 
 ### 4.5 정책 상태 조회
@@ -191,7 +201,8 @@ Authorization: Bearer <token>
 {
   "ok": true,
   "data": {
-    "policy_version": "a3f2c1d4...",
+    "active_policy_version": "a3f2c1d4...",
+    "staged_policy_version": "b4e3f2a1...",
     "last_reload_at": "2026-03-13T12:00:00Z",
     "last_reload_status": "success",
     "rules_count": 42,
@@ -227,7 +238,7 @@ luagate_requests_total{action="deny",method="GET",route="/admin"} 23
 
 # HELP luagate_blocked_total Total blocked requests
 # TYPE luagate_blocked_total counter
-luagate_blocked_total{threat_type="sqli",deny_reason="policy: deny-sqli"} 145
+luagate_blocked_total{threat_type="sqli",rule_id="deny-sqli"} 145
 
 # HELP luagate_latency_seconds Request latency
 # TYPE luagate_latency_seconds histogram
@@ -275,7 +286,8 @@ Authorization: Bearer <token>
 
 ```nginx
 # conf/nginx.http.conf (admin server 블록)
-add_header Access-Control-Allow-Origin $LUAGATE_DASHBOARD_ORIGIN always;
+# LUAGATE_DASHBOARD_ORIGIN은 템플릿 렌더링(envsubst) 또는 nginx `env` + `map`으로 주입한다.
+add_header Access-Control-Allow-Origin $cors_allow_origin always;
 add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
 add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
 add_header Vary "Origin" always;  # CDN/프록시 캐시가 Origin별로 응답을 구분하도록
@@ -293,6 +305,7 @@ if ($request_method = 'OPTIONS') {
 | HTTP Status | error 문자열 | 설명 |
 |------------|-------------|------|
 | 400 | ValidationError | 정책 스키마 검증 실패 |
+| 409 | ReloadInProgress | 다른 worker가 reload lock을 보유 중 |
 | 401 | Unauthorized | 인증 실패/누락 |
 | 404 | NotFound | 존재하지 않는 엔드포인트 |
 | 405 | MethodNotAllowed | 허용되지 않은 HTTP 메서드 |

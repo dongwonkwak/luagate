@@ -69,7 +69,8 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 │     └─ 변경됨 → 새 정책 로드               │
 │                                             │
 │  2. C FFI: 보안 스캐너 (§5)                 │
-│     입력: path_normalized, query, body      │
+│     입력: path_raw, path_normalized,        │
+│           query_string, body                │
 │     출력: { threat_type, threat_score }     │
 │                                             │
 │  3. 정책 평가 (ADR-002)                     │
@@ -93,7 +94,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | `ngx.req.read_body()` | access_by_lua 진입 전 Nginx 설정(`lua_need_request_body on`)으로 자동 읽기. 또는 body 검사가 필요한 경우에만 명시적으로 `ngx.req.read_body()` 호출 |
 | Inspection limit | 본문 크기 ≤ `client_body_buffer_size` (기본 16KB). 초과 시 임시 파일로 spill — 이 경우 body 검사를 수행하지 않음 (검사 불가 사유 로그 기록) |
 | Chunked / streaming body | `Transfer-Encoding: chunked` 요청은 Nginx가 버퍼링 후 Lua에 전달. 청크 단위 스트리밍 검사는 이 스펙 범위 밖 |
-| Large body (초과) | **fail-open**: body 검사를 건너뛰고 정책 평가만으로 판정. 로그에 `body_inspected: false` 기록 |
+| Large body (초과) | **fail-open**: body 검사를 건너뛰고 정책 평가만으로 판정. WARN/error 로그에 검사 생략 사유 기록 |
 | Body 없는 요청 (GET 등) | `body`는 `nil`로 전달. 스캐너에 `body_len = 0`으로 호출 |
 
 **에러 응답 형식 (deny):**
@@ -152,7 +153,8 @@ ngx.ctx.luagate = {
   request_id        = "UUID",
   path_raw          = string,
   path_normalized   = string,
-  query_string      = string,
+  query_string      = string,   -- raw query string
+  query_normalized  = string,
   action            = "allow" | "deny",
   matched_rule_id   = string | nil,
   deny_reason       = string | nil,

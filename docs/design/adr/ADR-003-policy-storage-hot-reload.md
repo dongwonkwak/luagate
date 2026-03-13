@@ -50,45 +50,62 @@
   2. `rename()` 시스템 콜로 원자적 교체
   3. 실패 시 임시 파일 삭제, 원본 보존
 
-### §3.3 Hot Reload 시맨틱스
+### §3.4 Hot Reload 시맨틱스
 
 **Reload 트리거 (두 가지):**
 
 1. **HUP 시그널**: `kill -HUP <nginx_master_pid>`
 2. **Admin API**: `POST /api/v1/policies/reload`
 
-**Reload 과정 (순서 보장):**
+**HUP와 Admin API의 의미 차이:**
+
+| 트리거 | 실행 주체 | 의미 |
+|--------|-----------|------|
+| `kill -HUP <nginx_master_pid>` | Nginx master | nginx.conf 재파싱 + 새 worker 기동 + 기존 worker graceful shutdown |
+| `POST /api/v1/policies/reload` | Admin API를 처리 중인 worker | 정책 파일 재검증 + shared dict versioned keyspace 갱신 + active pointer 교체 |
+
+**Admin API reload 과정 (순서 보장):**
 
 ```mermaid
 sequenceDiagram
-    participant T as Trigger(HUP/API)
-    participant M as Master/init_worker
+    participant T as Trigger(API)
+    participant A as AdminHandler(worker)
+    participant FS as FileSystem
     participant V as Validator
     participant CD as ConflictDetector
     participant SD as ngx.shared.DICT
     participant W as Workers
 
-    T->>M: Reload 요청
-    M->>M: YAML 파일 읽기
-    M->>V: Schema validation
+    T->>A: POST /api/v1/policies/reload
+    A->>SD: add("reload_lock", worker_pid, 5s)
+    alt lock already exists
+        SD-->>A: false
+        A-->>T: 409 ReloadInProgress
+    else lock acquired
+        A->>FS: YAML 파일 읽기
+        FS-->>A: file content
+        A->>V: Schema validation
     alt 유효하지 않은 스키마
-        V-->>M: 검증 실패
-        M->>M: last-known-good 유지
-        M->>M: ERROR 로그 기록
-        M-->>T: 400 Bad Request (API의 경우)
+        V-->>A: 검증 실패
+        A->>A: last-known-good 유지
+        A->>A: ERROR 로그 기록
+        A->>SD: delete("reload_lock")
+        A-->>T: 400 Bad Request
     else 스키마 유효
-        V-->>M: 검증 통과
-        M->>CD: 충돌/음영 감지 (ADR-002)
-        CD-->>M: 충돌 목록 (경고만)
-        M->>M: SHA256 해시 계산 (새 정책 버전)
-        M->>SD: atomic replace (luagate_policy dict)
-        M->>SD: policy_version 업데이트
-        M->>M: 충돌 경고 로그 기록
-        M-->>T: 200 OK (API의 경우)
+        V-->>A: 검증 통과
+        A->>CD: 충돌/음영 감지 (ADR-002)
+        CD-->>A: 경고 목록
+        A->>A: SHA256 해시 계산 (new_version)
+        A->>SD: set("policy:<new_version>:blob", ...)
+        A->>SD: set("policy:<new_version>:meta", ...)
+        A->>SD: set("active_policy_version", new_version)
+        A->>SD: delete("reload_lock")
+        A->>A: 충돌 경고 로그 기록
+        A-->>T: 200 OK
         Note over W: 다음 요청 처리 시
-        W->>SD: policy_version 확인
+        W->>SD: active_policy_version 확인
         alt 버전 변경 감지
-            W->>SD: 새 정책 트리 로드
+            W->>SD: policy:<version>:blob 로드
         end
     end
 ```
@@ -96,15 +113,15 @@ sequenceDiagram
 **정책 버전 관리:**
 
 - 버전 식별자: 정책 파일 전체 내용의 **SHA256 해시** (16진수 문자열)
-- 저장 위치: `luagate_policy` shared dict의 `policy_version` 키
+- 저장 위치: `luagate_policy` shared dict의 `active_policy_version` 키
 - 모든 요청 로그 및 메트릭에 현재 `policy_version` 포함
 - 예: `policy_version: "a3f2c1d4e5b6..."`
 
 **Worker 전파 메커니즘:**
 
 각 worker는 요청 처리 시작 시(`access_by_lua_block` 진입 전):
-1. `luagate_policy:get("policy_version")`으로 shared dict 버전 확인
-2. 로컬 캐시 버전과 다르면 shared dict에서 새 정책 트리 로드
+1. `luagate_policy:get("active_policy_version")`으로 shared dict 버전 확인
+2. 로컬 캐시 버전과 다르면 `policy:<version>:blob`를 shared dict에서 읽어 worker module upvalue에 캐시
 3. 로컬 버전 업데이트
 4. 요청 처리 계속
 
@@ -117,7 +134,8 @@ sequenceDiagram
 | YAML 파싱 오류 | last-known-good 유지, ERROR 로그 |
 | Schema 검증 실패 | last-known-good 유지, ERROR 로그 |
 | 충돌 감지 | 로드 계속, WARN 로그 |
-| shared dict 쓰기 실패 | last-known-good 유지, ERROR 로그 |
+| shared dict 쓰기 실패 | last-known-good 유지, ERROR 로그, `active_policy_version` 미변경 |
+| 동시 reload 요청 | 첫 요청만 lock 획득, 나머지는 `409 ReloadInProgress` 반환 |
 
 서버 최초 기동 시 정책 로드 실패 → 서버 시작 실패(fatal).
 
@@ -128,7 +146,7 @@ sequenceDiagram
 ### 긍정적 결과
 
 - **무중단 업데이트**: 정책 변경 시 Nginx worker 재시작 불필요
-- **원자성**: SHA256 기반 버전 + shared dict atomic replace로 partial update 방지
+- **원자성**: versioned keyspace 저장 후 `active_policy_version` 단일 키 교체로 partial update 방지
 - **실패 안전**: last-known-good 보장으로 잘못된 정책이 적용되지 않음
 - **감사 추적**: 모든 로그/메트릭에 policy_version 포함
 
@@ -136,6 +154,7 @@ sequenceDiagram
 
 - **전파 지연**: worker가 새 정책을 인식하는 시점이 "다음 요청 시"이므로,
   reload 직후 들어온 요청은 구 정책으로 처리될 수 있음 (수 ms 단위)
+- **단일 reload 직렬화**: reload lock을 사용하므로 동시에 여러 운영자가 reload하면 일부 요청은 `409`를 받는다
 - **파일 시스템 의존**: YAML 파일이 canonical source이므로 디스크 장애 시 정책 복구 불가.
   정책 파일 백업 정책 필요
 - **단일 파일 한계**: 정책 수가 매우 많아지면 단일 YAML 파일이 관리하기 어려워질 수 있음.
