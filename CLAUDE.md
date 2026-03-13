@@ -21,9 +21,9 @@ CLAUDE.md는 Claude Code의 **coordinator** 역할을 정의한다.
 | 에이전트 | 파일 | 호출 조건 |
 |---------|------|---------|
 | `architect` | `.claude/agents/architect.md` | 설계 대안 2개+, `<!-- ADR 필요 -->` 마커 구간 |
-| `api-developer` | `.claude/agents/api-developer.md` | HTTP/Stream/Admin API 핸들러 구현 |
+| `implementer` | `.claude/agents/implementer.md` | Lua/FFI/설정 파일 구현 + 문서 업데이트 |
 | `security-reviewer` | `.claude/agents/security-reviewer.md` | 보안 관련 코드/ADR 검증 |
-| `test-writer` | `.claude/agents/test-writer.md` | 새 기능 구현 후 테스트 작성 |
+| `tester` | `.claude/agents/tester.md` | 새 기능 구현 후 테스트 작성 |
 
 > **doc-sync**: `.claude/agents/doc-sync.md` → `.claude/skills/doc-sync/SKILL.md` 로 전환됨.
 > ADR 추가/변경 후 doc-sync skill을 invoke한다.
@@ -32,20 +32,20 @@ CLAUDE.md는 Claude Code의 **coordinator** 역할을 정의한다.
 
 ```
 # WRONG: 서브에이전트 간 직접 호출
-api-developer → security-reviewer (직접)
+implementer → security-reviewer (직접)
 
 # CORRECT: coordinator(CLAUDE.md)를 통한 조율
-api-developer 완료 → CLAUDE.md coordinator → security-reviewer 호출
+implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 ```
 
 ### 변경 유형 → 서브에이전트 결정 표
 
 | 변경 유형 | 호출 에이전트 |
 |----------|------------|
-| 새 API 엔드포인트 | api-developer → (보안 포함 시) security-reviewer → test-writer |
+| 새 API 엔드포인트 | implementer → (보안 포함 시) security-reviewer → tester |
 | 설계 결정 필요 | architect → (보안 ADR) security-reviewer → doc-sync skill |
-| FFI 모듈 변경 | api-developer + security-reviewer → test-writer |
-| 정책 엔진 변경 | api-developer → test-writer → (설계 변경 시) architect |
+| FFI 모듈 변경 | implementer + security-reviewer → tester |
+| 정책 엔진 변경 | implementer → tester → (설계 변경 시) architect |
 | 문서만 변경 | doc-sync skill (직접 편집) |
 
 ## knowledge 인덱스 (작업별 필독 파일)
