@@ -87,7 +87,7 @@ PROGRESS.md의 `## 현재 대기 중` 섹션에 추가:
 리뷰 준비 완료.
 
 실행 명령:
-  make review ISSUE=DON-XXX TYPE=<type>
+  codex exec - < .claude/reviews/DON-XXX-<type>-review.md
 
 결과 파일 생성 후 "계속 진행해"라고 말씀해주세요.
 ```
