@@ -14,7 +14,7 @@ COPY csrc/ .
 RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build \
  && mkdir -p /build/artifacts \
- && find build -maxdepth 1 -type f -name '*.so' -exec cp {} /build/artifacts/ \;
+ && find build \( -type f -o -type l \) -name '*.so*' -exec cp -L {} /build/artifacts/ \;
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM openresty/openresty:1.25.3.2-alpine
