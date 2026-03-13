@@ -80,9 +80,12 @@ api-developer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 - [ ] 코드 구현 완료
 - [ ] 테스트 추가/통과 (`make test`)
 - [ ] 관련 spec/ADR 준수 확인 (AGENTS.md 불변식)
-- [ ] 문서 갱신 (코드와 같은 PR)
+- [ ] 문서 갱신 (코드와 같은 PR — same-PR 규칙)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터 포함
 - [ ] PROGRESS.md append (날짜/이슈/산출물/비고)
+
+> **AGENTS.md 불변식 확인**: `luagate_` prefix, fail-closed, `ngx.worker.id()`,
+> hot reload 7단계, same-PR — 이 중 하나라도 위반하면 Done 전환 불가
 
 ## Linear 이슈 코멘트 템플릿
 
