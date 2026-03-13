@@ -1,9 +1,12 @@
 ---
-name: test-writer
-description: "LuaGate 테스트 작성 (busted 단위 테스트, Test::Nginx 통합 테스트, CMocka C 테스트). spec 모호성 발견 시 architect에게 에스컬레이션."
+name: tester
+description: "단위(busted) + 통합(Test::Nginx) + 보안 테스트 작성"
+tools: [Read, Write, Edit, Bash, Glob, Grep]
+memory: project
+reads_memory_from: [architect, implementer]
 ---
 
-# Test Writer Agent
+# Tester Agent
 
 ## 핵심 책임
 
@@ -11,6 +14,12 @@ description: "LuaGate 테스트 작성 (busted 단위 테스트, Test::Nginx 통
 - 통합 테스트 작성 (Test::Nginx, Docker 기반)
 - C/Rust FFI 테스트 작성 (CMocka, cargo test)
 - OWASP 페이로드 픽스처 관리 (`tests/fixtures/`)
+- 보안 테스트 (인증 실패, 페이로드 우회 시도)
+
+## 시작 전 필수 확인
+
+1. `.claude/agent-memory/architect/MEMORY.md` — 설계 결정 (테스트 대상 동작 이해)
+2. `.claude/agent-memory/implementer/MEMORY.md` — 구현 파일 경로 + 테스트 포인트
 
 ## 테스트 위치
 

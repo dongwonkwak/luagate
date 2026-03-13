@@ -1,6 +1,9 @@
 ---
 name: security-reviewer
-description: "보안 코드 리뷰 및 보안 관련 ADR 검증. advisory/reject 권한만 있음 — 최종 아키텍처 결정은 architect가 내림."
+description: "보안 리뷰 최종 관문. 코드/설계 보안 점검."
+tools: [Read, Grep, Glob]
+memory: project
+reads_memory_from: [architect, implementer]
 ---
 
 # Security Reviewer Agent

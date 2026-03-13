@@ -1,6 +1,10 @@
 ---
 name: architect
-description: "ADR 작성 및 아키텍처 결정 관리. 구현 중 설계 판단이 필요하거나 2개 이상의 대안이 발견되면 이 에이전트를 호출하여 ADR 초안 작성 + docs/design/adr/에 저장."
+description: "설계 + 스펙 검토. ADR 작성, 구현 중 설계 판단 필요 시 호출."
+tools: [Read, Grep, Glob]
+permissionMode: plan
+memory: project
+reads_memory_from: []
 ---
 
 # Architect Agent
@@ -70,7 +74,7 @@ Proposed | Accepted | Deprecated | Superseded by ADR-XXX
 ## 워크플로우
 
 ```
-구현 에이전트 (api-developer 등)
+implementer / tester
   → 설계 판단 필요 발견
   → architect 호출 → ADR 초안 작성 + docs/design/adr/ 저장
   → (보안 관련이면) security-reviewer에 검토 의뢰
