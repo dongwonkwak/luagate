@@ -245,6 +245,12 @@ access_log /var/log/luagate/access.log luagate_json buffer=64k flush=5s;
 }
 ```
 
+<!-- ADR 필요 -->
+> **TODO**: metrics-cardinality-and-export — low-cardinality 레이블 정책, route 정규화 전략, Prometheus export 형식 결정 시 ADR 필요
+
+<!-- ADR 필요 -->
+> **TODO**: log-redaction-and-retention — 민감정보 마스킹 대상/방법, 로그 보존 기간, 파기 정책 결정 시 ADR 필요
+
 ## 7. 의존성
 
 - [ADR-004](../design/adr/ADR-004-log-metrics-admin-security.md) — 스키마 원본 정의
