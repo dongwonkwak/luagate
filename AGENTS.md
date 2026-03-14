@@ -84,6 +84,22 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 type: `feat` | `fix` | `docs` | `test` | `refactor` | `chore` | `perf`
 
+## Git Hooks 설치
+
+신규 클론 후 반드시 실행:
+```bash
+make install-hooks
+```
+pre-commit (lint/format) + commit-msg (commitlint) + pre-push (test-unit) hooks 등록.
+
+## PR 컨벤션 요약
+
+- **PR 제목**: `type(scope): 설명 [DON-XX]` (커밋 메시지와 동일 형식)
+- **머지 전략**: Squash merge (epic → main), Merge commit (issue → epic)
+- **리뷰**: CI 통과 + 최소 1개 승인 필수. 보안 변경 시 `security-reviewer` 에이전트 호출.
+- **PR 템플릿**: `.github/pull_request_template.md` 자동 적용
+- **Same-PR 규칙**: 코드/문서/spec 변경은 같은 PR에 포함
+
 ## 테스트 규칙
 
 - Lua 단위 테스트: **busted**, 한국어 서술형 BDD (`describe`/`it`)
@@ -94,7 +110,7 @@ type: `feat` | `fix` | `docs` | `test` | `refactor` | `chore` | `perf`
 
 ```bash
 make test           # 전체 테스트
-make test-unit      # Lua 단위 테스트만
+make test-unit      # Lua + C 단위 테스트
 make up             # Docker Compose 기동
 make down           # Docker Compose 종료
 ```

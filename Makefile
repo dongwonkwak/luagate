@@ -1,4 +1,4 @@
-.PHONY: build test lint bench up down implement clean
+.PHONY: build test test-unit test-unit-lua test-unit-c test-integration-http test-integration-stream test-reload lint bench bench-http bench-stream up down implement install-hooks clean
 
 # ── Build ──────────────────────────────────────────────────────────────────
 build:
@@ -7,11 +7,45 @@ build:
 	cmake --build csrc/build
 
 # ── Test ───────────────────────────────────────────────────────────────────
-test:
-	@echo "==> Running Lua unit tests..."
+test: test-unit test-integration-http test-integration-stream test-reload
+
+test-unit: test-unit-lua test-unit-c
+
+test-unit-lua:
+	@echo "==> Running Lua unit tests (busted)..."
 	busted --config-file=.busted tests/unit
-	@echo "==> Running integration tests..."
-	busted --config-file=.busted tests/integration
+
+test-unit-c:
+	@echo "==> Running C unit tests (CMocka)..."
+	@if [ -f csrc/build/CTestTestfile.cmake ]; then \
+	  ctest --test-dir csrc/build --output-on-failure; \
+	else \
+	  echo "  (skipping C tests — run 'make build' first)"; \
+	fi
+
+test-integration-http:
+	@echo "==> Running HTTP integration tests (Test::Nginx)..."
+	@if [ -d tests/integration/http ]; then \
+	  prove -r tests/integration/http/; \
+	else \
+	  echo "  (skipping — tests/integration/http/ not yet created)"; \
+	fi
+
+test-integration-stream:
+	@echo "==> Running Stream integration tests (Test::Nginx::Stream)..."
+	@if [ -d tests/integration/stream ]; then \
+	  prove -r tests/integration/stream/; \
+	else \
+	  echo "  (skipping — tests/integration/stream/ not yet created)"; \
+	fi
+
+test-reload:
+	@echo "==> Running Hot Reload tests..."
+	@if [ -d tests/unit/reload ]; then \
+	  busted --config-file=.busted tests/unit/reload/; \
+	else \
+	  echo "  (skipping — tests/unit/reload/ not yet created)"; \
+	fi
 
 # ── Lint ───────────────────────────────────────────────────────────────────
 lint:
@@ -27,9 +61,15 @@ lint:
 	markdownlint docs/
 
 # ── Benchmark ──────────────────────────────────────────────────────────────
-bench:
-	@echo "==> Running benchmarks..."
-	wrk -t4 -c100 -d30s http://localhost:8080/bench
+bench: bench-http bench-stream
+
+bench-http:
+	@echo "==> Running HTTP benchmark (wrk)..."
+	wrk -t4 -c100 -d30s http://localhost:8080/api/v1/users
+
+bench-stream:
+	@echo "==> Running Stream benchmark..."
+	@echo "  (Stream benchmark tool TBD)"
 
 # ── Docker ─────────────────────────────────────────────────────────────────
 up:
@@ -42,6 +82,15 @@ down:
 implement:
 	@echo "==> Running AI implementation agent..."
 	claude --dangerously-skip-permissions -p "$(PROMPT)"
+
+# ── Git hooks ──────────────────────────────────────────────────────────────
+install-hooks:
+	@echo "==> Installing commitlint (required for commit-msg hook)..."
+	@if [ ! -f package.json ]; then npm init -y --scope="" > /dev/null; fi
+	npm install --save-dev @commitlint/cli @commitlint/config-conventional
+	@echo "==> Installing git hooks via pre-commit..."
+	pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+	@echo "==> Git hooks installed."
 
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean:
