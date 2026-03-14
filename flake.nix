@@ -45,6 +45,10 @@
             nodePackages.npm
             nodePackages.markdownlint-cli
 
+            # ── Git hooks ─────────────────────────────────────────────────
+            pre-commit
+            shellcheck
+
             # ── Docs ─────────────────────────────────────────────────────
             luajitPackages.ldoc
             doxygen

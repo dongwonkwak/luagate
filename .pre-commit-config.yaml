@@ -1,0 +1,92 @@
+repos:
+  # ── pre-commit built-in hooks ──────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: check-yaml
+        files: \.yaml$
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+
+  # ── Lua: StyLua ────────────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: stylua
+        name: StyLua (Lua formatter check)
+        language: system
+        entry: stylua --check
+        types: [file]
+        files: \.(lua)$
+        pass_filenames: true
+
+  # ── Lua: luacheck ──────────────────────────────────────────────────────────
+      - id: luacheck
+        name: luacheck (Lua linter)
+        language: system
+        entry: luacheck
+        types: [file]
+        files: \.(lua)$
+        pass_filenames: true
+
+  # ── C: clang-format ────────────────────────────────────────────────────────
+      - id: clang-format
+        name: clang-format (C formatter check)
+        language: system
+        entry: clang-format --dry-run --Werror
+        types_or: [c, c++]
+        pass_filenames: true
+
+  # ── Shell: shellcheck ──────────────────────────────────────────────────────
+      - id: shellcheck
+        name: shellcheck (shell linter)
+        language: system
+        entry: shellcheck
+        types: [shell]
+        pass_filenames: true
+
+  # ── Markdown: markdownlint ─────────────────────────────────────────────────
+      - id: markdownlint
+        name: markdownlint
+        language: system
+        entry: markdownlint --config .markdownlint.yaml
+        types: [markdown]
+        pass_filenames: true
+
+# ── commit-msg hook ────────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: commitlint
+        name: commitlint (commit message format)
+        language: system
+        entry: commitlint --edit
+        stages: [commit-msg]
+        pass_filenames: false
+
+# ── pre-push hooks ─────────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: test-unit
+        name: Unit tests (busted)
+        language: system
+        entry: make test-unit
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: clang-tidy
+        name: clang-tidy (C static analysis)
+        language: system
+        entry: bash -c 'if [ -f csrc/build/compile_commands.json ]; then find csrc -name "*.c" | xargs -r clang-tidy -p csrc/build; fi'
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: luacheck-full
+        name: luacheck (full project lint)
+        language: system
+        entry: luacheck lua/ tests/
+        stages: [pre-push]
+        pass_filenames: false

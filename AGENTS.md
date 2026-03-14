@@ -84,6 +84,14 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 type: `feat` | `fix` | `docs` | `test` | `refactor` | `chore` | `perf`
 
+## Git Hooks 설치
+
+신규 클론 후 반드시 실행:
+```bash
+make install-hooks
+```
+pre-commit (lint/format) + commit-msg (commitlint) + pre-push (test-unit) hooks 등록.
+
 ## PR 컨벤션 요약
 
 - **PR 제목**: `type(scope): 설명 [DON-XX]` (커밋 메시지와 동일 형식)
