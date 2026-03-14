@@ -239,7 +239,25 @@ ngx.ctx.luagate = {
 }
 ```
 
-## 10. Rate Limiting
+## 10. Failure Taxonomy (HTTP)
+
+HTTP 파이프라인 에러 분류 통일 표:
+
+| 실패 유형 | 실패 모드 | HTTP 응답 | 비고 |
+|---------|---------|---------|------|
+| URL decode error | fail-closed | 403 | c-ffi-modules.md `LUAGATE_INVALID_INPUT` |
+| scanner_internal_error | fail-closed | 403 | 스캐너 자체 오류 |
+| budget_exceeded (>5ms) | fail-closed | 403 | 스캐너 타임아웃 |
+| policy deny | — | 403 | 정책 매칭 deny |
+| upstream fail | — | 502 | proxy_pass 연결 실패 |
+| rate limit counter eviction | fail-open | — | shared_dict 용량 초과 (MVP 비범위) |
+| logging 실패 (감사 로그) | fail-closed | — | ADR-004: 감사 로그 드롭 금지 |
+| native crash (worker) | process failure | — | nginx master가 재기동 |
+
+> **Hook 순서**: `access_by_lua*` → `proxy_pass(upstream)` → `log_by_lua*`
+> `log_by_lua`는 항상 upstream 응답 이후에 실행된다. 요청 처리 실패 시에도 log 단계는 도달한다.
+
+## 11. Rate Limiting
 
 **MVP 비범위**: Rate Limiting은 현 스펙 범위에 포함되지 않는다.
 별도 ADR을 통해 설계 후 추가한다 (`<!-- ADR 필요 -->` 마커).

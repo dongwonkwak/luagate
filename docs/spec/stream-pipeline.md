@@ -216,7 +216,38 @@ ngx.shared.luagate_connections:incr("active_stream", -1, 0)
 
 Prometheus 메트릭: `luagate_active_connections{type="stream"}`
 
-## 9. TLS 패스스루 vs 터미네이션
+## 9. Failure Taxonomy (Stream)
+
+Stream 파이프라인 에러 분류 통일 표:
+
+| 실패 유형 | 실패 모드 | 비고 |
+|---------|---------|------|
+| decode error | fail-closed | 연결 종료 |
+| parser error (stream) | fail-closed | malformed packet, 연결 종료 |
+| detection miss (non-TLS, non-HTTP) | raw fallback | `detected_protocol=raw`, 정책으로 판정 |
+| malformed TLS | fail-closed | parser error와 구분. raw fallback 아님 |
+| upstream fail | 연결 종료 | upstream 502에 해당 |
+| rate limit counter eviction | fail-open | shared_dict 용량 초과 (MVP 비범위) |
+| logging 실패 (감사 로그) | fail-closed | ADR-004: 감사 로그 드롭 금지 |
+| native crash (worker) | process failure | nginx master가 재기동 |
+
+> **Hook 순서**: `preread_by_lua*` → `proxy_pass(upstream)` → `log_by_lua*`
+> `log_by_lua`는 항상 upstream 이후에 실행된다.
+
+### 9.1 detection miss vs parser error 매트릭스
+
+| 상황 | 분류 | detected_protocol | 처리 |
+|------|------|-----------------|------|
+| 첫 바이트가 TLS 레코드 헤더 (0x16)이지만 ClientHello 파싱 실패 | parser error (malformed TLS) | — | fail-closed (연결 종료) |
+| 첫 바이트가 HTTP 메서드이지만 파싱 불가 | parser error | — | fail-closed (연결 종료) |
+| 첫 바이트가 TLS/HTTP 패턴과 무관한 임의 바이트 | detection miss | `raw` | raw fallback (정책 평가) |
+| LUAGATE_NEED_MORE_DATA → preread_timeout 초과 | timeout | `raw` | fail-closed (연결 종료) |
+| peek 자체 실패 (I/O error) | I/O error | — | fail-closed (연결 종료) |
+
+> **malformed TLS vs raw 구분**: TLS 레코드 헤더(0x16)가 확인된 후 파싱에 실패하면 malformed-TLS(fail-closed).
+> 헤더 자체가 TLS 패턴이 아니면 raw(detection miss).
+
+## 10. TLS 패스스루 vs 터미네이션
 
 LuaGate Stream 파이프라인은 기본적으로 **TLS 패스스루** 모드다:
 - TLS 연결을 복호화하지 않음
