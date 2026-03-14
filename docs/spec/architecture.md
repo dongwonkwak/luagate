@@ -53,33 +53,32 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 | Zone | 역할 | Key Model | Write Owner | Atomicity Unit |
 |------|------|-----------|-------------|----------------|
-| `luagate_policy` | HTTP 정책 envelope | `policy:http:envelope` (data+version+meta blob) | reload worker | subsystem blob 단위 |
+| `luagate_policy` | 정책 버전 포인터 + 버전별 blob | `http:active_version`, `stream:active_version`, `policy:<ver>:blob`, `policy:<ver>:meta` | reload worker | active_version pointer 교체 단위 |
 | `luagate_stream_metrics` | Stream 메트릭 | `stream:metrics:*` | 각 worker (incr) | 키 단위 |
 | `luagate_metrics` | HTTP 메트릭 | `metrics:*` | 각 worker (incr) | 키 단위 |
-| `luagate_connections` | 활성 연결 수 | `conn:worker:<id>` | 해당 worker | 키 단위 |
+| `luagate_connections` | 활성 연결 수 | `active_http`, `active_stream` | 해당 worker | 키 단위 |
 | `luagate_state` | Reload/health 플래그 | `state:reload_flag`, `state:health` | reload worker | 키 단위 |
 
-> **Envelope vs State zone 분리 원칙**:
-> - **Envelope zone** (`luagate_policy`): 서브시스템별 1개 key에 data + version + metadata를 blob으로 저장. 원자적 교체가 atomicity unit.
-> - **State zone** (`luagate_state`): reload flag, health flag 등 단순 상태값만 저장. version 포인터를 State zone에 두지 않는다.
+> **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):
+> 새 정책을 `policy:<new_version>:blob`에 먼저 기록한 뒤, `http:active_version` / `stream:active_version` 포인터를 교체한다.
+> 이렇게 하면 pointer 교체 이전까지 기존 worker는 old version을 계속 사용하며 무중단이 보장된다.
 
-### 3.2 HTTP 정책 Envelope 구조
+### 3.2 `luagate_policy` Versioned Keyspace 구조
 
 ```
-luagate_policy["policy:http:envelope"] = {
-    version: "<sha256 hex>",   -- active_version (policy-engine.md §4.3 참조)
-    rules_blob: "<json>",      -- compiled rules
-    compiled_at: <epoch>,
-    lkg_version: "<sha256 hex>"  -- Last-Known-Good 버전 포인터
-}
+-- 서브시스템별 active version pointer (단순 string 값)
+luagate_policy["http:active_version"]   = "<sha256 hex>"   -- HTTP 활성 버전
+luagate_policy["stream:active_version"] = "<sha256 hex>"   -- Stream 활성 버전
 
-luagate_policy["policy:stream:envelope"] = {
-    version: "<sha256 hex>",
-    rules_blob: "<json>",
-    compiled_at: <epoch>,
-    lkg_version: "<sha256 hex>"
-}
+-- 버전별 blob (JSON 직렬화된 compiled rules)
+luagate_policy["policy:<sha256>:blob"] = "<json>"
+
+-- 버전별 메타데이터 (로드 시각, 규칙 수, 충돌 목록 등)
+luagate_policy["policy:<sha256>:meta"] = "<json>"
 ```
+
+> **LKG(Last-Known-Good)**: LKG 버전 포인터는 meta 내 `lkg_version` 필드로 보관한다.
+> commit 실패 시 active_version을 lkg_version으로 복원한다 (policy-engine.md §4.1 step [7] 참조).
 
 ### 3.3 L1 캐시 무효화 전략
 
@@ -87,12 +86,17 @@ luagate_policy["policy:stream:envelope"] = {
 갱신 조건: `active_version != _cached_version` (요청 진입 시 shared dict에서 확인).
 
 ```lua
--- worker-local L1 캐시 갱신 흐름
-local current_version = ngx.shared.luagate_policy:get("policy:http:envelope.version")
+-- worker-local L1 캐시 갱신 흐름 (policy-engine.md §4.4 참조)
+local current_version = ngx.shared.luagate_policy:get("http:active_version")
 if current_version ~= _cached_version then
-    -- shared dict(L2)에서 새 blob 로드
-    _cached_policy = load_from_envelope()
-    _cached_version = current_version
+    -- shared dict(L2)에서 버전별 blob 로드
+    local blob_key = "policy:" .. current_version .. ":blob"
+    local policy_json = ngx.shared.luagate_policy:get(blob_key)
+    if policy_json then
+        _cached_policy = cjson.decode(policy_json)
+        _cached_version = current_version
+    end
+    -- blob 없으면 last-known-good(_cached_policy) 유지
 end
 ```
 

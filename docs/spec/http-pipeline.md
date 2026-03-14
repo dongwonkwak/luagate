@@ -102,9 +102,9 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | 항목 | 계약 |
 |------|------|
 | `ngx.req.read_body()` | access_by_lua 진입 전 Nginx 설정(`lua_need_request_body on`)으로 자동 읽기. 또는 body 검사가 필요한 경우에만 명시적으로 `ngx.req.read_body()` 호출 |
-| Inspection limit | 본문 크기 ≤ `client_body_buffer_size` (기본 16KB). 초과 시 임시 파일로 spill — 이 경우 body 검사를 수행하지 않음 (검사 불가 사유 로그 기록) |
-| Chunked / streaming body | `Transfer-Encoding: chunked` 요청은 Nginx가 버퍼링 후 Lua에 전달. 청크 단위 스트리밍 검사는 이 스펙 범위 밖 |
-| Large body (초과) | **fail-open**: body 검사를 건너뛰고 정책 평가만으로 판정. WARN/error 로그에 검사 생략 사유 기록 |
+| Body 검사 범위 | **MVP 비범위** (security-scanner.md §2c 참조). body 검사는 Phase 2에서 지원. MVP에서는 `body_len = 0`으로 스캐너를 호출한다 |
+| Large body (spill to file) | 본문이 `client_body_buffer_size` 초과 시 임시 파일로 spill — MVP에서 body 검사 미지원이므로 동작 무변화. 검사 생략 사유를 WARN 로그에 기록 |
+| Chunked / streaming body | `Transfer-Encoding: chunked` 요청은 Nginx가 버퍼링 후 Lua에 전달. 청크 단위 스트리밍 검사는 Phase 2 이후 범위 |
 | Body 없는 요청 (GET 등) | `body`는 `nil`로 전달. 스캐너에 `body_len = 0`으로 호출 |
 
 ### 2.4 proxy_pass (업스트림 프록시)
@@ -144,9 +144,9 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | 변수 | 기본값 |
 |------|--------|
 | `$luagate_decision_source` | `nginx_core` |
-| `$luagate_threat_type` | `none` |
+| `$luagate_threat_type` | `null` (JSON null — log-schema.md §2 참조) |
 | `$luagate_request_state` | `short_circuited` |
-| `$luagate_rule_name` | `-` (null) |
+| `$luagate_rule_name` | `null` (JSON null) |
 
 ## 4. decision_source 값 체계
 
@@ -159,9 +159,11 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 
 ## 5. threat_type 값 체계
 
+위협이 없으면 `threat_type`은 JSON `null`로 직렬화한다 (log-schema.md §2 참조). `"none"` 문자열은 사용하지 않는다.
+
 | 값 | 설명 |
 |----|------|
-| `none` | 위협 없음 (정상 요청) |
+| `null` | 위협 없음 (정상 요청) |
 | `sqli` | SQL Injection |
 | `xss` | Cross-Site Scripting |
 | `path_traversal` | 경로 탐색 공격 |

@@ -76,7 +76,7 @@ stream_rules:                   # TCP 스트림 규칙 목록
 | `id` | string | ✓ | 규칙 고유 식별자 — **파일 전체(http + stream) 유일성** |
 | `description` | string | — | 설명 |
 | `enabled` | boolean | — | 기본값 `true`. `false`이면 평가에서 제외 (schema 검증은 수행, conflict detect에서 제외) |
-| `priority` | integer | ✓ | **낮은 숫자 = 높은 우선순위** (ADR-002). 동률은 선언 순서 유지 |
+| `priority` | integer | ✓ | **낮은 숫자 = 높은 우선순위** (ADR-002). 동률은 `rule.id ASC` stable sort |
 | `scope` | map | — | 매칭 조건 (AND). 생략 시 catch-all (wildcard) |
 | `action` | enum | ✓ | HTTP: `allow` \| `deny`. Stream: `proxy` \| `deny` |
 | `tags` | list<string> | — | 분류용 태그. 평가에 영향 없음 |
@@ -171,7 +171,7 @@ scope 조건이 없는 규칙은 모든 요청에 매칭 (catch-all).
 
 정책 로드 시 규칙을 priority 오름차순으로 정렬하여 메모리에 유지한다.
 
-- **동률(동일 priority)**: YAML 파일 내 선언 순서 유지 (ADR-002)
+- **동률(동일 priority)**: `priority ASC` 후 `rule.id ASC` stable sort 적용 (ADR-002 §3.1)
 - **`original_index`**: `enabled` 값에 관계없이 **source order 기준** (disabled 규칙 포함 전체 목록의 0-based index)
 
 ## 4. 정책 로더 (ADR-003)
@@ -210,8 +210,18 @@ load_policy(filepath):
 -- 필수 필드 검증
 assert(rule.id, "rule.id is required")
 assert(type(rule.priority) == "number", "rule.priority must be number")
-assert(rule.action == "allow" or rule.action == "deny",
-       "rule.action must be 'allow' or 'deny'")
+
+-- action 검증: HTTP와 Stream은 허용 action이 다름
+if is_http_rule then
+    assert(rule.action == "allow" or rule.action == "deny",
+           "http rule.action must be 'allow' or 'deny'")
+else  -- stream rule
+    assert(rule.action == "proxy" or rule.action == "deny",
+           "stream rule.action must be 'proxy' or 'deny'")
+    if rule.action == "proxy" then
+        assert(rule.upstream, "stream proxy rule requires 'upstream' field")
+    end
+end
 
 -- id 유일성: http rules + stream_rules 합산 검증
 local seen_ids = {}

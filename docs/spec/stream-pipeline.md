@@ -32,9 +32,10 @@ Nginx `stream {}` 블록 (`conf/nginx.stream.conf`)에서 구성한다.
 local sock = assert(ngx.req.socket())
 local data, err = peek_preread_bytes(sock, 16)  -- 의사 코드
 if not data then
-    -- peek 실패 → "raw"로 처리 (fail-closed: 알 수 없는 프로토콜)
-    ngx.ctx.luagate_stream.detected_protocol = "raw"
-    return
+    -- peek I/O 실패 → fail-closed (연결 종료). §9.1 매트릭스 참조
+    -- "raw"로 처리하지 않음: I/O error는 detection miss(raw fallback)와 구분한다
+    ngx.log(ngx.ERR, "preread peek failed: ", err)
+    return ngx.exit(ngx.ERROR)
 end
 
 -- 프로토콜 탐지 순서 (c-ffi-modules.md detect_protocol 호출)
@@ -179,7 +180,7 @@ stream_rules:
 | `luagate_stream_connections_denied_total` | counter | deny된 연결 수 |
 | `luagate_stream_bytes_sent_total` | counter | 총 송신 바이트 |
 | `luagate_stream_bytes_received_total` | counter | 총 수신 바이트 |
-| `luagate_stream_active_connections` | gauge | 현재 활성 연결 수 |
+| `luagate_active_connections{type="stream"}` | gauge | 현재 활성 연결 수 (log-schema.md §7, admin-api.md §6.8과 동일 이름) |
 | `luagate_stream_protocol_detected_total` | counter | 탐지된 프로토콜별 카운터 (label: protocol) |
 
 ## 7. 스트림 컨텍스트 객체

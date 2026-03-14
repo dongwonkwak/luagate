@@ -314,7 +314,7 @@ typedef struct {
 ## 7. FFI 통합 원칙 (ADR-001)
 
 1. **동일 worker 내 동기 호출**: IPC 없음. `ffi.load()` 후 직접 함수 호출
-2. **return code 해석**: Lua wrapper가 return code를 확인하여 에러 처리. pcall은 native crash 대비용으로만 사용
+2. **return code 해석**: Lua wrapper가 return code를 확인하여 에러 처리. `pcall`은 Lua-level 예외(잘못된 인수 타입 등)에만 유효하며, native crash(segfault/abort)는 포착할 수 없다 (ADR-001 §1.2 참조)
 3. **실패 처리**: `LUAGATE_BUDGET_EXCEEDED`, `LUAGATE_INTERNAL_ERROR` → fail-closed (403 또는 연결 종료)
 4. **타임아웃**: 스캐너 < 5ms (budget_exceeded threshold). 디코더/파서 < 0.5ms
 
@@ -416,11 +416,13 @@ package.loaded["_luagate_stream_lib"]  = stream_lib
 -- lua/luagate/ffi_util.lua
 local M = {}
 
--- pcall은 native crash 대비용. return code는 wrapper 내부에서 직접 확인.
+-- pcall은 Lua-level 예외(잘못된 인수 타입 등) 대비용.
+-- native crash(segfault, Rust abort)는 pcall로 포착 불가 — worker 재시작으로만 복구 (ADR-001 §1.2).
+-- return code는 wrapper 내부에서 직접 확인하며, pcall은 보조 방어선으로만 사용한다.
 function M.safe_call(fn, ...)
     local ok, result = pcall(fn, ...)
     if not ok then
-        ngx.log(ngx.ERR, "FFI call failed: ", tostring(result))
+        ngx.log(ngx.ERR, "FFI call failed (Lua-level): ", tostring(result))
         return nil, result
     end
     return result, nil

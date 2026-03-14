@@ -16,7 +16,7 @@ Admin API는 LuaGate의 관리 인터페이스로, 정책 관리, 상태 조회,
 
 ## 2. 인증
 
-모든 요청에 `Authorization` 헤더 필수 (`GET /health` 및 `GET /metrics` 제외 — 아래 각 엔드포인트 참조):
+모든 요청에 `Authorization` 헤더 필수 (`GET /health` 제외 — 아래 각 엔드포인트 참조):
 
 ```
 Authorization: Bearer <token>
@@ -194,7 +194,10 @@ If-Match: "<http_active_version>"
 - charset: UTF-8 only. BOM 미허용
 - 압축 미허용 (`Content-Encoding` 거부)
 
-처리 순서: [1] If-Match 확인 → [2] parse → [3] validate → [4] conflict_detect → [5] compile → [6] audit write → [7] commit + canonical file write
+처리 순서: [1] If-Match 확인 → [2] parse → [3] validate → [4] conflict_detect → [5] hash(SHA256) → [6] compile → [7] audit write → [8] commit + canonical file write
+
+> **hash 단계**: [5]에서 업로드된 YAML 전체의 SHA256을 계산하여 new_version으로 사용. If-Match 불일치가 있으면 [1]에서 409 반환.
+> **policy-engine.md와의 관계**: 파일 기반 reload(`POST /reload`)는 policy-engine.md §4.1의 7단계를 그대로 따른다. PUT의 [1] If-Match / [7] audit / [8] commit+file-write는 API 전용 단계다.
 
 **응답 200 (성공):**
 ```json
