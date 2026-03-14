@@ -39,7 +39,8 @@ if [ $# -eq 2 ]; then
   PENDING="${ISSUE}-${TYPE}"
   validate_pending "$PENDING"
 elif [ $# -eq 0 ]; then
-  PENDING=$(grep '^PENDING_REVIEW:' PROGRESS.md 2>/dev/null | tail -1 | awk '{print $2}')
+  # Fix #1: pipefail로 인한 무출력 종료 방지 — || true로 grep 실패를 무시
+  PENDING=$(grep '^PENDING_REVIEW:' PROGRESS.md 2>/dev/null | tail -1 | awk '{print $2}' || true)
   if [ -z "$PENDING" ]; then
     echo "오류: PROGRESS.md에 PENDING_REVIEW 마커가 없습니다." >&2
     echo "직접 지정: ./scripts/codex-review.sh <ISSUE> <TYPE>" >&2
@@ -70,9 +71,12 @@ fi
 RESOLVED=$(grep '^\- \[x\]' "$RESULT" 2>/dev/null | sed 's/^- \[x\] //' || true)
 
 if [ -n "$RESOLVED" ]; then
-  # 재리뷰: 재리뷰 전용 프롬프트 생성 후 미해결 항목만 출력하도록 지시
+  # Fix #2: tmpfile trap 추가 + codex 성공 시에만 result.md에 append
   REOPEN=$(grep '^\- \[ \]' "$RESULT" 2>/dev/null | sed 's/^- \[ \] //' || true)
   REREVIEW_PROMPT=$(mktemp)
+  REREVIEW_OUTPUT=$(mktemp)
+  trap "rm -f '$REREVIEW_PROMPT' '$REREVIEW_OUTPUT'" EXIT
+
   {
     echo "아래 항목은 이미 해결되었으니 재지적하지 마세요:"
     printf "%b" "$RESOLVED" | sed 's/^/  - /'
@@ -92,17 +96,21 @@ if [ -n "$RESOLVED" ]; then
     cat "$REVIEW"
   } > "$REREVIEW_PROMPT"
 
-  {
-    echo ""
-    echo "---"
-    echo ""
-    echo "## 재리뷰 ($(date '+%Y-%m-%d'))"
-    echo ""
-    codex exec - < "$REREVIEW_PROMPT"
-  } >> "$RESULT"
-
-  rm -f "$REREVIEW_PROMPT"
-  echo "재리뷰 완료: $RESULT"
+  # codex 성공 시에만 result.md에 헤더 + 출력 append (실패 시 result.md 오염 방지)
+  if codex exec - < "$REREVIEW_PROMPT" > "$REREVIEW_OUTPUT"; then
+    {
+      echo ""
+      echo "---"
+      echo ""
+      echo "## 재리뷰 ($(date '+%Y-%m-%d'))"
+      echo ""
+      cat "$REREVIEW_OUTPUT"
+    } >> "$RESULT"
+    echo "재리뷰 완료: $RESULT"
+  else
+    echo "오류: Codex 실행 실패. result.md는 수정되지 않았습니다." >&2
+    exit 1
+  fi
 else
   # 최초 리뷰: review.md → Codex → result.md 신규 생성
   codex exec - < "$REVIEW" > "$RESULT"
