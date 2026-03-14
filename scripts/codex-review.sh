@@ -113,8 +113,16 @@ if [ -n "$RESOLVED" ]; then
   fi
 else
   # 최초 리뷰: review.md → Codex → result.md 신규 생성
-  codex exec - < "$REVIEW" > "$RESULT"
-  echo "리뷰 완료: $RESULT"
+  # tmpfile 패턴: codex 성공 시에만 result.md 생성 (실패 시 빈 파일 잔존 방지)
+  FIRST_OUTPUT=$(mktemp)
+  trap "rm -f '$FIRST_OUTPUT'" EXIT
+  if codex exec - < "$REVIEW" > "$FIRST_OUTPUT"; then
+    cp "$FIRST_OUTPUT" "$RESULT"
+    echo "리뷰 완료: $RESULT"
+  else
+    echo "오류: Codex 실행 실패. result.md는 생성되지 않았습니다." >&2
+    exit 1
+  fi
 fi
 
 # --- PROGRESS.md 마커 정리: PENDING_REVIEW → COMPLETED_REVIEW ---

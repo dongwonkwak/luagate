@@ -25,8 +25,9 @@ git diff main...HEAD --name-only
 
 ### 2. 생성 전 확인
 
-파일을 생성하기 전에 반드시 사람에게 확인을 받는다:
+파일을 생성하기 전에 반드시 사람에게 확인을 받는다.
 
+**최초 리뷰 시:**
 ```
 다음 파일을 생성합니다:
 
@@ -34,6 +35,16 @@ git diff main...HEAD --name-only
   📄 결과 파일: .claude/reviews/DON-XXX-{type}-result.md  ← codex 실행 후 생성됨
 
 생성할까요? (변경 파일 목록: N개)
+```
+
+**재리뷰 시** (review.md 또는 result.md가 이미 존재하는 경우):
+```
+재리뷰를 준비합니다:
+
+  📄 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md  ← 이미 존재 (덮어쓰지 않음)
+  📄 결과 파일: .claude/reviews/DON-XXX-{type}-result.md  ← 이미 존재 (append됨)
+
+PROGRESS.md에 PENDING_REVIEW 마커를 재기입합니다. 진행할까요?
 ```
 
 사람이 승인하면 3단계로 진행. 거부하면 중단.
@@ -64,6 +75,10 @@ PENDING_REVIEW: DON-XXX-{type}
 ```
 
 스크립트(`scripts/codex-review.sh`)가 이 마커를 읽어 리뷰 파일 경로를 자동으로 결정한다.
+
+> **NOTE (재리뷰 시)**: 이전 `COMPLETED_REVIEW: DON-XXX-{type} (날짜)` 라인이 이미 있더라도
+> 그 아래에 `PENDING_REVIEW: DON-XXX-{type}` 를 추가한다. 스크립트는 `tail -1`로
+> 마지막 마커를 읽으므로 정상 동작한다.
 
 ### 5. 사람에게 실행 명령 안내
 

@@ -74,13 +74,22 @@ scripts/
 ### 재리뷰
 
 ```
-1. 수정 완료 후 사람이 재리뷰 요청
+1. 수정 완료 후 Claude Code가 result.md의 [x] 체크 업데이트
 
-2. 스크립트가 result.md의 [x] 항목을 자동 감지
+2. Claude Code: request-codex-review 스킬 재실행
+   └─ review.md는 덮어쓰지 않음 (이미 존재)
+   └─ PROGRESS.md에 PENDING_REVIEW 마커 재기입
+        기존: COMPLETED_REVIEW: DON-XXX-{type} (날짜)
+        추가: PENDING_REVIEW: DON-XXX-{type}    ← 아래에 append
+   └─ 스크립트는 tail -1으로 마지막 마커를 읽으므로 정상 동작
+
+3. 사람: Codex 실행
+   └─ ./scripts/codex-review.sh
+   └─ 스크립트가 result.md의 [x] 항목을 자동 감지
    └─ 기해결 항목은 Codex에 스킵 지시 전달
    └─ result.md에 "## 재리뷰 (YYYY-MM-DD)" 헤더 추가 후 append
 
-3. 미해결 항목만 재검토
+4. 미해결 항목만 재검토
 ```
 
 ---

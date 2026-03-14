@@ -32,6 +32,15 @@ PENDING_REVIEW: DON-97-code
 - 리뷰 파일: `.claude/reviews/DON-97-code-review.md`
 - 결과 파일: `.claude/reviews/DON-97-code-result.md`
 
+**재리뷰 시**: 이전 `COMPLETED_REVIEW` 라인이 이미 있더라도 그 아래에 `PENDING_REVIEW`를 추가한다.
+스크립트는 `tail -1`로 마지막 마커를 읽으므로 정상 동작한다.
+
+```
+# 재리뷰 시 PROGRESS.md 예시
+COMPLETED_REVIEW: DON-97-code (2026-03-14)
+PENDING_REVIEW: DON-97-code          ← 스킬이 재기입
+```
+
 ### 최초 리뷰 vs 재리뷰
 
 | 상황 | 동작 |
