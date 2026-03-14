@@ -11,6 +11,7 @@
 ```
 README.md
   → docs/spec/architecture.md
+  → docs/design/adr/ (결정 배경)
   → 관련 spec (작업 영역별)
   → AGENTS.md (코딩 컨벤션, 불변식, 용어집)
   → CLAUDE.md (AI 개발 워크플로우 — 참고용)
@@ -51,9 +52,10 @@ make test-unit
 ### 로컬 실행
 
 ```bash
-make up          # Docker Compose 기동
-curl http://localhost:8080/health  # 확인
-make down        # 종료
+make up                              # Docker Compose 기동
+curl http://localhost:9090/health    # Health check (Admin API 포트)
+curl http://localhost:8080/          # 게이트웨이 동작 확인
+make down                            # 종료
 ```
 
 ---
@@ -95,7 +97,7 @@ fix(scanner): handle NULL body in luagate_scan_http [DON-55]
 docs(spec): update http-pipeline stream preread section [DON-90]
 ```
 
-> `commitlint`이 pre-commit hook으로 형식을 자동 검사한다. (`make install-hooks` 후 적용)
+> `commitlint`이 **commit-msg hook**으로 형식을 자동 검사한다. (`make install-hooks` 후 적용)
 
 ---
 

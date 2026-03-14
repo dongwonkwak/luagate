@@ -63,7 +63,7 @@ repos:
       - id: commitlint
         name: commitlint (commit message format)
         language: system
-        entry: commitlint --edit
+        entry: npx --no-install commitlint --edit
         stages: [commit-msg]
         pass_filenames: false
 

@@ -47,17 +47,14 @@ cd luagate
 make up
 
 # 3. 검증
-# Health check
-curl http://localhost:8080/health
+# Health check (Admin API 포트)
+curl http://localhost:9090/health
 
-# Allow 요청
+# 게이트웨이 요청 (정책 평가)
 curl http://localhost:8080/
 
-# Block 요청 (deny rule 매칭)
-curl http://localhost:8080/admin/secret  # → 403
-
 # Admin API
-curl http://localhost:9090/api/v1/health
+curl http://localhost:9090/health
 ```
 
 ### 2) 개발 환경 (Nix)
@@ -82,8 +79,8 @@ make test
 | 포트 | 역할 |
 |------|------|
 | 8080 | HTTP data plane (게이트웨이) |
-| 8443 | HTTPS data plane (TLS 종료) |
-| 9090 | Admin API + /metrics |
+| 8443 | HTTPS data plane (TLS 종료, Phase 1 예정) |
+| 9090 | Admin API + /metrics + /health |
 
 ---
 

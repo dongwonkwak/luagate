@@ -16,10 +16,10 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
-| 2026-03-12 | DON-85 | ADR-001: OpenResty 선택 | `docs/adr/ADR-001-openresty.md` | 완료 |
-| 2026-03-12 | DON-86 | ADR-002: Lua 정책 엔진 | `docs/adr/ADR-002-lua-policy-engine.md` | 완료 |
-| 2026-03-12 | DON-87 | ADR-003: Rust FFI | `docs/adr/ADR-003-rust-ffi.md` | 완료 |
-| 2026-03-12 | DON-88 | ADR-004: 감사 로그 설계 | `docs/adr/ADR-004-audit-log.md` | 완료 |
+| 2026-03-12 | DON-85 | ADR-001: 실행/상태 공유 모델 | `docs/design/adr/ADR-001-execution-shared-state-model.md` | 완료 |
+| 2026-03-12 | DON-86 | ADR-002: 정책 평가/충돌 탐지 | `docs/design/adr/ADR-002-policy-evaluation-conflict-detection.md` | 완료 |
+| 2026-03-12 | DON-87 | ADR-003: 정책 저장/Hot Reload | `docs/design/adr/ADR-003-policy-storage-hot-reload.md` | 완료 |
+| 2026-03-12 | DON-88 | ADR-004: 로그/메트릭/Admin/보안 | `docs/design/adr/ADR-004-log-metrics-admin-security.md` | 완료 |
 
 ## Phase 0-B: 프로젝트 스캐폴딩
 
@@ -31,10 +31,10 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 2026-03-12 | DON-93 | Phase 1 이슈 생성 | Linear 이슈 등록 | 완료 |
 | 2026-03-12 | DON-94 | Makefile 초안 | `Makefile` | 완료 |
 | 2026-03-12 | DON-95 | 기본 conf 파일 | `conf/` | 완료 |
-| 2026-03-13 | DON-99 | 정책 의미론 닫기 | `docs/spec/policies.md` | 리뷰 반영 |
-| 2026-03-13 | DON-100 | 원자성 모델 정리 | `docs/spec/hot-reload.md` | 리뷰 반영 |
-| 2026-03-13 | DON-101 | ADR-004 전체 반영 | `docs/adr/ADR-004-audit-log.md` | 리뷰 반영 |
-| 2026-03-13 | DON-102 | 파이프라인 수정 | `docs/spec/pipeline.md` | 리뷰 반영 |
+| 2026-03-13 | DON-99 | 정책 의미론 닫기 | `docs/spec/policy-engine.md` | 리뷰 반영 |
+| 2026-03-13 | DON-100 | 원자성 모델 정리 | `docs/spec/architecture.md` | 리뷰 반영 |
+| 2026-03-13 | DON-101 | ADR-004 전체 반영 | `docs/design/adr/ADR-004-log-metrics-admin-security.md` | 리뷰 반영 |
+| 2026-03-13 | DON-102 | 파이프라인 수정 | `docs/spec/http-pipeline.md` | 리뷰 반영 |
 | 2026-03-13 | DON-103 | Makefile 보강 | `Makefile` | 리뷰 반영 |
 | 2026-03-13 | DON-104 | CODEOWNERS 생성 | `CODEOWNERS` | 리뷰 반영 |
 | 2026-03-13 | DON-107 | Claude Code 워크플로우 설계 | `.claude/` 전체 | 완료 |

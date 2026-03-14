@@ -25,15 +25,27 @@ test-unit-c:
 
 test-integration-http:
 	@echo "==> Running HTTP integration tests (Test::Nginx)..."
-	prove -r tests/integration/http/
+	@if [ -d tests/integration/http ]; then \
+	  prove -r tests/integration/http/; \
+	else \
+	  echo "  (skipping — tests/integration/http/ not yet created)"; \
+	fi
 
 test-integration-stream:
 	@echo "==> Running Stream integration tests (Test::Nginx::Stream)..."
-	prove -r tests/integration/stream/
+	@if [ -d tests/integration/stream ]; then \
+	  prove -r tests/integration/stream/; \
+	else \
+	  echo "  (skipping — tests/integration/stream/ not yet created)"; \
+	fi
 
 test-reload:
 	@echo "==> Running Hot Reload tests..."
-	busted --config-file=.busted tests/unit/reload/
+	@if [ -d tests/unit/reload ]; then \
+	  busted --config-file=.busted tests/unit/reload/; \
+	else \
+	  echo "  (skipping — tests/unit/reload/ not yet created)"; \
+	fi
 
 # ── Lint ───────────────────────────────────────────────────────────────────
 lint:
@@ -73,10 +85,11 @@ implement:
 
 # ── Git hooks ──────────────────────────────────────────────────────────────
 install-hooks:
+	@echo "==> Installing commitlint (required for commit-msg hook)..."
+	@if [ ! -f package.json ]; then npm init -y --scope="" > /dev/null; fi
+	npm install --save-dev @commitlint/cli @commitlint/config-conventional
 	@echo "==> Installing git hooks via pre-commit..."
 	pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
-	@echo "==> Installing commitlint..."
-	npm install --save-dev @commitlint/cli @commitlint/config-conventional
 	@echo "==> Git hooks installed."
 
 # ── Clean ──────────────────────────────────────────────────────────────────

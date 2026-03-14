@@ -144,5 +144,6 @@ Epic 완료 후 PR 생성 절차:
 
 ## pre-commit / post-commit hook 규칙
 
-- pre-commit: `stylua --check`, `luacheck`, `cargo fmt --check`, `cargo clippy`
-- post-commit: `PROGRESS.md` 업데이트 리마인더
+- pre-commit: `stylua --check`, `luacheck`, `clang-format --check`, `shellcheck`, `markdownlint`
+- commit-msg: `commitlint` (Conventional Commits 형식 강제)
+- pre-push: `make test-unit` + `clang-tidy` + `luacheck` 전체
