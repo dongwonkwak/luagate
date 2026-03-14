@@ -31,6 +31,9 @@ git diff main...HEAD --name-only
 
 - `{{ISSUE}}` → 이슈 번호 (예: `DON-97`)
 - `{{TYPE}}` → 리뷰 유형 (`code` | `design`)
+- `{{TYPE_LABEL}}` → 리뷰 유형 한국어 설명
+  - `code` → `코드 리뷰 — 구현 정확성, 보안, 테스트 완전성 검토`
+  - `design` → `설계 리뷰 — 아키텍처 결정의 타당성, 대안 검토, ADR 품질 검토`
 - `{{TITLE}}` → Linear 이슈 제목
 - `{{CHANGED_FILES}}` → `git diff main...HEAD --name-only` 결과
 - `{{SPEC_DOCS}}` → 관련 spec/ADR 경로
@@ -55,10 +58,10 @@ PENDING_REVIEW: DON-XXX-{type}
 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md
 결과 파일: .claude/reviews/DON-XXX-{type}-result.md
 
-실행 명령 (스크립트 사용):
+실행 명령 (스크립트 사용 — 권장):
   ./scripts/codex-review.sh
 
-또는 직접 실행:
+⚠️ 직접 실행은 최초 리뷰에만 사용. 재리뷰에서 사용하면 기존 result.md 이력이 덮어씌워집니다:
   codex exec - < .claude/reviews/DON-XXX-{type}-review.md > .claude/reviews/DON-XXX-{type}-result.md
 
 결과 파일 생성 후 "계속 진행해"라고 말씀해주세요.

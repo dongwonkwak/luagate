@@ -80,3 +80,5 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 2026-03-14 | DON-130 | request-codex-review 스킬 생성 | `.claude/skills/request-codex-review/SKILL.md`, `review-template.md`, `result-template.md` | 완료 |
 | 2026-03-14 | DON-131 | scripts/codex-review.sh 생성 + scripts/README.md | `scripts/codex-review.sh`, `scripts/README.md` | 완료 |
 | 2026-03-14 | DON-132 | docs/workflow/codex-review.md 작성 | `docs/workflow/codex-review.md` | 완료 |
+
+PENDING_REVIEW: DON-128-code

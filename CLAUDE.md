@@ -138,7 +138,7 @@ Epic 완료 후 PR 생성 절차:
 
 1. `git push -u origin <epic-branch>`
 2. `gh pr create` — 제목: `type(scope): 설명 [DON-XX]`, 본문: `.github/pull_request_template.md` 참조
-3. 보안/설계 변경 포함 시 → `request-codex-review` 스킬 invoke
+3. 구현 완료 후 → `request-codex-review` 스킬 invoke (code 리뷰). 보안/설계 변경 포함 시 design 리뷰도 추가
 4. CI 통과 + 최소 1개 승인 후 Squash merge
 
 > **머지 전략**: epic → main은 Squash merge (단일 커밋), issue → epic은 Merge commit.

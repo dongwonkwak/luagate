@@ -11,13 +11,32 @@
 
 set -euo pipefail
 
+# --- codex CLI 설치 확인 ---
+if ! command -v codex &>/dev/null; then
+  echo "오류: codex CLI가 설치되어 있지 않습니다." >&2
+  echo "설치: npm install -g @openai/codex" >&2
+  exit 1
+fi
+
 REVIEWS_DIR=".claude/reviews"
+
+# --- 인자 검증 함수 ---
+validate_pending() {
+  local val="$1"
+  # DON-숫자-영문소문자 형식만 허용 (경로 조작 방지)
+  if ! echo "$val" | grep -qE '^DON-[0-9]+-[a-z]+$'; then
+    echo "오류: 잘못된 형식입니다: '$val'" >&2
+    echo "올바른 형식: DON-숫자-유형 (예: DON-97-code)" >&2
+    exit 1
+  fi
+}
 
 # --- 인자 처리 ---
 if [ $# -eq 2 ]; then
   ISSUE="$1"
   TYPE="$2"
   PENDING="${ISSUE}-${TYPE}"
+  validate_pending "$PENDING"
 elif [ $# -eq 0 ]; then
   PENDING=$(grep '^PENDING_REVIEW:' PROGRESS.md 2>/dev/null | tail -1 | awk '{print $2}')
   if [ -z "$PENDING" ]; then
@@ -26,6 +45,7 @@ elif [ $# -eq 0 ]; then
     echo "예시: ./scripts/codex-review.sh DON-97 code" >&2
     exit 1
   fi
+  validate_pending "$PENDING"
 else
   echo "사용법: $0 [ISSUE TYPE]" >&2
   echo "예시:   $0 DON-97 code" >&2
@@ -48,14 +68,38 @@ mkdir -p "$REVIEWS_DIR"
 RESOLVED=$(grep '^\- \[x\]' "$RESULT" 2>/dev/null | sed 's/^- \[x\] //' || true)
 
 if [ -n "$RESOLVED" ]; then
-  # 재리뷰: 기해결 항목 스킵 프롬프트 + 날짜 헤더 추가
-  SKIP_PROMPT="다음 항목은 이미 해결되었으니 재지적하지 마세요:\n${RESOLVED}\n\n---\n"
-  echo "" >> "$RESULT"
-  echo "---" >> "$RESULT"
-  echo "" >> "$RESULT"
-  echo "## 재리뷰 ($(date '+%Y-%m-%d'))" >> "$RESULT"
-  echo "" >> "$RESULT"
-  (printf "%b" "$SKIP_PROMPT"; cat "$REVIEW") | codex exec - >> "$RESULT"
+  # 재리뷰: 재리뷰 전용 프롬프트 생성 후 미해결 항목만 출력하도록 지시
+  REOPEN=$(grep '^\- \[ \]' "$RESULT" 2>/dev/null | sed 's/^- \[ \] //' || true)
+  REREVIEW_PROMPT=$(mktemp)
+  {
+    echo "아래 항목은 이미 해결되었으니 재지적하지 마세요:"
+    printf "%b" "$RESOLVED" | sed 's/^/  - /'
+    echo ""
+    echo "아직 미해결된 항목만 검토하세요:"
+    if [ -n "$REOPEN" ]; then
+      printf "%b" "$REOPEN" | sed 's/^/  - /'
+    else
+      echo "  (없음 — 모든 항목이 해결된 경우 '미해결 항목 없음'이라고만 출력)"
+    fi
+    echo ""
+    echo "---"
+    echo ""
+    echo "출력 형식: 미해결 항목만 '- [ ] 내용' 형식으로 나열. 헤더(#)나 전체 result 문서를 다시 출력하지 말 것."
+    echo ""
+    echo "원본 리뷰 컨텍스트:"
+    cat "$REVIEW"
+  } > "$REREVIEW_PROMPT"
+
+  {
+    echo ""
+    echo "---"
+    echo ""
+    echo "## 재리뷰 ($(date '+%Y-%m-%d'))"
+    echo ""
+    codex exec - < "$REREVIEW_PROMPT"
+  } >> "$RESULT"
+
+  rm -f "$REREVIEW_PROMPT"
   echo "재리뷰 완료: $RESULT"
 else
   # 최초 리뷰: review.md → Codex → result.md 신규 생성
