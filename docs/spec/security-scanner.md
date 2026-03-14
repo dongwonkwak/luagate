@@ -13,6 +13,11 @@
 - **Lua 바인딩**: `lua/luagate/scanner/ffi.lua`
 - **호출 방식**: C FFI, 동일 worker 내 동기 호출 (ADR-001)
 
+### Admin plane 스캐너 대상 제외
+
+Admin plane (server block identity가 `admin`인 요청)은 스캐너 대상에서 제외한다.
+ADR-002 정책 평가 제외와 동일 규칙.
+
 ## 2. 탐지 위협 유형
 
 | threat_type | 설명 | 기반 |
@@ -25,6 +30,49 @@
 | `xxe` | XML External Entity | XML DTD 패턴 |
 | `log4shell` | Log4j RCE (CVE-2021-44228) | `${jndi:...}` 패턴 |
 | `scanner` | 자동화 스캐너 탐지 | User-Agent, 탐색 패턴 |
+
+### threat_type 동시 탐지 규칙
+
+- **Primary threat_type**: evaluation order 기준 먼저 매칭된 것
+- 내부적으로 `matched_rules[]` 유지 (Phase 2에서 노출 예정)
+- MVP: log-schema의 `rule_name`에 primary threat의 내부 rule_name 기록
+
+### match_target / evidence_snippet
+
+- MVP: 미지원
+- 탐지 근거 최소 표현: `rule_name` + `threat_type` (log-schema.md 참조)
+- Phase 2: `match_target`, `evidence_snippet` 노출 예정
+
+## 2b. 에러 3계층 분류
+
+| 에러 유형 | 의미 | 처리 |
+|---------|------|------|
+| `decode_partial` | transform 일부 실패. raw/partial-decoded 값으로 검사 계속. fail-open 아님 — 검사는 반드시 실행 | 계속 진행 (partial 값으로 스캔) |
+| `scanner_internal_error` | 스캐너 자체 실패 | fail-closed (403) |
+| `budget_exceeded` | 5ms 초과 | fail-closed (403) |
+
+## 2c. 입력 크기 상한
+
+- **path**: 최대 8KB. 초과 시 fail-closed (403)
+- **query string**: 최대 8KB. 초과 시 fail-closed (403)
+- **body**: MVP 비범위. Phase 2에서 `application/json`, `application/x-www-form-urlencoded`만 지원. `multipart`/binary 제외
+
+## 2d. 대상별 스캔 계약표
+
+| 대상 | 입력 원천 | 최대 바이트 | Decode 순서 | On-Error |
+|------|---------|-----------|-----------|---------|
+| path | path_raw (Lua 계산, query 미포함) | 8KB | percent-decode → path normalize → NFKC | decode_partial → 계속, 크기 초과 → fail-closed |
+| query.key | query_raw에서 `&`로 분리 후 `=` 앞 부분 | name 4KB | percent-decode (name/value 컴포넌트 단위) | decode_partial → 계속 |
+| query.value | query_raw에서 `&`로 분리 후 `=` 뒤 부분 | value 4KB | percent-decode (name/value 컴포넌트 단위) | decode_partial → 계속 |
+| body | MVP 비범위 | — | — | — |
+
+## 2e. 누락 처리 규칙
+
+- `+` → space (`application/x-www-form-urlencoded` 컨텍스트)
+- invalid `%XX` (XX가 hex가 아님) → `decode_partial`, 원본 유지
+- invalid UTF-8 → `decode_partial`, byte sequence 유지
+- duplicate params → 각각 독립 검사 (첫 번째만 취하지 않음)
+- path separator decode (`%2F` → `/`) → path normalize 단계에서 처리
 
 ## 3. C FFI 인터페이스
 
@@ -213,7 +261,8 @@ conf/
 
 ## 7. 성능 요구사항
 
-- 스캔 완료 시간: < 1ms (p99, ADR-001 §1.2 기준)
+- 스캔 완료 시간: < 5ms (`budget_exceeded` threshold)
+- `budget_exceeded` 초과 시 → fail-closed (403)
 - 메모리: 패턴 로딩 후 정적 메모리 사용 (worker당 추가 할당 최소화)
 - 스레드 안전성: 동일 worker 내 단일 스레드이므로 mutex 불필요
 
