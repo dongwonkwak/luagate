@@ -8,6 +8,7 @@
 # 동작:
 #   최초 리뷰: review.md → Codex → result.md 신규 생성
 #   재리뷰:   [x] 항목 필터링 → 스킵 프롬프트 주입 → 날짜 헤더 추가 → result.md에 append
+#   완료 시:  PROGRESS.md의 PENDING_REVIEW → COMPLETED_REVIEW 마커로 교체
 
 set -euo pipefail
 
@@ -55,14 +56,15 @@ fi
 REVIEW="${REVIEWS_DIR}/${PENDING}-review.md"
 RESULT="${REVIEWS_DIR}/${PENDING}-result.md"
 
+# --- reviews 디렉토리 생성 (review 파일 존재 확인 전에 수행) ---
+mkdir -p "$REVIEWS_DIR"
+
 # --- review 파일 존재 확인 ---
 if [ ! -f "$REVIEW" ]; then
   echo "오류: 리뷰 파일이 없습니다: $REVIEW" >&2
   echo "request-codex-review 스킬을 먼저 실행하세요." >&2
   exit 1
 fi
-
-mkdir -p "$REVIEWS_DIR"
 
 # --- 최초 리뷰 vs 재리뷰 분기 ---
 RESOLVED=$(grep '^\- \[x\]' "$RESULT" 2>/dev/null | sed 's/^- \[x\] //' || true)
@@ -105,4 +107,10 @@ else
   # 최초 리뷰: review.md → Codex → result.md 신규 생성
   codex exec - < "$REVIEW" > "$RESULT"
   echo "리뷰 완료: $RESULT"
+fi
+
+# --- PROGRESS.md 마커 정리: PENDING_REVIEW → COMPLETED_REVIEW ---
+if grep -q "^PENDING_REVIEW: ${PENDING}$" PROGRESS.md 2>/dev/null; then
+  sed -i "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" PROGRESS.md
+  echo "PROGRESS.md 마커 갱신: PENDING_REVIEW → COMPLETED_REVIEW"
 fi

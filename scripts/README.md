@@ -41,6 +41,18 @@ PENDING_REVIEW: DON-97-code
 
 재리뷰 시 기존 `[x]` 항목은 Codex에게 스킵 지시가 전달된다 (AGENTS.md 불변식).
 
+### 마커 자동 정리
+
+리뷰 실행 완료 후 스크립트가 PROGRESS.md의 마커를 자동으로 갱신한다:
+
+```
+# 실행 전
+PENDING_REVIEW: DON-97-code
+
+# 실행 후
+COMPLETED_REVIEW: DON-97-code (2026-03-14)
+```
+
 ### 전제 조건
 
 - `codex` CLI가 PATH에 설치되어 있어야 한다.

@@ -57,6 +57,7 @@ scripts/
 3. 사람: Codex 실행
    └─ ./scripts/codex-review.sh
    └─ 결과: .claude/reviews/DON-XXX-{type}-result.md 생성
+   └─ PROGRESS.md: PENDING_REVIEW → COMPLETED_REVIEW 자동 갱신
 
 4. 사람: 피드백 검토 후 Claude Code에 수정 지시
    └─ "result.md를 보고 피드백 반영해줘"
