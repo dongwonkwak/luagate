@@ -16,13 +16,13 @@
 
 | 기능 | 설명 | 상태 |
 |------|------|------|
-| 정책 기반 허용/차단 | YAML 정책 파일로 IP/경로/메서드 필터링 | 계획 |
-| Hot Reload | 무중단 정책 갱신 (nginx reload 불필요) | 계획 |
-| 위협 탐지 | Rust FFI 기반 스캐너 (SQLi, XSS 등) | 계획 |
-| 감사 로그 | 구조화 JSON 로그 (결정 근거 포함) | 계획 |
-| Admin API | REST API로 정책/상태 관리 (포트 9090) | 계획 |
-| 스트림 프록시 | TCP/UDP 스트림 정책 적용 | 계획 |
-| 메트릭 | Prometheus 형식 노출 | 계획 |
+| 정책 기반 허용/차단 | YAML 정책 파일로 IP/경로/메서드 필터링 | Planned |
+| Hot Reload | 무중단 정책 갱신 (nginx reload 불필요) | Planned |
+| 위협 탐지 | Rust FFI 기반 스캐너 (SQLi, XSS 등) | Planned |
+| 감사 로그 | 구조화 JSON 로그 (결정 근거 포함) | Planned |
+| Admin API | REST API로 정책/상태 관리 (포트 9090) | Planned |
+| 스트림 프록시 | TCP/UDP 스트림 정책 적용 | Planned |
+| 메트릭 | Prometheus 형식 노출 (/metrics) | Planned |
 
 ---
 
@@ -30,10 +30,13 @@
 
 ### 사전 요건
 
-- Docker + Docker Compose
-- (개발) Nix + direnv (flake.nix 제공)
+| 방법 | 필요 도구 |
+|------|----------|
+| **권장 (Nix)** | [Nix](https://nixos.org/download) + [direnv](https://direnv.net/) |
+| Docker (데모) | Docker 24+ + Docker Compose v2 |
+| 수동 | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, CMake 3.20+, Node.js 20+ |
 
-### 3단계 시작
+### 1) 데모 실행 (Docker)
 
 ```bash
 # 1. 클론
@@ -43,19 +46,44 @@ cd luagate
 # 2. 기동
 make up
 
-# 3. 확인
-curl http://localhost:8080/health       # HTTP 게이트웨이
-curl https://localhost:8443/health      # HTTPS (자체 서명 인증서)
-curl http://localhost:9090/api/v1/health # Admin API
+# 3. 검증
+# Health check
+curl http://localhost:8080/health
+
+# Allow 요청
+curl http://localhost:8080/
+
+# Block 요청 (deny rule 매칭)
+curl http://localhost:8080/admin/secret  # → 403
+
+# Admin API
+curl http://localhost:9090/api/v1/health
+```
+
+### 2) 개발 환경 (Nix)
+
+```bash
+git clone https://github.com/dongwonkwak/luagate.git
+cd luagate
+
+# Nix 개발 셸 진입 (모든 의존성 자동 설치)
+nix develop
+# 또는 direnv 사용 시: direnv allow
+
+# 빌드
+make build
+
+# 전체 테스트
+make test
 ```
 
 ### 포트 표
 
-| 포트 | 용도 |
+| 포트 | 역할 |
 |------|------|
-| 8080 | HTTP 게이트웨이 |
-| 8443 | HTTPS 게이트웨이 |
-| 9090 | Admin API |
+| 8080 | HTTP data plane (게이트웨이) |
+| 8443 | HTTPS data plane (TLS 종료) |
+| 9090 | Admin API + /metrics |
 
 ---
 
@@ -82,6 +110,26 @@ graph TB
 ```
 
 **요청 흐름**: Client → Nginx TCP Accept → SSL/TLS → Lua access phase (정책 평가) → upstream proxy / deny
+
+---
+
+## 디렉토리 구조
+
+```
+luagate/
+├── lua/            # Lua 핸들러 및 정책 엔진 모듈
+├── csrc/           # Rust FFI 소스 (scanner, decoder)
+├── conf/           # nginx.conf 및 정책 YAML
+├── docs/
+│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 001~004)
+│   └── spec/       # 스펙 문서 (10개)
+├── tests/          # 단위(busted) + 통합(Test::Nginx) 테스트
+├── scripts/        # 개발/운영 보조 스크립트
+├── frontend/       # Admin Dashboard UI
+├── benchmarks/     # 성능 측정 스크립트
+├── policies/       # 정책 파일 예시
+└── .claude/        # Claude Code 에이전트/스킬/메모리
+```
 
 ---
 
@@ -135,9 +183,13 @@ graph TB
 
 ## 벤치마크
 
-*Phase 1 구현 완료 후 추가 예정*
+*Phase 1 구현 완료 후 실측값 추가 예정*
 
-<!-- Benchmark results placeholder -->
+| 지표 | SLO (목표) | 실측 |
+|------|-----------|------|
+| p99 레이턴시 (정책 평가 포함) | < 5ms | Planned |
+| 처리량 | > 10,000 req/s | Planned |
+| 메모리 (worker당) | < 50MB | Planned |
 
 ---
 
