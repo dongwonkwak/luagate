@@ -11,6 +11,7 @@ CLAUDE.md는 Claude Code의 **coordinator** 역할을 정의한다.
 ### 항상 적용 규칙 (skill invoke 없이도 적용)
 
 - AGENTS.md 불변식 전체 (`luagate_` prefix, fail-closed, `ngx.worker.id()`, hot reload 7단계, same-PR)
+- AGENTS.md 리뷰 관련 불변식 (Codex 역할 제한, result-template.md 경로 명시, 재리뷰 기해결 항목 지적 금지)
 - `ngx.ctx`에 정책 캐시 저장 금지
 - blocking I/O 핸들러 금지
 - Lua access_log 직접 쓰기 금지 (Nginx native 사용)
