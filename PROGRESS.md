@@ -49,3 +49,9 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-14 | DON-92 | PROGRESS.md 초기화 | `PROGRESS.md` | 완료 |
+| 2026-03-14 | DON-96 | README.md 초안 작성 | `README.md` | 완료 |
+| 2026-03-14 | DON-108 | README 전면 수정 | `README.md` | 리뷰 반영 |
+| 2026-03-14 | DON-105 | PR 컨벤션 + PR 템플릿 | `.github/pull_request_template.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/knowledge/conventions.md` | 완료 |
+| 2026-03-14 | DON-106 | Git hooks 설정 | `.pre-commit-config.yaml`, `commitlint.config.js`, `flake.nix`, `Makefile` | 완료 |
+| 2026-03-14 | DON-110 | test/doc strategy 강화 | `docs/spec/test-strategy.md`, `docs/spec/doc-strategy.md`, `Makefile` | 리뷰 반영 |
+| 2026-03-14 | DON-111 | CONTRIBUTING.md 생성 | `CONTRIBUTING.md`, `README.md` | 완료 |
