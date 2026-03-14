@@ -1,7 +1,7 @@
 ---
 name: request-codex-review
-description: "Codex CLI 리뷰 프롬프트 파일 생성 + PROGRESS.md 대기 상태 기록 + 사람에게 실행 명령 안내."
-trigger: "request-codex-review | codex 리뷰 | 리뷰 요청"
+description: "review.md 파일 생성 + PROGRESS.md PENDING_REVIEW 마커 기입 + 사람에게 실행 명령 안내. codex 자체는 실행하지 않음."
+trigger: "request-codex-review | codex 리뷰 파일 생성 | 리뷰 프롬프트 생성"
 ---
 
 # request-codex-review Skill
