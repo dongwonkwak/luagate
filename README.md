@@ -177,7 +177,7 @@ luagate/
 
 - [AGENTS.md](AGENTS.md) — 코딩 컨벤션, 불변식, 용어집
 - [CLAUDE.md](CLAUDE.md) — Claude Code 개발 워크플로우
-- [CONTRIBUTING.md](CONTRIBUTING.md) — 기여 가이드 *(작성 예정)*
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 기여 가이드
 
 ---
 
