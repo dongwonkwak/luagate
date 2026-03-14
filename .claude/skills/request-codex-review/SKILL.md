@@ -23,7 +23,22 @@ Codex CLI 리뷰를 위한 프롬프트 파일을 생성하고, 사람에게 실
 git diff main...HEAD --name-only
 ```
 
-### 2. 리뷰 프롬프트 파일 생성
+### 2. 생성 전 확인
+
+파일을 생성하기 전에 반드시 사람에게 확인을 받는다:
+
+```
+다음 파일을 생성합니다:
+
+  📄 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md
+  📄 결과 파일: .claude/reviews/DON-XXX-{type}-result.md  ← codex 실행 후 생성됨
+
+생성할까요? (변경 파일 목록: N개)
+```
+
+사람이 승인하면 3단계로 진행. 거부하면 중단.
+
+### 3. 리뷰 프롬프트 파일 생성
 
 출력 경로: `.claude/reviews/DON-XXX-{type}-review.md`
 
@@ -40,7 +55,7 @@ git diff main...HEAD --name-only
 - `{{ACCEPTANCE_CRITERIA}}` → Linear 이슈 AC 항목
 - `{{RESULT_PATH}}` → `.claude/reviews/DON-XXX-{type}-result.md`
 
-### 3. PROGRESS.md PENDING_REVIEW 마커 기입
+### 4. PROGRESS.md PENDING_REVIEW 마커 기입
 
 PROGRESS.md 끝에 아래 형식으로 추가한다:
 
@@ -50,7 +65,7 @@ PENDING_REVIEW: DON-XXX-{type}
 
 스크립트(`scripts/codex-review.sh`)가 이 마커를 읽어 리뷰 파일 경로를 자동으로 결정한다.
 
-### 4. 사람에게 실행 명령 안내
+### 5. 사람에게 실행 명령 안내
 
 ```
 리뷰 준비 완료.
