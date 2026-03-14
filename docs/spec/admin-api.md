@@ -1,6 +1,7 @@
 # Admin API Specification
 
 > **ADR 참조**:
+>
 > - [ADR-003 정책 저장소 + Hot Reload](../design/adr/ADR-003-policy-storage-hot-reload.md)
 > - [ADR-004 로그/메트릭 + 관리면 보안](../design/adr/ADR-004-log-metrics-admin-security.md)
 
@@ -18,11 +19,12 @@ Admin API는 LuaGate의 관리 인터페이스로, 정책 관리, 상태 조회,
 
 모든 요청에 `Authorization` 헤더 필수 (`GET /health` 제외 — 아래 각 엔드포인트 참조):
 
-```
+```http
 Authorization: Bearer <token>
 ```
 
 **Static token 관리 규칙**:
+
 - 환경변수 `LUAGATE_ADMIN_TOKEN` 또는 파일(마운트) 방식으로 주입
 - 최소 32바이트 entropy (256-bit random)
 - 재기동 없는 교체: **Phase 2** (현재는 재기동 필요)
@@ -52,13 +54,14 @@ Content-Type: application/json
 ```
 
 | error 코드 | stage | HTTP 상태 |
-|-----------|-------|---------|
+| --- | --- | --- |
 | `unauthorized` | `auth` | 401 |
 | `validation_failed` | `validate` | 422 |
 | `conflict_detected` | `conflict_detect` | 422 |
 | `compile_failed` | `compile` | 422 |
 | `commit_failed` | `commit` | 500 |
 | `reload_failed` | `reload` | 500 |
+| `version_mismatch` | `reload` | 409 |
 | `reload_in_progress` | `reload` | 409 |
 | `audit_write_failed` | `audit` | 500 |
 | `not_found` | `routing` | 404 |
@@ -74,8 +77,8 @@ Content-Type: application/json
 **확정된 설계:**
 
 | 엔드포인트 | 동작 | If-Match |
-|-----------|------|---------|
-| `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`subsystem:active_version` 형식) |
+| --- | --- | --- |
+| `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`<http_active_version>` 형식) |
 | `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거만 | 선택 |
 
 > **PUT /api/v1/policies**: 저장 + validate + conflict_detect + compile + commit을 한 번에 수행.
@@ -85,25 +88,29 @@ Content-Type: application/json
 
 - `GET /api/v1/policies` 응답에 `ETag: "<http_active_version>"` 포함
 - `PUT /api/v1/policies` 요청에 `If-Match: "<http_active_version>"` 필수
-  - 불일치 시 → `409 Conflict`
+  - 불일치 시 → `409 Conflict` + `error: "version_mismatch"`
 - `POST /api/v1/policies/reload`에 `If-Match` 선택. 제공 시 불일치이면 `409 Conflict`
+  - 불일치 시 → `error: "version_mismatch"`
+- Admin API의 optimistic concurrency 기준값은 `GET /api/v1/policies` 응답의 `ETag`와 동일한 HTTP active version이다.
 
 ## 6. 엔드포인트
 
 ### 6.1 헬스체크 (Liveness)
 
-```
+```http
 GET /health
 ```
 
 **인증 불필요**. 서버 liveness 확인용. 상세 정보 미포함.
 
 **응답 200:**
+
 ```json
 {"status": "ok"}
 ```
 
 **응답 503** (unhealthy):
+
 ```json
 {"status": "unhealthy", "reason": "policy not loaded"}
 ```
@@ -112,7 +119,7 @@ GET /health
 
 ### 6.2 서버 상태 (Detailed Status)
 
-```
+```http
 GET /api/v1/status
 Authorization: Bearer <token>
 ```
@@ -120,6 +127,7 @@ Authorization: Bearer <token>
 상세 정보: worker 수, 버전, uptime, policy version.
 
 **응답 200:**
+
 ```json
 {
   "luagate_version": "0.1.0",
@@ -136,7 +144,7 @@ Authorization: Bearer <token>
 
 ### 6.3 정책 조회
 
-```
+```http
 GET /api/v1/policies
 Authorization: Bearer <token>
 ```
@@ -144,7 +152,8 @@ Authorization: Bearer <token>
 현재 canonical source (`conf/policies.yaml`) 반환.
 
 **응답 200:**
-```
+
+```http
 Content-Type: application/x-yaml
 ETag: "a3f2c1d4..."
 
@@ -160,12 +169,13 @@ rules:
 
 ### 6.4 정책 버전 조회
 
-```
+```http
 GET /api/v1/policies/version
 Authorization: Bearer <token>
 ```
 
 **응답 200:**
+
 ```json
 {
   "source_version": "b4e3f2a1...",
@@ -179,7 +189,7 @@ Authorization: Bearer <token>
 
 ### 6.5 정책 업데이트 (전체 파이프라인)
 
-```
+```http
 PUT /api/v1/policies
 Authorization: Bearer <token>
 Content-Type: application/x-yaml
@@ -190,6 +200,7 @@ If-Match: "<http_active_version>"
 ```
 
 **요청 제한**:
+
 - `Content-Length` 최대 1MB. 초과 시 → 413 `payload_too_large`
 - charset: UTF-8 only. BOM 미허용
 - 압축 미허용 (`Content-Encoding` 거부)
@@ -200,6 +211,7 @@ If-Match: "<http_active_version>"
 > **policy-engine.md와의 관계**: 파일 기반 reload(`POST /reload`)는 policy-engine.md §4.1의 7단계를 그대로 따른다. PUT의 [1] If-Match / [7] audit / [8] commit+file-write는 API 전용 단계다.
 
 **응답 200 (성공):**
+
 ```json
 {
   "previous_http_version": "a3f2c1d4...",
@@ -219,6 +231,7 @@ If-Match: "<http_active_version>"
 ```
 
 **응답 422 (검증 실패):**
+
 ```json
 {
   "error": "validation_failed",
@@ -228,9 +241,10 @@ If-Match: "<http_active_version>"
 ```
 
 **응답 409 (If-Match 불일치):**
+
 ```json
 {
-  "error": "reload_in_progress",
+  "error": "version_mismatch",
   "stage": "reload",
   "details": ["If-Match version mismatch: expected a3f2c1d4, got b4e3f2a1"]
 }
@@ -240,7 +254,7 @@ If-Match: "<http_active_version>"
 
 ### 6.6 정책 리로드
 
-```
+```http
 POST /api/v1/policies/reload
 Authorization: Bearer <token>
 If-Match: "<http_active_version>"   (선택)
@@ -249,6 +263,7 @@ If-Match: "<http_active_version>"   (선택)
 현재 `conf/policies.yaml`에서 reload 트리거 (ADR-003).
 
 **응답 200:**
+
 ```json
 {
   "previous_http_version": "a3f2c1d4...",
@@ -264,6 +279,7 @@ If-Match: "<http_active_version>"   (선택)
 ```
 
 **응답 500 (reload 실패 — LKG 유지):**
+
 ```json
 {
   "error": "reload_failed",
@@ -275,6 +291,7 @@ If-Match: "<http_active_version>"   (선택)
 ```
 
 **응답 409 (동시 reload 충돌):**
+
 ```json
 {
   "error": "reload_in_progress",
@@ -287,12 +304,13 @@ If-Match: "<http_active_version>"   (선택)
 
 ### 6.7 정책 상태 조회
 
-```
+```http
 GET /api/v1/policies/status
 Authorization: Bearer <token>
 ```
 
 **응답 200:**
+
 ```json
 {
   "active_http_version": "a3f2c1d4...",
@@ -313,7 +331,7 @@ Authorization: Bearer <token>
 
 ### 6.8 메트릭 (Prometheus)
 
-```
+```http
 GET /metrics
 ```
 
@@ -322,7 +340,8 @@ GET /metrics
 Prometheus text format (OpenMetrics 호환).
 
 **응답 200:**
-```
+
+```text
 # HELP luagate_http_requests_total Total HTTP requests processed
 # TYPE luagate_http_requests_total counter
 luagate_http_requests_total{action="allow"} 12345
@@ -345,18 +364,20 @@ log-schema.md §7 메트릭 전체 목록 참조.
 
 ### 6.9 감사 로그 조회
 
-```
+```http
 GET /api/v1/audit?offset=0&limit=100&since=2026-03-13T00:00:00Z&until=2026-03-14T00:00:00Z
 Authorization: Bearer <token>
 ```
 
 **쿼리 파라미터**:
+
 - `offset`: 건너뛸 항목 수 (기본 0)
 - `limit`: 최대 반환 항목 수 (기본 100, 최대 1000)
 - `since`: 시작 시각 (ISO-8601 UTC, 포함)
 - `until`: 종료 시각 (ISO-8601 UTC, 미포함)
 
 **응답 200:**
+
 ```json
 {
   "entries": [
@@ -387,12 +408,18 @@ Authorization: Bearer <token>
 기본 **off**. 필요 시 nginx.conf에서 explicit origin allowlist로만 활성화:
 
 ```nginx
-# conf/nginx.http.conf (admin server 블록)
-# CORS 기본 off — 아래 블록은 명시적으로 활성화할 때만 사용
+# nginx.conf (http {} 스코프)
+# LUAGATE_DASHBOARD_ORIGIN은 템플릿 렌더링(envsubst) 또는 nginx `env` + `map`으로 주입한다.
+# CORS 기본 off — 아래 map은 명시적으로 활성화할 때만 사용
 map $http_origin $cors_allow_origin {
     default "";
     "https://dashboard.example.com" "https://dashboard.example.com";
 }
+```
+
+```nginx
+# conf/nginx.http.conf (admin server/location 블록)
+# http {} 에서 정의된 $cors_allow_origin만 참조한다.
 
 add_header Access-Control-Allow-Origin $cors_allow_origin always;
 add_header Access-Control-Allow-Methods "GET, POST, PUT, OPTIONS" always;
@@ -404,6 +431,8 @@ if ($request_method = 'OPTIONS') {
     return 204;
 }
 ```
+
+`map`은 **http-context directive**이므로 admin `server` 블록 안에 inline으로 두지 않는다.
 
 > **wildcard origin (`*`) 금지**: Bearer token과 함께 사용 시 보안 취약점.
 

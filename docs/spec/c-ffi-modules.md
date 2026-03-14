@@ -1,6 +1,7 @@
 # C FFI Modules Specification
 
 > **ADR 참조**:
+>
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — C FFI 통합 방식 및 실패 정책
 
 ## 1. 개요
@@ -9,7 +10,7 @@ LuaGate는 고성능 처리가 필요한 모듈을 Rust로 구현하고 LuaJIT F
 이 문서는 **헤더 수준 ABI 계약서**다. Lua 바인딩 작성자와 Rust 구현자가 이 문서를 기준으로 한다.
 
 | 모듈 | 라이브러리 | 소스 | 역할 |
-|------|-----------|------|------|
+| --- | --- | --- | --- |
 | 보안 스캐너 | `luagate_scanner.so` | `src/scanner/` | 위협 탐지, OWASP 패턴 매칭 |
 | URL 디코더/정규화 | `luagate_decoder.so` | `src/decoder/` | 멀티레이어 인코딩 디코딩/NFKC 정규화 |
 | Stream 파서 | `luagate_stream.so` | `src/stream/` | 프로토콜 탐지, SNI 추출, CIDR radix tree |
@@ -34,7 +35,7 @@ enum luagate_result {
 **Lua 처리 규칙:**
 
 | return code | Lua 처리 |
-|-------------|---------|
+| --- | --- |
 | `LUAGATE_OK` | 정상 진행 |
 | `LUAGATE_NEED_MORE_DATA` | preread buffer 더 읽기 시도. timeout 초과 시 fail-closed |
 | `LUAGATE_INVALID_INPUT` | decode_partial 또는 fail-closed (함수별 상이, 아래 참조) |
@@ -47,7 +48,7 @@ enum luagate_result {
 > **caller-allocated output buffer 방식**: 모든 함수는 caller가 제공한 버퍼에 결과를 기록한다.
 > Rust가 메모리를 할당하여 반환하지 않는다 (malloc → free 패턴 대신).
 
-```
+```text
 caller 책임:
   - out 버퍼 할당 (스택 또는 Lua string.rep() 등)
   - out_cap 크기 제공
@@ -201,6 +202,7 @@ int luagate_normalize_nfkc(
 ### 6.1 native ssl_preread 검토 결정
 
 **결정**: `ngx_stream_ssl_preread_module`은 **기본 SNI 추출에 충분**하나, 다음 이유로 custom parser를 유지한다:
+
 - Fragmented ClientHello (여러 TLS record에 걸친 경우) 미지원
 - non-TLS 프로토콜 탐지 (`http`, `raw`) 불가
 - LUAGATE_NEED_MORE_DATA 상태 관리 필요
@@ -274,7 +276,7 @@ int luagate_radix_free(luagate_radix_t *tree);
 
 ### 6.4 Radix Tree Lifecycle (Hot Reload 연동)
 
-```
+```text
 [reload trigger]
         │
         ▼
@@ -368,7 +370,7 @@ percent-encoding = "2.3"
 ### 9.1 대상
 
 | 대상 | 도구 | Corpus |
-|------|------|--------|
+| --- | --- | --- |
 | `luagate_detect_protocol` | AFL++ 또는 libFuzzer | TLS ClientHello, HTTP request fragments, raw bytes |
 | `luagate_extract_sni` | libFuzzer | TLS record 변형 corpus |
 | `luagate_normalize_path` | libFuzzer | percent-encoded paths, Unicode bypass corpus |
@@ -454,19 +456,20 @@ end
 
 ```makefile
 # Makefile
+# 아래 예시의 <TAB>은 실제 탭 문자 1개를 의미한다.
 .PHONY: build-ffi fuzz-regression
 
 build-ffi:
-	cd src/scanner && cargo build --release
-	cd src/decoder && cargo build --release
-	cd src/stream  && cargo build --release
-	cp src/scanner/target/release/libluagate_scanner.so lib/
-	cp src/decoder/target/release/libluagate_decoder.so lib/
-	cp src/stream/target/release/libluagate_stream.so   lib/
+<TAB>cd src/scanner && cargo build --release
+<TAB>cd src/decoder && cargo build --release
+<TAB>cd src/stream  && cargo build --release
+<TAB>cp src/scanner/target/release/libluagate_scanner.so lib/
+<TAB>cp src/decoder/target/release/libluagate_decoder.so lib/
+<TAB>cp src/stream/target/release/libluagate_stream.so   lib/
 
 fuzz-regression:
-	cd src/scanner && cargo +nightly fuzz run fuzz_detect_protocol -- -max_total_time=10
-	cd src/decoder && cargo +nightly fuzz run fuzz_normalize_path  -- -max_total_time=10
+<TAB>cd src/stream  && cargo +nightly fuzz run fuzz_detect_protocol -- -max_total_time=10
+<TAB>cd src/decoder && cargo +nightly fuzz run fuzz_normalize_path  -- -max_total_time=10
 
 # nginx.conf에서 lib/ 디렉토리를 lua_package_cpath에 추가
 ```

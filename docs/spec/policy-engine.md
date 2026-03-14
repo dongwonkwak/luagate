@@ -1,6 +1,7 @@
 # Policy Engine Specification
 
 > **ADR 참조**:
+>
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
 > - [ADR-002 정책 평가 규칙 + 충돌 감지](../design/adr/ADR-002-policy-evaluation-conflict-detection.md)
 > - [ADR-003 정책 저장소 + Hot Reload](../design/adr/ADR-003-policy-storage-hot-reload.md)
@@ -72,19 +73,19 @@ stream_rules:                   # TCP 스트림 규칙 목록
 **공통 필드:**
 
 | 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
+| --- | --- | --- | --- |
 | `id` | string | ✓ | 규칙 고유 식별자 — **파일 전체(http + stream) 유일성** |
 | `description` | string | — | 설명 |
 | `enabled` | boolean | — | 기본값 `true`. `false`이면 평가에서 제외 (schema 검증은 수행, conflict detect에서 제외) |
 | `priority` | integer | ✓ | **낮은 숫자 = 높은 우선순위** (ADR-002). 동률은 `rule.id ASC` stable sort |
 | `scope` | map | — | 매칭 조건 (AND). 생략 시 catch-all (wildcard) |
 | `action` | enum | ✓ | HTTP: `allow` \| `deny`. Stream: `proxy` \| `deny` |
-| `tags` | list<string> | — | 분류용 태그. 평가에 영향 없음 |
+| `tags` | `list<string>` | — | 분류용 태그. 평가에 영향 없음 |
 
 **Stream 전용:**
 
 | 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
+| --- | --- | --- | --- |
 | `upstream` | string | proxy 시 ✓ | `"host:port"` 형식 |
 
 ### 2.2 Scope 키 및 매칭 연산자
@@ -92,7 +93,7 @@ stream_rules:                   # TCP 스트림 규칙 목록
 **HTTP 규칙 scope:**
 
 | scope 키 | 타입 | 매칭 연산자 | 설명 | 예시 |
-|----------|------|------------|------|------|
+| --- | --- | --- | --- | --- |
 | `path` | string | exact / prefix (`/*` suffix) | URL 경로. `/*`로 끝나면 prefix 매칭, 아니면 exact | `/health`, `/api/v1/*` |
 | `host` | string | exact / wildcard (`*.`) | 가상 호스트. `*.`로 시작하면 서브도메인 wildcard | `api.example.com`, `*.example.com` |
 | `method` | string \| list | exact (대소문자 무관) | HTTP 메서드 | `"GET"`, `["GET","POST"]` |
@@ -103,7 +104,7 @@ stream_rules:                   # TCP 스트림 규칙 목록
 **Stream 규칙 scope:**
 
 | scope 키 | 타입 | 매칭 연산자 | 설명 | 예시 |
-|----------|------|------------|------|------|
+| --- | --- | --- | --- | --- |
 | `src_ip_cidr` | string | CIDR 포함 여부 | 클라이언트 IP CIDR | `0.0.0.0/0` |
 | `dst_port` | string \| integer | exact(정수) / range(`"lo-hi"`) | 목적지 포트 | `443`, `"1024-65535"` |
 | `detected_protocol` | string | exact | 탐지된 프로토콜 enum | `tls`, `http`, `raw` |
@@ -113,13 +114,13 @@ stream_rules:                   # TCP 스트림 규칙 목록
 > scope 전체를 생략하면 catch-all 규칙이 된다.
 
 **`threat_type` 등 스캐너 출력 기반 scope 필드**는 현재 canonical scope에 포함되지 않는다.
-향후 도입 시 별도 ADR/appendix로 정의한다 (`<!-- ADR 필요 -->` 마커 유지).
+향후 도입 시 별도 ADR/appendix로 정의한다 (`ADR 필요` 마커 유지).
 
 ## 3. 정책 평가 알고리즘 (ADR-002)
 
 ### 3.1 HTTP 규칙 평가
 
-```
+```text
 function evaluate_http(request):
     rules = get_active_http_rules()  # enabled=true만, priority 오름차순 정렬
 
@@ -135,7 +136,7 @@ function evaluate_http(request):
 
 ### 3.2 Stream 규칙 평가
 
-```
+```text
 function evaluate_stream(connection):
     rules = get_active_stream_rules()  # enabled=true만, priority 오름차순 정렬
 
@@ -154,7 +155,7 @@ function evaluate_stream(connection):
 모든 scope 조건이 AND로 평가된다.
 
 | scope 키 | 매칭 방식 |
-|----------|----------|
+| --- | --- |
 | `path` | `/*` suffix → prefix 매칭, 그 외 exact |
 | `host` | `*.` prefix → 서브도메인 wildcard, 그 외 exact |
 | `method` | exact (대소문자 무관) |
@@ -178,7 +179,7 @@ scope 조건이 없는 규칙은 모든 요청에 매칭 (catch-all).
 
 ### 4.1 로드 흐름 (7단계)
 
-```
+```text
 load_policy(filepath):
     [1] 파일 읽기 (io.open)
     [2] YAML 파싱 (lyaml 또는 lua-yaml)
@@ -200,7 +201,6 @@ load_policy(filepath):
 
 > **Partial success 범위**: [7] commit 단계에 한정.
 > [3] validate / [6] compile은 **전체 또는 전무(all-or-nothing)** — 하나라도 실패 시 전체 거부.
-
 > **Reload 실패 시**: 기존 active 정책(LKG) 유지. 실패한 버전은 폐기.
 > LKG(Last-Known-Good)는 첫 성공 reload 후 형성되며, 이후 reload 실패 시 복원 대상이 된다.
 
@@ -235,14 +235,14 @@ end
 
 `active_version`은 정책 파일 전체(raw bytes) 기준 **SHA256 hex string(lowercase, 64자)**로 정의한다.
 
-```
+```text
 active_version = sha256_hex(file_raw_bytes)
 -- 예: "a3f9c2d1e8b4071f6a5d39c0e7b12345..."
 ```
 
 - HTTP 서브시스템 active version: `luagate_policy["http:active_version"]`
 - Stream 서브시스템 active version: `luagate_policy["stream:active_version"]`
-- If-Match 비교 대상: 각 서브시스템의 active version (subsystem별 독립)
+- Admin API의 If-Match 비교 대상: `luagate_policy["http:active_version"]` (즉, `GET /api/v1/policies`의 `ETag`)
 
 ### 4.4 Hot Reload (ADR-003)
 
@@ -325,7 +325,7 @@ function detect_shadowed(rules):
 기록 필드 정의는 [admin-api.md — 감사 로그 섹션](./admin-api.md#감사-로그)을 참조한다.
 
 | 결과 | 기록 필드 |
-|------|---------|
+| --- | --- |
 | 성공 | `timestamp`, `actor`, `action=reload_success`, `previous_version`, `new_version`, `subsystem` |
 | 실패 | `timestamp`, `actor`, `action=reload_failure`, `stage`, `reason`, `current_version` |
 | Partial | `timestamp`, `actor`, `action=reload_partial`, `http_result`, `stream_result` |
@@ -336,9 +336,9 @@ function detect_shadowed(rules):
 ## 7. 관리 API 연동
 
 | 엔드포인트 | 기능 |
-|-----------|------|
+| --- | --- |
 | `GET /api/v1/policies` | staged 정책 YAML 반환 (파일 기준 canonical source) |
-| `PUT /api/v1/policies` | 새 정책 저장 + validate + compile + commit. `If-Match: <subsystem active_version>` 필수 |
+| `PUT /api/v1/policies` | 새 정책 저장 + validate + compile + commit. `If-Match: <http_active_version>` 필수 |
 | `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거. `If-Match` 선택 |
 | `GET /api/v1/policies/version` | 서브시스템별 active_version + ETag 반환 |
 | `GET /api/v1/policies/status` | 버전, 충돌 목록, 마지막 reload 시각 |

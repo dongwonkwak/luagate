@@ -9,7 +9,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 ## 2. 프로세스 모델
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │  OS Process: nginx (OpenResty)                              │
 │                                                             │
@@ -52,7 +52,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 ### 3.1 Zone 목록 및 역할
 
 | Zone | 역할 | Key Model | Write Owner | Atomicity Unit |
-|------|------|-----------|-------------|----------------|
+| --- | --- | --- | --- | --- |
 | `luagate_policy` | 정책 버전 포인터 + 버전별 blob | `http:active_version`, `stream:active_version`, `policy:<ver>:blob`, `policy:<ver>:meta` | reload worker | active_version pointer 교체 단위 |
 | `luagate_stream_metrics` | Stream 메트릭 | `stream:metrics:*` | 각 worker (incr) | 키 단위 |
 | `luagate_metrics` | HTTP 메트릭 | `metrics:*` | 각 worker (incr) | 키 단위 |
@@ -65,7 +65,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 ### 3.2 `luagate_policy` Versioned Keyspace 구조
 
-```
+```text
 -- 서브시스템별 active version pointer (단순 string 값)
 luagate_policy["http:active_version"]   = "<sha256 hex>"   -- HTTP 활성 버전
 luagate_policy["stream:active_version"] = "<sha256 hex>"   -- Stream 활성 버전
@@ -102,7 +102,7 @@ end
 
 ### 3.4 LKG (Last-Known-Good) 형성 및 사용
 
-- **형성**: 첫 번째 성공 reload 완료 시 LKG 포인터를 `envelope.lkg_version`에 기록
+- **형성**: 첫 번째 성공 reload 완료 시 LKG 포인터를 `luagate_policy["policy:<active_sha256>:meta"]`의 `lkg_version` 필드에 기록
 - **사용**: 다음 reload 실패(validate/compile/commit 오류) 시 현재 active 정책을 LKG로 복원
 - **Cold start 조건**: parse + validate + conflict_detect + compile 단계 중 하나라도 실패 시 LKG 사용. LKG 없으면 fail-closed (기동 거부)
 
@@ -110,7 +110,7 @@ end
 
 ### 4.1 HTTP 파이프라인
 
-```
+```text
 Client
   │
   ▼
@@ -144,7 +144,7 @@ Client Response
 
 ### 4.2 Stream(TCP) 파이프라인
 
-```
+```text
 Client TCP Connect
   │
   ▼
@@ -167,7 +167,7 @@ Client TCP Connect
 ## 5. 실패 정책 표
 
 | 실패 유형 | 실패 모드 | 비고 |
-|---------|---------|------|
+| --- | --- | --- |
 | 정책 decode 에러 | **fail-closed** (기존 best-effort degrade 폐기) | LKG로 복원 또는 기동 거부 |
 | 정책 parse 에러 | fail-closed | |
 | 정책 validate 에러 | fail-closed (all-or-nothing) | |
@@ -182,7 +182,7 @@ Client TCP Connect
 ## 6. 기술 스택
 
 | 계층 | 기술 | 버전 |
-|------|------|------|
+| --- | --- | --- |
 | 웹 서버/런타임 | OpenResty | 1.25.x |
 | 스크립팅 언어 | LuaJIT | 2.1 |
 | 고성능 모듈 | Rust (cdylib) | 1.75+ |
@@ -193,7 +193,7 @@ Client TCP Connect
 
 ## 7. 디렉토리 구조
 
-```
+```text
 luagate/
 ├── conf/
 │   ├── nginx.conf              # Nginx 메인 설정
@@ -236,7 +236,7 @@ luagate/
 Admin API는 server block identity 기반으로 data plane에서 분리된다.
 
 | 항목 | 설명 |
-|------|------|
+| --- | --- |
 | **설정값** | 환경변수/파일로 주입 가능한 값 (토큰, 포트, 로그 레벨 등) |
 | **불변규약** | 코드에 하드코딩된 정책 불변식 (fail-closed, 감사 로그 드롭 금지 등) |
 | **정책 우회 조건** | Admin 서버는 별도 server block으로 분리. 해당 server block에서는 ADR-002 정책 평가 제외 (server block identity로 구분) |
@@ -246,7 +246,7 @@ Admin API는 server block identity 기반으로 data plane에서 분리된다.
 LuaGate는 단일 인스턴스 단위로 배포된다 (ADR-001).
 수평 확장은 로드밸런서 뒤에 복수 인스턴스를 배치하는 방식으로 달성한다:
 
-```
+```text
 Internet
     │
     ▼
