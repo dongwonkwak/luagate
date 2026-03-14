@@ -38,3 +38,9 @@ result-*
 # Test output
 tests/.output/
 *.log
+
+# Agent memory (에이전트별 동적 학습 결과, 환경마다 다름)
+.claude/agent-memory/
+
+# 리뷰 파일 (임시, 요약은 Linear에 보존)
+.claude/reviews/
