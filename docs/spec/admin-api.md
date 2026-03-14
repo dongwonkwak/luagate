@@ -1,6 +1,7 @@
 # Admin API Specification
 
 > **ADR 참조**:
+>
 > - [ADR-003 정책 저장소 + Hot Reload](../design/adr/ADR-003-policy-storage-hot-reload.md)
 > - [ADR-004 로그/메트릭 + 관리면 보안](../design/adr/ADR-004-log-metrics-admin-security.md)
 
@@ -8,84 +9,153 @@
 
 Admin API는 LuaGate의 관리 인터페이스로, 정책 관리, 상태 조회, 메트릭 노출을 담당한다.
 
-- **바인딩**: `127.0.0.1:8080` (ADR-004 §6.1)
+- **바인딩**: `127.0.0.1:8080` (ADR-004 §6.1) — server block identity로 data plane과 분리
 - **인증**: Static Bearer Token (ADR-004 §6.2)
 - **프로토콜**: HTTP/1.1
 - **구현**: `lua/luagate/admin/`
+- **CORS**: 기본 off. 필요 시 explicit origin allowlist로만 활성화
 
 ## 2. 인증
 
-모든 요청에 `Authorization` 헤더 필수 (GET /health 제외):
+모든 요청에 `Authorization` 헤더 필수 (`GET /health` 제외 — 아래 각 엔드포인트 참조):
 
-```
+```http
 Authorization: Bearer <token>
 ```
 
-토큰은 환경 변수 `LUAGATE_ADMIN_TOKEN`에서 로드.
+**Static token 관리 규칙**:
+
+- 환경변수 `LUAGATE_ADMIN_TOKEN` 또는 파일(마운트) 방식으로 주입
+- 최소 32바이트 entropy (256-bit random)
+- 재기동 없는 교체: **Phase 2** (현재는 재기동 필요)
+- 토큰은 로그/응답 바디에 절대 포함하지 않음
+
 인증 실패 응답:
 
 ```json
 HTTP/1.1 401 Unauthorized
 Content-Type: application/json
 
-{
-  "error": "Unauthorized",
-  "message": "Invalid or missing Bearer token"
-}
+{"error": "unauthorized", "stage": "auth", "details": ["missing or invalid bearer token"]}
 ```
 
 인증 실패 시 감사 로그 기록 (ADR-004 §6.3).
 
-## 3. 공통 응답 형식
+## 3. 에러 응답 Contract
+
+모든 에러 응답의 JSON body shape:
 
 ```json
 {
-  "ok": true | false,
-  "data": { ... },      // 성공 시
-  "error": "...",       // 실패 시
-  "message": "..."      // 실패 시 상세
+  "error": "<snake_case_error_code>",
+  "stage": "<pipeline_stage>",
+  "details": ["<detail_message>", ...]
 }
 ```
 
-## 4. 엔드포인트
+| error 코드 | stage | HTTP 상태 |
+| --- | --- | --- |
+| `unauthorized` | `auth` | 401 |
+| `validation_failed` | `validate` | 422 |
+| `conflict_detected` | `conflict_detect` | 422 |
+| `compile_failed` | `compile` | 422 |
+| `commit_failed` | `commit` | 500 |
+| `reload_failed` | `reload` | 500 |
+| `version_mismatch` | `reload` | 409 |
+| `reload_in_progress` | `reload` | 409 |
+| `audit_write_failed` | `audit` | 500 |
+| `not_found` | `routing` | 404 |
+| `method_not_allowed` | `routing` | 405 |
+| `payload_too_large` | `request` | 413 |
+| `internal_error` | `internal` | 500 |
 
-### 4.1 헬스체크
+> **감사 기록 실패 시**: mutation/reload를 **거부**한다. `audit_write_failed` 에러 반환.
+> ADR-004 드롭 비허용 원칙: 감사 로그 없이 상태 변경 불가.
 
-```
+## 4. PUT vs POST /reload 상태 머신
+
+**확정된 설계:**
+
+| 엔드포인트 | 동작 | If-Match |
+| --- | --- | --- |
+| `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`<http_active_version>` 형식) |
+| `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거만 | 선택 |
+
+> **PUT /api/v1/policies**: 저장 + validate + conflict_detect + compile + commit을 한 번에 수행.
+> 실패 시 canonical file을 변경하지 않는다. Partial commit은 §policy-engine.md commit 단계 규칙 따름.
+
+## 5. ETag / If-Match
+
+- `GET /api/v1/policies` 응답에 `ETag: "<http_active_version>"` 포함
+- `PUT /api/v1/policies` 요청에 `If-Match: "<http_active_version>"` 필수
+  - 불일치 시 → `409 Conflict` + `error: "version_mismatch"`
+- `POST /api/v1/policies/reload`에 `If-Match` 선택. 제공 시 불일치이면 `409 Conflict`
+  - 불일치 시 → `error: "version_mismatch"`
+- Admin API의 optimistic concurrency 기준값은 `GET /api/v1/policies` 응답의 `ETag`와 동일한 HTTP active version이다.
+
+## 6. 엔드포인트
+
+### 6.1 헬스체크 (Liveness)
+
+```http
 GET /health
 ```
 
-인증 불필요. 서버 기동 상태 확인용.
+**인증 불필요**. 서버 liveness 확인용. 상세 정보 미포함.
 
 **응답 200:**
+
+```json
+{"status": "ok"}
+```
+
+**응답 503** (unhealthy):
+
+```json
+{"status": "unhealthy", "reason": "policy not loaded"}
+```
+
+---
+
+### 6.2 서버 상태 (Detailed Status)
+
+```http
+GET /api/v1/status
+Authorization: Bearer <token>
+```
+
+상세 정보: worker 수, 버전, uptime, policy version.
+
+**응답 200:**
+
 ```json
 {
-  "ok": true,
-  "data": {
-    "status": "ok",
-    "policy_version": "a3f2c1d4e5b6...",
-    "uptime_seconds": 3600
-  }
+  "luagate_version": "0.1.0",
+  "uptime_seconds": 3600,
+  "worker_count": 4,
+  "active_http_version": "a3f2c1d4...",
+  "active_stream_version": "b4e3f2a1...",
+  "last_reload_at": "2026-03-14T07:00:00Z",
+  "last_reload_status": "success"
 }
 ```
 
 ---
 
-### 4.2 정책 조회
+### 6.3 정책 조회
 
-```
+```http
 GET /api/v1/policies
 Authorization: Bearer <token>
 ```
 
-현재 staged 정책 YAML 반환.
-
-> **의미**: canonical source는 `conf/policies.yaml` 파일이므로, `GET /api/v1/policies`는 디스크에 저장된 **staged 정책**을 조회한다.
-> 현재 트래픽에 적용 중인 버전은 `GET /api/v1/policies/status`의 `active_policy_version`으로 확인한다.
+현재 canonical source (`conf/policies.yaml`) 반환.
 
 **응답 200:**
-```
+
+```http
 Content-Type: application/x-yaml
+ETag: "a3f2c1d4..."
 
 version: "1.0"
 global:
@@ -97,224 +167,278 @@ rules:
 
 ---
 
-### 4.3 정책 업데이트
+### 6.4 정책 버전 조회
 
+```http
+GET /api/v1/policies/version
+Authorization: Bearer <token>
 ```
+
+**응답 200:**
+
+```json
+{
+  "source_version": "b4e3f2a1...",
+  "active_http_version": "a3f2c1d4...",
+  "active_stream_version": "a3f2c1d4...",
+  "etag": "a3f2c1d4..."
+}
+```
+
+---
+
+### 6.5 정책 업데이트 (전체 파이프라인)
+
+```http
 PUT /api/v1/policies
 Authorization: Bearer <token>
 Content-Type: application/x-yaml
+Content-Length: <bytes>
+If-Match: "<http_active_version>"
 
 <새 정책 YAML>
 ```
 
-1. Schema 검증
-2. 충돌/음영 감지 (경고 수집)
-3. `conf/policies.yaml` atomic write (ADR-003)
-4. `staged_policy_version` 계산 (SHA256 of new policy)
-5. 감사 로그 기록 (`policy_update` 이벤트, `staged_policy_version` 포함)
-6. **reload는 별도로 트리거** — 이 엔드포인트는 파일만 저장하며 active_policy_version은 변경하지 않음
+**요청 제한**:
 
-> **staged vs active 구분**:
-> - `staged_policy_version`: `PUT /api/v1/policies`로 저장된 정책의 버전 해시. 아직 활성화되지 않음.
-> - `active_policy_version`: 현재 요청을 처리하는 정책 버전. `POST /api/v1/policies/reload` 성공 후 변경됨.
+- `Content-Length` 최대 1MB. 초과 시 → 413 `payload_too_large`
+- charset: UTF-8 only. BOM 미허용
+- 압축 미허용 (`Content-Encoding` 거부)
 
-**응답 200:**
+처리 순서: [1] If-Match 확인 → [2] parse → [3] validate → [4] conflict_detect → [5] hash(SHA256) → [6] compile → [7] audit write → [8] commit + canonical file write
+
+> **hash 단계**: [5]에서 업로드된 YAML 전체의 SHA256을 계산하여 new_version으로 사용. If-Match 불일치가 있으면 [1]에서 409 반환.
+> **policy-engine.md와의 관계**: 파일 기반 reload(`POST /reload`)는 policy-engine.md §4.1의 7단계를 그대로 따른다. PUT의 [1] If-Match / [7] audit / [8] commit+file-write는 API 전용 단계다.
+
+**응답 200 (성공):**
+
 ```json
 {
-  "ok": true,
-  "data": {
-    "staged_policy_version": "b4e3f2a1...",
-    "active_policy_version": "a3f2c1d4...",
-    "warnings": [
-      {
-        "type": "conflict",
-        "rule_ids": ["rule-a", "rule-b"],
-        "message": "same scope, priority, opposing action"
-      }
-    ]
-  }
+  "previous_http_version": "a3f2c1d4...",
+  "previous_stream_version": "a3f2c1d4...",
+  "new_http_version": "b4e3f2a1...",
+  "new_stream_version": "b4e3f2a1...",
+  "http_result": "committed",
+  "stream_result": "committed",
+  "warnings": [
+    {
+      "type": "conflict",
+      "rule_ids": ["rule-a", "rule-b"],
+      "message": "same scope, priority, opposing action"
+    }
+  ]
 }
 ```
 
-**응답 400 (검증 실패):**
+**응답 422 (검증 실패):**
+
 ```json
 {
-  "ok": false,
-  "error": "ValidationError",
-  "message": "rule 'my-rule': action must be 'allow' or 'deny'"
+  "error": "validation_failed",
+  "stage": "validate",
+  "details": ["rule 'my-rule': action must be 'allow' or 'deny'"]
+}
+```
+
+**응답 409 (If-Match 불일치):**
+
+```json
+{
+  "error": "version_mismatch",
+  "stage": "reload",
+  "details": ["If-Match version mismatch: expected a3f2c1d4, got b4e3f2a1"]
 }
 ```
 
 ---
 
-### 4.4 정책 리로드
+### 6.6 정책 리로드
 
-```
+```http
 POST /api/v1/policies/reload
 Authorization: Bearer <token>
+If-Match: "<http_active_version>"   (선택)
 ```
 
-현재 `conf/policies.yaml`을 즉시 reload한다 (ADR-003).
+현재 `conf/policies.yaml`에서 reload 트리거 (ADR-003).
 
 **응답 200:**
+
 ```json
 {
-  "ok": true,
-  "data": {
-    "policy_version": "b4e3f2a1...",
-    "reloaded_at": "2026-03-13T12:34:56Z",
-    "warnings_count": 0
-  }
+  "previous_http_version": "a3f2c1d4...",
+  "previous_stream_version": "a3f2c1d4...",
+  "new_http_version": "b4e3f2a1...",
+  "new_stream_version": "b4e3f2a1...",
+  "http_result": "committed",
+  "stream_result": "committed",
+  "reloaded_at": "2026-03-14T07:00:00Z",
+  "warnings_count": 0,
+  "errors": []
 }
 ```
 
-**응답 500 (reload 실패 — last-known-good 유지):**
+**응답 500 (reload 실패 — LKG 유지):**
+
 ```json
 {
-  "ok": false,
-  "error": "ReloadFailed",
-  "message": "YAML parse error at line 42: unexpected token",
-  "current_policy_version": "a3f2c1d4..."
+  "error": "reload_failed",
+  "stage": "compile",
+  "details": ["YAML parse error at line 42: unexpected token"],
+  "current_http_version": "a3f2c1d4...",
+  "current_stream_version": "a3f2c1d4..."
 }
 ```
 
 **응답 409 (동시 reload 충돌):**
+
 ```json
 {
-  "ok": false,
-  "error": "ReloadInProgress",
-  "message": "another reload is already in progress"
+  "error": "reload_in_progress",
+  "stage": "reload",
+  "details": ["another reload is already in progress"]
 }
 ```
 
 ---
 
-### 4.5 정책 상태 조회
+### 6.7 정책 상태 조회
 
-```
+```http
 GET /api/v1/policies/status
 Authorization: Bearer <token>
 ```
 
 **응답 200:**
+
 ```json
 {
-  "ok": true,
-  "data": {
-    "active_policy_version": "a3f2c1d4...",
-    "staged_policy_version": "b4e3f2a1...",
-    "last_reload_at": "2026-03-13T12:00:00Z",
-    "last_reload_status": "success",
-    "rules_count": 42,
-    "stream_rules_count": 5,
-    "conflicts": [
-      {
-        "type": "conflict",
-        "rule_ids": ["rule-a", "rule-b"]
-      }
-    ],
-    "shadowed": ["narrow-allow"]
-  }
+  "active_http_version": "a3f2c1d4...",
+  "active_stream_version": "a3f2c1d4...",
+  "source_version": "b4e3f2a1...",
+  "last_reload_at": "2026-03-14T07:00:00Z",
+  "last_reload_status": "success",
+  "http_rules_count": 42,
+  "stream_rules_count": 5,
+  "conflicts": [
+    {"type": "conflict", "rule_ids": ["rule-a", "rule-b"]}
+  ],
+  "shadowed": ["narrow-allow"]
 }
 ```
 
 ---
 
-### 4.6 메트릭 (Prometheus)
+### 6.8 메트릭 (Prometheus)
 
-```
+```http
 GET /metrics
-Authorization: Bearer <token>
 ```
+
+**인증**: Bearer auth 적용. (GET /health와 달리 인증 필요)
 
 Prometheus text format (OpenMetrics 호환).
 
 **응답 200:**
-```
-# HELP luagate_requests_total Total HTTP requests processed
-# TYPE luagate_requests_total counter
-luagate_requests_total{action="allow",method="GET",route="/api/v1/users"} 12345
-luagate_requests_total{action="deny",method="GET",route="/admin"} 23
 
-# HELP luagate_blocked_total Total blocked requests
-# TYPE luagate_blocked_total counter
-luagate_blocked_total{threat_type="sqli",rule_id="deny-sqli"} 145
-
-# HELP luagate_latency_seconds Request latency
-# TYPE luagate_latency_seconds histogram
-luagate_latency_seconds_bucket{le="0.001"} 9000
-...
+```text
+# HELP luagate_http_requests_total Total HTTP requests processed
+# TYPE luagate_http_requests_total counter
+luagate_http_requests_total{action="allow"} 12345
+luagate_http_requests_total{action="deny"} 23
 
 # HELP luagate_active_connections Active connections
 # TYPE luagate_active_connections gauge
 luagate_active_connections{type="http"} 25
 luagate_active_connections{type="stream"} 3
+
+# HELP luagate_shared_dict_capacity_bytes Shared dict capacity
+# TYPE luagate_shared_dict_capacity_bytes gauge
+luagate_shared_dict_capacity_bytes{zone="luagate_policy"} 10485760
+luagate_shared_dict_free_bytes{zone="luagate_policy"} 8388608
 ```
 
-ADR-004 §4.3 메트릭 전체 목록 참조.
+log-schema.md §7 메트릭 전체 목록 참조.
 
 ---
 
-### 4.7 감사 로그 조회
+### 6.9 감사 로그 조회
 
-```
-GET /api/v1/audit?limit=100&since=2026-03-13T00:00:00Z
+```http
+GET /api/v1/audit?offset=0&limit=100&since=2026-03-13T00:00:00Z&until=2026-03-14T00:00:00Z
 Authorization: Bearer <token>
 ```
 
+**쿼리 파라미터**:
+
+- `offset`: 건너뛸 항목 수 (기본 0)
+- `limit`: 최대 반환 항목 수 (기본 100, 최대 1000)
+- `since`: 시작 시각 (ISO-8601 UTC, 포함)
+- `until`: 종료 시각 (ISO-8601 UTC, 미포함)
+
 **응답 200:**
+
 ```json
 {
-  "ok": true,
-  "data": {
-    "entries": [
-      {
-        "timestamp": "2026-03-13T12:34:56Z",
-        "event": "policy_reload",
-        "src_ip": "127.0.0.1",
-        "trigger": "api",
-        "status": "success",
-        "policy_version": "b4e3f2a1..."
-      }
-    ],
-    "total": 1
-  }
+  "entries": [
+    {
+      "timestamp": "2026-03-14T07:00:00Z",
+      "event": "policy_reload_success",
+      "actor_ip": "127.0.0.1",
+      "new_version": "b4e3f2a1...",
+      "previous_version": "a3f2c1d4...",
+      "subsystem": "http"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 100
 }
 ```
 
-## 5. CORS 설정 (ADR-004 §6.4)
+## 7. 감사 로그 (audit.log) 섹션
+
+감사 로그 상세 스키마: [log-schema.md §5](./log-schema.md#5-감사-로그-auditlog-adr-004-63)
+
+> **감사 로그 드롭 금지**: audit 기록 실패 = mutation/reload 거부.
+> 이 규칙은 코드 불변식이며 설정으로 우회 불가.
+
+## 8. CORS
+
+기본 **off**. 필요 시 nginx.conf에서 explicit origin allowlist로만 활성화:
 
 ```nginx
-# conf/nginx.http.conf (admin server 블록)
+# nginx.conf (http {} 스코프)
 # LUAGATE_DASHBOARD_ORIGIN은 템플릿 렌더링(envsubst) 또는 nginx `env` + `map`으로 주입한다.
-add_header Access-Control-Allow-Origin $cors_allow_origin always;
-add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
-add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
-add_header Vary "Origin" always;  # CDN/프록시 캐시가 Origin별로 응답을 구분하도록
+# CORS 기본 off — 아래 map은 명시적으로 활성화할 때만 사용
+map $http_origin $cors_allow_origin {
+    default "";
+    "https://dashboard.example.com" "https://dashboard.example.com";
+}
+```
 
-# OPTIONS preflight는 인증(Bearer token) 없이 허용
-# preflight에는 Authorization 헤더가 없으므로 auth 미들웨어에서 OPTIONS를 예외 처리해야 함
+```nginx
+# conf/nginx.http.conf (admin server/location 블록)
+# http {} 에서 정의된 $cors_allow_origin만 참조한다.
+
+add_header Access-Control-Allow-Origin $cors_allow_origin always;
+add_header Access-Control-Allow-Methods "GET, POST, PUT, OPTIONS" always;
+add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+add_header Vary "Origin" always;
+
 if ($request_method = 'OPTIONS') {
     add_header Access-Control-Max-Age 86400;
     return 204;
 }
 ```
 
-## 6. 에러 코드 표
+`map`은 **http-context directive**이므로 admin `server` 블록 안에 inline으로 두지 않는다.
 
-| HTTP Status | error 문자열 | 설명 |
-|------------|-------------|------|
-| 400 | ValidationError | 정책 스키마 검증 실패 |
-| 409 | ReloadInProgress | 다른 worker가 reload lock을 보유 중 |
-| 401 | Unauthorized | 인증 실패/누락 |
-| 404 | NotFound | 존재하지 않는 엔드포인트 |
-| 405 | MethodNotAllowed | 허용되지 않은 HTTP 메서드 |
-| 500 | InternalError | 서버 내부 오류 |
-| 500 | ReloadFailed | 정책 reload 실패 |
+> **wildcard origin (`*`) 금지**: Bearer token과 함께 사용 시 보안 취약점.
 
-## 7. 의존성
+## 9. 의존성
 
 - [ADR-003](../design/adr/ADR-003-policy-storage-hot-reload.md) — 정책 reload 흐름
 - [ADR-004](../design/adr/ADR-004-log-metrics-admin-security.md) — 보안 설정, 감사 로그
-- [spec/policy-engine.md](./policy-engine.md) — 정책 검증/평가
-- [spec/log-schema.md](./log-schema.md) — 감사 로그 스키마
+- [spec/policy-engine.md](./policy-engine.md) — 정책 검증/평가, If-Match 대상
+- [spec/log-schema.md](./log-schema.md) — 감사 로그 스키마, 메트릭 목록

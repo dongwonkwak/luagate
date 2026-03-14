@@ -55,3 +55,19 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 2026-03-14 | DON-106 | Git hooks 설정 | `.pre-commit-config.yaml`, `commitlint.config.js`, `flake.nix`, `Makefile` | 완료 |
 | 2026-03-14 | DON-110 | test/doc strategy 강화 | `docs/spec/test-strategy.md`, `docs/spec/doc-strategy.md`, `Makefile` | 리뷰 반영 |
 | 2026-03-14 | DON-111 | CONTRIBUTING.md 생성 | `CONTRIBUTING.md`, `README.md` | 완료 |
+
+## Epic 5: Spec Review Fixes (DON-121)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-14 | DON-99 | 정책 의미론 닫기 | `docs/spec/policy-engine.md` | YAML schema, match operators, partial semantics |
+| 2026-03-14 | DON-100 | 원자성 모델 정리 | `docs/spec/architecture.md` | envelope/state zone, Stream metrics, LKG, 실패 정책 |
+| 2026-03-14 | DON-101 | ADR-004 전체 반영 | `docs/spec/http-pipeline.md`, `docs/spec/stream-pipeline.md` | 27/18필드, decision_source, ngx.var 목록 |
+| 2026-03-14 | DON-102 | 파이프라인 수정 | `docs/spec/http-pipeline.md`, `docs/spec/stream-pipeline.md` | failure taxonomy, detection miss 매트릭스 |
+| 2026-03-14 | DON-112 | log-schema 전면 수정 | `docs/spec/log-schema.md` | path_raw, null 계약, 기본값 전략, 예시 JSON 6개 |
+| 2026-03-14 | DON-113 | security-scanner + admin-api 수정 | `docs/spec/security-scanner.md`, `docs/spec/admin-api.md` | 에러 3계층, 스캔 계약, 상태 머신, 에러 contract |
+| 2026-03-14 | DON-114 | c-ffi-modules ABI 문서 격상 | `docs/spec/c-ffi-modules.md` | 헤더 시그니처, 에러 enum, radix lifecycle, fuzzing |
+
+## 현재 대기 중
+
+- DON-121: design 리뷰 대기 중 (`.claude/reviews/DON-121-design-review.md`)
