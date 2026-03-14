@@ -1,4 +1,4 @@
-.PHONY: build test test-unit lint bench up down implement install-hooks clean
+.PHONY: build test test-unit test-unit-lua test-unit-c test-integration-http test-integration-stream test-reload lint bench bench-http bench-stream up down implement install-hooks clean
 
 # ── Build ──────────────────────────────────────────────────────────────────
 build:
@@ -7,13 +7,33 @@ build:
 	cmake --build csrc/build
 
 # ── Test ───────────────────────────────────────────────────────────────────
-test: test-unit
-	@echo "==> Running integration tests..."
-	busted --config-file=.busted tests/integration
+test: test-unit test-integration-http test-integration-stream test-reload
 
-test-unit:
-	@echo "==> Running Lua unit tests..."
+test-unit: test-unit-lua test-unit-c
+
+test-unit-lua:
+	@echo "==> Running Lua unit tests (busted)..."
 	busted --config-file=.busted tests/unit
+
+test-unit-c:
+	@echo "==> Running C unit tests (CMocka)..."
+	@if [ -f csrc/build/CTestTestfile.cmake ]; then \
+	  ctest --test-dir csrc/build --output-on-failure; \
+	else \
+	  echo "  (skipping C tests — run 'make build' first)"; \
+	fi
+
+test-integration-http:
+	@echo "==> Running HTTP integration tests (Test::Nginx)..."
+	prove -r tests/integration/http/
+
+test-integration-stream:
+	@echo "==> Running Stream integration tests (Test::Nginx::Stream)..."
+	prove -r tests/integration/stream/
+
+test-reload:
+	@echo "==> Running Hot Reload tests..."
+	busted --config-file=.busted tests/unit/reload/
 
 # ── Lint ───────────────────────────────────────────────────────────────────
 lint:
@@ -29,9 +49,15 @@ lint:
 	markdownlint docs/
 
 # ── Benchmark ──────────────────────────────────────────────────────────────
-bench:
-	@echo "==> Running benchmarks..."
-	wrk -t4 -c100 -d30s http://localhost:8080/bench
+bench: bench-http bench-stream
+
+bench-http:
+	@echo "==> Running HTTP benchmark (wrk)..."
+	wrk -t4 -c100 -d30s http://localhost:8080/api/v1/users
+
+bench-stream:
+	@echo "==> Running Stream benchmark..."
+	@echo "  (Stream benchmark tool TBD)"
 
 # ── Docker ─────────────────────────────────────────────────────────────────
 up:

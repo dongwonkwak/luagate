@@ -6,21 +6,34 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 
 | 계층 | 프레임워크 | 범위 | 속도 |
 |------|-----------|------|------|
-| 단위 테스트 | busted (Lua) + cargo test (Rust) | 함수/모듈 | 빠름 |
-| 통합 테스트 | Docker + pytest | HTTP/TCP 엔드투엔드 | 중간 |
-| 부하 테스트 | wrk / k6 | 성능/처리량 | 느림 (선택) |
+| 단위 테스트 | busted (Lua) + CMocka (C) + cargo test (Rust) | 함수/모듈 | 빠름 |
+| 통합 테스트 | Test::Nginx (HTTP/Stream) | HTTP/TCP 엔드투엔드 | 중간 |
+| 부하 테스트 | wrk / vegeta | 성능/처리량 | 느림 (선택) |
 
-## 2. 단위 테스트 (§7.1)
+## 2. Makefile 명령 계약
 
-### 2.1 Lua 단위 테스트 — busted
+| 명령 | 내용 | PR blocking |
+|------|------|------------|
+| `make test` | 전체 (unit + integration) | Yes |
+| `make test-unit` | Lua + C 단위 테스트 | Yes |
+| `make test-unit-lua` | busted 단위 테스트만 | Yes |
+| `make test-unit-c` | CMocka 단위 테스트만 | Yes |
+| `make test-integration-http` | HTTP 통합 (Test::Nginx) | Yes |
+| `make test-integration-stream` | Stream 통합 (Test::Nginx::Stream) | Yes |
+| `make test-reload` | Hot reload 전용 테스트 | Yes |
+| `make bench` | 전체 벤치마크 (smoke) | No |
+| `make bench-http` | HTTP 벤치마크 (wrk/vegeta) | No |
+| `make bench-stream` | Stream 벤치마크 | No |
+
+> **PR blocking**: `make test`는 CI에서 필수. `make bench`는 성능 비교 시에만 실행.
+
+## 3. 단위 테스트 (§7.1)
+
+### 3.1 Lua 단위 테스트 — busted
 
 ```bash
-# 의존성 설치
-luarocks install busted
-luarocks install luassert
-
-# 실행
-busted tests/unit/
+make test-unit-lua
+# 또는: busted tests/unit/
 ```
 
 **테스트 구조:**
@@ -33,14 +46,18 @@ tests/
     │   ├── conflict_test.lua      # 충돌/음영 감지 (ADR-002)
     │   └── loader_test.lua        # YAML 로딩, hot reload (ADR-003)
     ├── scanner/
-    │   └── ffi_test.lua           # FFI 바인딩 (실제 .so 필요)
+    │   └── ffi_test.lua           # FFI 바인딩 계약 (ABI/메모리/에러 전파)
     ├── decoder/
-    │   └── ffi_test.lua           # 멀티레이어 디코딩 (§5)
+    │   └── ffi_test.lua           # 멀티레이어 디코딩 + FFI contract
     ├── log/
-    │   ├── http_test.lua          # HTTP 로그 직렬화 (ADR-004)
+    │   ├── http_test.lua          # HTTP 로그 직렬화 + golden snapshot
     │   └── stream_test.lua        # TCP 세션 로그 직렬화
-    └── admin/
-        └── auth_test.lua          # Bearer token 인증 (ADR-004)
+    ├── admin/
+    │   └── auth_test.lua          # Bearer token 인증 (ADR-004)
+    └── reload/
+        ├── atomic_swap_test.lua   # atomic pointer swap 검증
+        ├── rollback_test.lua      # LKG rollback 검증
+        └── inflight_test.lua      # in-flight request 보존 검증
 ```
 
 **테스트 예시:**
@@ -79,73 +96,119 @@ describe("Policy Evaluator", function()
 end)
 ```
 
-### 2.2 Rust 단위 테스트 — cargo test
+### 3.2 C 단위 테스트 — CMocka
+
+**테스트 위치**: `csrc/tests/` (단일 위치)
+
+CMake test discovery 규칙:
+- 파일명: `test_<module>.c`
+- CMake: `add_executable(test_<module> tests/test_<module>.c)` + `add_test(NAME <module> COMMAND test_<module>)`
 
 ```bash
-cd src/scanner && cargo test
-cd src/decoder && cargo test
+make test-unit-c
+# 또는: cmake --build csrc/build --target test && ctest --test-dir csrc/build
 ```
 
-**테스트 범위:**
-
-```rust
-// src/scanner/src/lib.rs
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_sqli_detection() {
-        let result = scan_path("/search", "id=1' OR '1'='1", "", "");
-        assert_eq!(result.threat_type, Some("sqli".to_string()));
-        assert!(result.threat_score > 0.7);
-    }
-
-    #[test]
-    fn test_path_traversal() {
-        let result = scan_path("/admin", "", "", "");
-        // 정규화 후 경로 탐색 없음
-        assert_eq!(result.threat_type, None);
-    }
-
-    #[test]
-    fn test_clean_request() {
-        let result = scan_path("/api/v1/users", "page=1", "", "curl/7.88");
-        assert_eq!(result.threat_type, None);
-        assert_eq!(result.threat_score, 0.0);
-    }
-}
-```
-
-## 3. 통합 테스트 (§7.2)
-
-### 3.1 Docker 환경 구성
-
-```yaml
-# docker-compose.test.yml
-services:
-  luagate:
-    build: .
-    ports:
-      - "8080:80"      # HTTP
-      - "18080:8080"   # Admin API
-    volumes:
-      - ./tests/fixtures/policies.yaml:/app/conf/policies.yaml
-    environment:
-      LUAGATE_ADMIN_TOKEN: test-token-for-integration-tests
-
-  backend:
-    image: kennethreitz/httpbin
-    ports:
-      - "8000:80"
-```
+### 3.3 Rust 단위 테스트 — cargo test
 
 ```bash
-# 통합 테스트 실행
-docker-compose -f docker-compose.test.yml up -d
-pytest tests/integration/ -v
-docker-compose -f docker-compose.test.yml down
+cd csrc && cargo test
 ```
 
-### 3.2 테스트 픽스처
+### 3.4 FFI Contract 테스트
+
+Lua↔C FFI 계약 검증 (ABI/메모리/에러 전파):
+
+```lua
+-- tests/unit/scanner/ffi_test.lua
+describe("FFI contract", function()
+    it("returns non-NULL result for valid input", function()
+        local result = ffi_scanner.scan_http("/path", "body", "ua")
+        assert.is_not_nil(result)
+    end)
+
+    it("frees result without error", function()
+        local result = ffi_scanner.scan_http("/path", "", "")
+        -- free 호출 후 dangling pointer 없음 검증
+        ffi_scanner.free_result(result)
+    end)
+
+    it("handles NULL body gracefully (fail-closed)", function()
+        local result = ffi_scanner.scan_http("/path", nil, "ua")
+        -- fail-closed: NULL input은 deny 결과
+        assert.equals("deny", result.action)
+    end)
+end)
+```
+
+### 3.5 로그 Golden/Snapshot 테스트
+
+`log-schema.md` 필드와 동기화:
+
+```lua
+-- tests/unit/log/http_test.lua
+describe("Log serialization golden test", function()
+    it("HTTP access log contains required fields", function()
+        local entry = log_serializer.build_http_entry(mock_ctx)
+        -- log-schema.md §2 required fields
+        assert.is_not_nil(entry.ts)
+        assert.is_not_nil(entry.request_id)
+        assert.is_not_nil(entry.method)
+        assert.is_not_nil(entry.path)
+        assert.is_not_nil(entry.status)
+        assert.is_not_nil(entry.decision)
+        assert.is_not_nil(entry.decision_source)
+    end)
+end)
+```
+
+## 4. 통합 테스트 (§7.2)
+
+### 4.1 HTTP 통합 — Test::Nginx
+
+```bash
+make test-integration-http
+```
+
+**harness**: Test::Nginx (Perl) — `tests/integration/http/`
+
+### 4.2 Stream 통합 — Test::Nginx::Stream
+
+```bash
+make test-integration-stream
+```
+
+**harness**: Test::Nginx::Stream — `tests/integration/stream/`
+
+TLS 검증: `openssl s_client` 또는 별도 TCP harness.
+
+```perl
+# tests/integration/stream/basic.t
+use Test::Nginx::Socket::Lua::Stream;
+plan tests => 2;
+
+run_tests();
+
+__DATA__
+=== TEST 1: TCP connection is proxied
+--- stream_server_config
+    content_by_lua_block { ... }
+--- stream_request: HELLO
+--- stream_response: OK
+```
+
+### 4.3 Hot Reload 통합 — test-reload
+
+```bash
+make test-reload
+```
+
+검증 항목:
+- atomic pointer swap (새 버전이 원자적으로 활성화)
+- rollback (검증 실패 시 LKG 유지)
+- in-flight request 보존 (reload 중 처리 중인 요청이 완료됨)
+
+### 4.4 테스트 픽스처
 
 ```yaml
 # tests/fixtures/policies.yaml
@@ -160,14 +223,6 @@ rules:
     priority: 1
     action: allow
 
-  # deny-sqli: threat_type scope는 현재 미구현 (policy-engine.md §2.1 canonical scope 외)
-  # 구현 후 활성화 예정 (ADR 필요)
-  # - id: deny-sqli
-  #   scope:
-  #     threat_type: sqli
-  #   priority: 2
-  #   action: deny
-
   - id: allow-api
     scope:
       path: /api/v1/*
@@ -175,236 +230,103 @@ rules:
     action: allow
 ```
 
-### 3.3 통합 테스트 케이스
+## 5. 커버리지 목표
 
-```python
-# tests/integration/test_http_pipeline.py
-import pytest
-import requests
+| 모듈 | 목표 | 측정 방법 |
+|------|------|----------|
+| `lua/luagate/policy/` | 90%+ | luacov |
+| `lua/luagate/log/` | 80%+ | luacov |
+| `lua/luagate/admin/` | 80%+ | luacov |
+| `csrc/` (C) | 80%+ | gcov/lcov |
+| `csrc/` (Rust) | 80%+ | cargo-llvm-cov |
+| FFI contract paths | 100% | 수동 확인 |
 
-BASE_URL = "http://localhost:8080"
-ADMIN_URL = "http://localhost:18080"
-ADMIN_TOKEN = "test-token-for-integration-tests"
+> 커버리지는 CI에서 측정하고 PR에 리포트. 핵심 경로(policy evaluation, scanner) 아래로 내려가면 PR 블록.
 
-class TestHTTPPipeline:
-    def test_health_endpoint(self):
-        resp = requests.get(f"{BASE_URL}/health")
-        assert resp.status_code == 200
-        assert resp.json()["data"]["status"] == "ok"
+## 6. 변경 유형별 필수 테스트 매트릭스
 
-    def test_allowed_request(self):
-        resp = requests.get(f"{BASE_URL}/api/v1/users")
-        assert resp.status_code == 200
+| 변경 유형 | 필수 테스트 |
+|----------|-----------|
+| 정책 평가 로직 | `test-unit-lua` (evaluator_test, conflict_test) |
+| Hot Reload 경로 | `test-reload` + `test-unit-lua` (reload/) |
+| FFI 모듈 변경 | `test-unit-c` + `test-unit-lua` (ffi_test) |
+| 로그 스키마 변경 | `test-unit-lua` (log/ golden test) |
+| Admin API 변경 | `test-unit-lua` (auth_test) + `test-integration-http` |
+| Stream 파이프라인 | `test-integration-stream` |
+| 보안 스캐너 | `test-unit-lua` (ffi_test) + OWASP 페이로드 테스트 |
+| 전체 | `make test` |
 
-    def test_default_deny(self):
-        resp = requests.get(f"{BASE_URL}/unknown-path")
-        assert resp.status_code == 403
+## 7. 부하 테스트 (§7.3)
 
-    def test_path_traversal_blocked(self):
-        resp = requests.get(f"{BASE_URL}/api/v1/%2e%2e/admin")
-        assert resp.status_code == 403
+### SLO 재현 조건
 
-    def test_request_id_header(self):
-        resp = requests.get(f"{BASE_URL}/api/v1/users")
-        assert "X-Request-ID" in resp.headers
+| 항목 | 값 |
+|------|-----|
+| worker 수 | `nginx worker_processes auto` (코어 수) |
+| 정책 corpus 크기 | 100 rules (표준), 1000 rules (stress) |
+| warm-up 기간 | 30초 |
+| 동시 연결 수 | 100 (표준), 500 (stress) |
+| 하드웨어 baseline | 4 vCPU / 8GB RAM |
 
-class TestAdminAPI:
-    headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
-
-    def test_auth_required(self):
-        resp = requests.get(f"{ADMIN_URL}/api/v1/policies")
-        assert resp.status_code == 401
-
-    def test_policy_reload(self):
-        resp = requests.post(
-            f"{ADMIN_URL}/api/v1/policies/reload",
-            headers=self.headers
-        )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-
-    def test_metrics_endpoint(self):
-        resp = requests.get(
-            f"{ADMIN_URL}/metrics",
-            headers=self.headers
-        )
-        assert resp.status_code == 200
-        assert "luagate_requests_total" in resp.text
-
-class TestReloadFailure:
-    """정책 reload 실패 시 last-known-good 유지 검증"""
-    headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
-
-    def test_reload_failure_keeps_last_known_good(self):
-        # 1. 현재 정상 정책 버전 확인
-        status = requests.get(f"{ADMIN_URL}/api/v1/policies/status", headers=self.headers)
-        original_version = status.json()["data"]["active_policy_version"]
-
-        # 2. 검증은 통과하지만 apply 단계에서 실패하도록 shared dict write mock 또는 fault injection 사용
-        bad_policy = """
-global:
-  default_action: deny
-rules:
-  - id: large-rule-set
-    scope: { path: /api/v1/* }
-    priority: 1
-    action: allow
-"""
-        put_headers = {**self.headers, "Content-Type": "application/x-yaml"}
-        requests.put(f"{ADMIN_URL}/api/v1/policies", headers=put_headers, data=bad_policy)
-
-        # 3. fault injection 활성화 후 reload 시도 → shared dict write failure 예상
-        reload_resp = requests.post(f"{ADMIN_URL}/api/v1/policies/reload", headers=self.headers)
-        assert reload_resp.status_code in (500, 507)
-
-        # 4. 기존 버전이 유지되었는지 확인
-        status_after = requests.get(f"{ADMIN_URL}/api/v1/policies/status", headers=self.headers)
-        assert status_after.json()["data"]["active_policy_version"] == original_version
-
-    def test_concurrent_reload(self):
-        """동시 reload 요청 시 race condition 없음 검증"""
-        import threading
-        results = []
-
-        def do_reload():
-            resp = requests.post(f"{ADMIN_URL}/api/v1/policies/reload", headers=self.headers)
-            results.append(resp.status_code)
-
-        threads = [threading.Thread(target=do_reload) for _ in range(5)]
-        for t in threads: t.start()
-        for t in threads: t.join()
-
-        # 첫 요청만 성공, 나머지는 lock 충돌로 409
-        assert 200 in results
-        assert all(r in (200, 409) for r in results)
-
-class TestSharedDictExhaustion:
-    """shared dict 용량 초과 시 메트릭 손실 허용, 요청 처리 계속 검증"""
-    headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
-
-    def test_metrics_loss_on_dict_full(self):
-        # shared dict 초과는 환경 재현이 어려우므로 단위 테스트에서 mock으로 검증
-        # 통합 테스트: 메트릭 엔드포인트가 항상 응답함을 확인
-        resp = requests.get(f"{ADMIN_URL}/metrics", headers=self.headers)
-        assert resp.status_code == 200
-        # 정상 요청이 계속 처리되는지 확인
-        data_resp = requests.get(f"{BASE_URL}/api/v1/users")
-        assert data_resp.status_code in (200, 403)
-```
-
-## 4. 부하 테스트 (§7.3)
-
-### 4.1 wrk 기본 벤치마크
+### HTTP 벤치마크 (PR smoke)
 
 ```bash
-# 기준 성능: allow 경로
-wrk -t4 -c100 -d30s http://localhost:8080/api/v1/users
-
-# 보안 스캐너 포함 경로
-wrk -t4 -c100 -d30s "http://localhost:8080/api/v1/search?q=normal"
+make bench-http
+# wrk -t4 -c100 -d30s http://localhost:8080/api/v1/users
 ```
 
 **목표 지표:**
 
-| 지표 | 목표값 |
-|------|--------|
+| 지표 | SLO |
+|------|-----|
 | Requests/sec | > 10,000 |
 | Latency p50 | < 1ms |
 | Latency p99 | < 5ms |
 | 에러율 | 0% |
 
-### 4.2 k6 시나리오 테스트
+### Full 벤치마크 (릴리스 전)
 
-```javascript
-// tests/load/scenario.js
-import http from 'k6/http';
-import { check } from 'k6';
-
-export const options = {
-  scenarios: {
-    normal_traffic: {
-      executor: 'constant-vus',
-      vus: 50,
-      duration: '60s',
-    },
-  },
-};
-
-export default function () {
-  const res = http.get('http://localhost:8080/api/v1/users');
-  check(res, { 'status is 200': (r) => r.status === 200 });
-}
+```bash
+make bench
+# HTTP + Stream 전체 시나리오, vegeta rate test 포함
 ```
 
-## 5. 보안 테스트
+## 8. Fuzz / Property 테스트
 
-OWASP Top 10 기반 공격 벡터 테스트:
+대상 모듈:
+- TLS parser (stream preread)
+- decoder (멀티레이어 인코딩)
+- radix tree (경로 매칭)
 
-> **주의**: 현재 canonical policy scope에는 `threat_type`가 없으므로, 스캐너 탐지가 자동 차단을 의미하지 않는다.
+도구: Rust `cargo fuzz` (libFuzzer), Lua `busted` property-based (추후 도입).
+
+## 9. 보안 테스트
+
+OWASP Top 10 기반 공격 벡터 테스트 (`tests/fixtures/` 픽스처):
+
+> **주의**: canonical policy scope에 `threat_type`가 없으므로 스캐너 탐지가 자동 차단을 의미하지 않는다.
 > 통합 테스트는 "차단"과 "탐지"를 분리해 검증한다.
 
-```python
-# tests/integration/test_security.py
-def test_path_traversal_blocked_by_normalization_and_default_deny():
-    resp = requests.get(f"{BASE_URL}/api/v1/%2e%2e/admin")
-    assert resp.status_code == 403
-
-@pytest.mark.parametrize("path,params,expected_threat", [
-    ("/api/v1/search", {"q": "1' OR '1'='1"}, "sqli"),
-    ("/api/v1/search", {"q": "<script>alert(1)</script>"}, "xss"),
-    ("/api/v1/cmd", {"cmd": "; ls -la"}, "cmd-injection"),
-])
-def test_scanner_detection_logged(path, params, expected_threat):
-    requests.get(f"{BASE_URL}{path}", params=params)
-    # access.log를 읽어 threat_type이 기록되었는지 검증
-    # read_last_access_log_line() helper는 테스트 컨테이너/볼륨에 마운트된 access.log를 파싱한다.
-    last_log = read_last_access_log_line()
-    assert last_log["threat_type"] == expected_threat
-```
-
-## 6. CI 파이프라인
+## 10. CI 파이프라인
 
 ```yaml
-# .github/workflows/test.yml (또는 GitLab CI)
+# .github/workflows/test.yml
 stages:
-  - lint
-  - unit
-  - build
-  - integration
-
-unit-lua:
-  stage: unit
-  script:
-    - luarocks install busted
-    - busted tests/unit/
-
-unit-rust:
-  stage: unit
-  script:
-    - cd src/scanner && cargo test
-    - cd src/decoder && cargo test
-
-build-so:
-  stage: build
-  script:
-    - make build-ffi
-
-integration:
-  stage: integration
-  services:
-    - docker:dind
-  script:
-    - docker-compose -f docker-compose.test.yml up -d
-    - sleep 3
-    - pytest tests/integration/ -v
-    - docker-compose -f docker-compose.test.yml down
+  - lint        # stylua, luacheck, clang-format
+  - unit        # test-unit-lua, test-unit-c, cargo test
+  - build       # make build-ffi
+  - integration # test-integration-http, test-integration-stream, test-reload
 ```
+
+- `lint` + `unit` + `build` + `integration` 모두 PR blocking
+- `bench` 는 PR blocking 아님 (릴리스 태그 트리거)
 
 <!-- ADR 필요 -->
 > **TODO**: 카오스 엔지니어링(worker 강제 종료, shared dict 초과) 테스트 전략 수립 시 ADR 필요
 
-## 7. 의존성
+## 11. 의존성
 
 - [spec/policy-engine.md](./policy-engine.md) — 정책 평가 테스트 기준
 - [spec/security-scanner.md](./security-scanner.md) — 공격 벡터 테스트 기준
 - [spec/http-pipeline.md](./http-pipeline.md) — 통합 테스트 시나리오
+- [spec/log-schema.md](./log-schema.md) — 로그 golden test 기준
