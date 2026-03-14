@@ -92,3 +92,34 @@ Linear 코멘트에 파일 경로 포인터 포함:
 구현 파일: lua/luagate/policy/evaluator.lua:45-89
 테스트 파일: tests/unit/policy/evaluator_test.lua
 ```
+
+## PR 컨벤션
+
+### PR 제목
+형식: `type(scope): 설명 [DON-XX]`
+커밋 메시지와 동일한 Conventional Commits 형식.
+
+예:
+```
+feat(policy): implement first-match-wins evaluation [DON-98]
+docs(readme): revamp quick start and port table [DON-108]
+```
+
+### PR 본문
+`.github/pull_request_template.md` 자동 적용.
+
+### 리뷰 프로세스
+1. CI (lint + test) 자동 실행
+2. `request-codex-review` 스킬로 Codex 리뷰 요청 (보안/설계 변경 시)
+3. 보안 관련 변경: `security-reviewer` 에이전트 호출 권장
+4. 최소 1개 승인 필요
+
+### 머지 전략
+- **Squash merge** (epic → main): 깔끔한 main 히스토리
+- **Merge commit** (issue → epic): 이슈별 히스토리 보존
+- 머지 후 브랜치 자동 삭제
+
+### 브랜치 보호 규칙
+- main 직접 푸시 금지 (PR 필수)
+- CI(lint + test) 통과 필수
+- 최소 1개 리뷰 승인
