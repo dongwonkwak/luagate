@@ -67,3 +67,7 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 2026-03-14 | DON-112 | log-schema 전면 수정 | `docs/spec/log-schema.md` | path_raw, null 계약, 기본값 전략, 예시 JSON 6개 |
 | 2026-03-14 | DON-113 | security-scanner + admin-api 수정 | `docs/spec/security-scanner.md`, `docs/spec/admin-api.md` | 에러 3계층, 스캔 계약, 상태 머신, 에러 contract |
 | 2026-03-14 | DON-114 | c-ffi-modules ABI 문서 격상 | `docs/spec/c-ffi-modules.md` | 헤더 시그니처, 에러 enum, radix lifecycle, fuzzing |
+
+## 현재 대기 중
+
+- DON-121: design 리뷰 대기 중 (`.claude/reviews/DON-121-design-review.md`)
