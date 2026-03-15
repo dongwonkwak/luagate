@@ -186,7 +186,7 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 | 이벤트 | 기록 필드 |
 |--------|----------|
 | 정책 변경 (`PUT /api/v1/policies`) | timestamp, event=policy_update, src_ip, staged_version, active_http_version, active_stream_version |
-| 정책 리로드 (`POST /api/v1/policies/reload`) | timestamp, event=policy_reload, src_ip, trigger=api\|hup, status, active_http_version, active_stream_version |
+| 정책 리로드 (`POST /api/v1/policies/reload`) | timestamp, event=policy_reload_success\|policy_reload_failure\|policy_reload_partial, src_ip, trigger=api\|hup, previous_version, new_version, subsystem (success/partial 전용) |
 | 인증 실패 | timestamp, event=auth_failure, src_ip, path, reason |
 | 서버 기동/종료 | timestamp, event=startup\|shutdown, active_http_version, active_stream_version |
 

@@ -397,8 +397,9 @@ Authorization: Bearer <token>
       "timestamp": "2026-03-14T07:00:00Z",
       "event": "policy_reload_success",
       "actor_ip": "127.0.0.1",
-      "new_version": "b4e3f2a1...",
+      "trigger": "api",
       "previous_version": "a3f2c1d4...",
+      "new_version": "b4e3f2a1...",
       "subsystem": "http"
     }
   ],
@@ -428,11 +429,14 @@ reload 성공/실패/partial 각 경우의 감사 로그 엔트리 shape:
   "timestamp": "2026-03-14T07:00:00Z",
   "event": "policy_reload_success",
   "actor_ip": "127.0.0.1",
+  "trigger": "api",
   "previous_version": "a3f2c1d4...",
   "new_version": "b4e3f2a1...",
   "subsystem": "http"
 }
 ```
+
+> `trigger`: `"api"` (POST /reload) 또는 `"hup"` (SIGHUP). 상세 스키마: log-schema.md §5.1.
 
 **실패 (event: "policy_reload_failure")**:
 
@@ -441,6 +445,7 @@ reload 성공/실패/partial 각 경우의 감사 로그 엔트리 shape:
   "timestamp": "2026-03-14T07:00:00Z",
   "event": "policy_reload_failure",
   "actor_ip": "127.0.0.1",
+  "trigger": "api",
   "stage": "compile",
   "reason": "YAML parse error at line 42",
   "current_version": "a3f2c1d4..."

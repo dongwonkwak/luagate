@@ -122,7 +122,7 @@ end
 - **사용**: 다음 reload 실패 시 **롤백 절차 없음** — commit 이전에 실패하면 active pointer가 변경되지 않았으므로 기존 버전의 blob/meta가 shared dict에 그대로 유지된다. 각 worker의 module-level upvalue는 active pointer가 변경되지 않은 한 자동으로 이전 캐시를 계속 사용한다.
 - **Partial commit**: commit 단계([7])에서 HTTP 서브시스템 성공, Stream 실패 시 HTTP `active_version`만 교체되고 Stream은 이전 버전 유지. 각 서브시스템은 독립적으로 LKG 상태를 보존한다.
 - **Cold start 제약**: 서버 최초 기동 시 shared dict가 비어 있으므로 LKG 없음. 이 경우 정책 로드 실패 → fail-closed (기동 거부). LKG는 첫 번째 성공적인 reload 이후에만 형성된다.
-- **LKG는 자동 롤백 메커니즘이 아님**: "이전 성공 버전이 메모리(shared dict)에 남아 있어 즉시 재활성화 가능한 상태"를 의미한다. 명시적 롤백이 필요하다면 `PUT /api/v1/policies`로 이전 YAML을 재제출하거나 `POST /api/v1/policies/reload`를 트리거해야 한다.
+- **LKG는 자동 롤백 메커니즘이 아님**: "이전 성공 버전이 메모리(shared dict)에 남아 있어 즉시 재활성화 가능한 상태"를 의미한다. 명시적 롤백이 필요하다면 `PUT /api/v1/policies`로 이전 YAML을 재제출해야 한다. `POST /api/v1/policies/reload`는 현재 canonical 파일을 그대로 재적용하는 동작이므로 롤백 수단이 될 수 없다.
 
 ## 4. 요청 처리 파이프라인
 
