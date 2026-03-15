@@ -19,7 +19,10 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 ## 2. Null 표현 계약
 
 > **Nullable 필드의 null 직렬화**: Nginx 기본 `-` 대신 JSON `null`로 직렬화한다.
-> Lua가 각 필드에 `"null"` 문자열 또는 cjson.null을 사전 할당하며, log_format에서 이를 그대로 출력한다.
+> Lua record table에는 nullable 값을 `cjson.null` 또는 Lua string으로 유지하고,
+> `log_by_lua` finalize 시 `cjson.encode(record)`로 최종 NDJSON 한 줄을 생성한다.
+> Nginx `access_log`에는 이미 인코딩된 전체 JSON line 변수(`$luagate_log_json`)만 전달하며,
+> 이 경우 `log_format`에 `escape=json`을 다시 적용하지 않는다.
 >
 > **기본값 선할당 전략**: `rewrite_by_lua` (HTTP) 또는 `preread_by_lua` (Stream) 진입 시
 > 아래 기본값으로 초기화. `access/preread`에서 실제 판정 결과로 override, `log_by_lua`에서 finalize.
@@ -74,7 +77,16 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 > local path_raw = uri:match("^([^?]*)") or uri
 > ```
 
-### 3.2 request_state 값 정의표 (HTTP)
+### 3.2 decision_source 값 정의표 (HTTP)
+
+| 값 | 설명 |
+|----|------|
+| `policy_engine` | 정책 엔진이 판정 (allow 또는 policy deny) |
+| `security_scanner` | 보안 스캐너가 탐지하여 deny |
+| `rate_limiter` | 레이트 리밋으로 deny (MVP 비범위) |
+| `nginx_core` | nginx core early short-circuit (400/413/414/502 등) |
+
+### 3.3 request_state 값 정의표 (HTTP)
 
 | 값 | 조건 |
 |----|------|
@@ -85,7 +97,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `upstream_error` | allow 판정이었으나 업스트림 502 |
 | `short_circuited` | nginx_core early termination (400/413/414 등) — 기본값 |
 
-### 3.3 예시 JSON — HTTP allow
+### 3.4 예시 JSON — HTTP allow
 
 ```json
 {
@@ -119,7 +131,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-### 3.4 예시 JSON — HTTP policy deny
+### 3.5 예시 JSON — HTTP policy deny
 
 ```json
 {
@@ -153,7 +165,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-### 3.5 예시 JSON — HTTP scanner deny
+### 3.6 예시 JSON — HTTP scanner deny
 
 ```json
 {
@@ -187,7 +199,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-### 3.6 예시 JSON — nginx_core early short-circuit (413)
+### 3.7 예시 JSON — nginx_core early short-circuit (413)
 
 ```json
 {
@@ -421,28 +433,43 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 
 ```nginx
 # Nginx-managed logging 방식 (권장):
-# log_by_lua에서 ngx.var를 사용하여 JSON을 구성하고,
-# nginx log_format + access_log 지시자로 파일에 기록한다.
+# log_by_lua에서 Lua table을 cjson.encode()로 한 줄 JSON으로 인코딩하고,
+# nginx log_format + access_log 지시자로 그 결과를 그대로 파일에 기록한다.
 # 이 방식은 Nginx의 log buffering, rotation 시그널(USR1) 처리를 활용한다.
+#
+# `$luagate_log_json`은 이미 cjson.encode(record) 결과이므로
+# log_format에서 escape=json을 다시 걸지 않는다. 중복 escape 시 NDJSON이 깨진다.
 
-log_format luagate_access_json escape=json
-    '{"timestamp":"$time_iso8601",'
-    '"request_id":"$luagate_request_id",'
-    '"src_ip":"$luagate_src_ip",'
-    '"src_port":$remote_port,'
-    '"dst_port":$server_port,'
-    '"method":"$request_method",'
-    '"host":"$host",'
-    '"path_raw":"$luagate_path_raw",'
-    '"path_normalized":"$luagate_path_normalized",'
-    '"query_string":"$luagate_query_string",'
-    '"action":"$luagate_action",'
-    '"decision_source":"$luagate_decision_source",'
-    '"request_state":"$luagate_request_state",'
-    '"response_status":$status,'
-    '"bytes_sent":$bytes_sent,'
-    '"active_version":"$luagate_active_version",'
-    '"worker_id":$luagate_worker_id}';
+log_format luagate_access_json '$luagate_log_json';
+
+log_by_lua_block {
+    local cjson = require("cjson.safe")
+
+    local record = {
+        timestamp = ngx.var.time_iso8601,
+        request_id = ngx.var.luagate_request_id,
+        src_ip = ngx.var.luagate_src_ip,
+        src_port = tonumber(ngx.var.remote_port),
+        dst_port = tonumber(ngx.var.server_port),
+        method = ngx.req.get_method(),
+        host = ngx.var.host,
+        path_raw = ngx.var.luagate_path_raw,
+        path_normalized = ngx.var.luagate_path_normalized,
+        query_string = ngx.var.luagate_query_string,
+        action = ngx.var.luagate_action,
+        matched_rule_id = ngx.ctx.luagate.matched_rule_id or cjson.null,
+        deny_reason = ngx.ctx.luagate.deny_reason or cjson.null,
+        decision_source = ngx.ctx.luagate.decision_source or "nginx_core",
+        threat_type = ngx.ctx.luagate.threat_type or cjson.null,
+        request_state = ngx.var.luagate_request_state,
+        response_status = tonumber(ngx.var.status),
+        bytes_sent = tonumber(ngx.var.bytes_sent),
+        active_version = ngx.var.luagate_active_version,
+        worker_id = tonumber(ngx.var.luagate_worker_id),
+    }
+
+    ngx.var.luagate_log_json = assert(cjson.encode(record))
+}
 
 access_log /var/log/luagate/access.log luagate_access_json buffer=64k flush=5s;
 ```

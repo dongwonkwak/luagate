@@ -24,10 +24,10 @@ REVIEWS_DIR=".claude/reviews"
 # --- 인자 검증 함수 ---
 validate_pending() {
   local val="$1"
-  # DON-숫자-영문소문자 형식만 허용 (경로 조작 방지)
-  if ! echo "$val" | grep -qE '^DON-[0-9]+-[a-z]+$'; then
+  # DON-숫자-유형 또는 epic-숫자-식별자-유형 형식만 허용 (경로 조작 방지)
+  if ! echo "$val" | grep -qE '^(DON-[0-9]+-[a-z]+|epic-[0-9]+-[a-z0-9-]+-[a-z]+)$'; then
     echo "오류: 잘못된 형식입니다: '$val'" >&2
-    echo "올바른 형식: DON-숫자-유형 (예: DON-97-code)" >&2
+    echo "올바른 형식: DON-숫자-유형 또는 epic-숫자-식별자-유형 (예: epic-05-feature-design)" >&2
     exit 1
   fi
 }
