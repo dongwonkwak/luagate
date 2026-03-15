@@ -323,11 +323,14 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
   "timestamp": "2026-03-14T07:00:00Z",
   "event": "policy_reload_success",
   "actor_ip": "127.0.0.1",
+  "trigger": "api",
   "previous_version": "a3f2c1d4...",
   "new_version": "b4e3f2a1...",
   "subsystem": "http"
 }
 ```
+
+> `trigger`: `"api"` (POST /reload) 또는 `"hup"` (SIGHUP).
 
 **정책 reload 실패 (`policy_reload_failure`):**
 ```json
@@ -335,6 +338,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
   "timestamp": "2026-03-14T07:00:01Z",
   "event": "policy_reload_failure",
   "actor_ip": "127.0.0.1",
+  "trigger": "api",
   "stage": "conflict_detect",
   "reason": "duplicate rule id: allow-health",
   "current_version": "a3f2c1d4..."
@@ -359,7 +363,8 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
   "event": "policy_update",
   "actor_ip": "127.0.0.1",
   "staged_version": "b4e3f2a1...",
-  "active_version": "a3f2c1d4...",
+  "active_http_version": "a3f2c1d4...",
+  "active_stream_version": "a3f2c1d4...",
   "warnings_count": 0
 }
 ```
@@ -380,7 +385,8 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 {
   "timestamp": "2026-03-14T07:00:04Z",
   "event": "startup",
-  "active_version": "a3f2c1d4...",
+  "active_http_version": "a3f2c1d4...",
+  "active_stream_version": "a3f2c1d4...",
   "version": "luagate/0.1.0"
 }
 ```

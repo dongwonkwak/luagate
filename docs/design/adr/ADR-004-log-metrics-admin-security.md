@@ -181,9 +181,12 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 > **active_version 레이블 제거**: cardinality 폭발 방지. 정책 버전 추적은 `GET /api/v1/policies/status`로 조회한다.
 
 **저장 방식:**
-- 카운터는 `luagate_metrics` shared dict에 원자적으로 증가
+- HTTP 카운터는 `luagate_metrics` shared dict에 원자적으로 증가
+- Stream 카운터는 **`luagate_stream_metrics`** shared dict에 원자적으로 증가 (HTTP metrics zone과 분리)
+  - 분리 이유: stream 파이프라인과 HTTP 파이프라인은 Nginx에서 독립적인 context를 사용하므로, zone을 분리하여 write 충돌 최소화 및 디버깅 용이성 확보
+  - `luagate_stream_metrics` 키 prefix: `stream:metrics:*`
 - Histogram 버킷은 `latency:bucket:<ms>` 키로 shared dict에 저장 (ADR-001 §1.1 참조)
-- 메트릭 읽기는 `/metrics` 요청 시 shared dict에서 직접 집계
+- 메트릭 읽기는 `/metrics` 요청 시 `luagate_metrics` + `luagate_stream_metrics` 두 zone에서 집계
 
 ### §6 관리면 보안
 
