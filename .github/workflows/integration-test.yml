@@ -27,17 +27,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build test Docker image
-        run: docker build -f Dockerfile.test -t luagate-test .
-
-      - name: Run integration tests
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}/lua/luagate:/usr/local/openresty/lualib/luagate:ro" \
-            -v "${{ github.workspace }}/conf/nginx.conf:/luagate/conf/nginx.conf:ro" \
-            -v "${{ github.workspace }}/tests:/luagate/tests:ro" \
-            -v "${{ github.workspace }}/policies:/luagate/policies:ro" \
-            -e TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot \
-            luagate-test \
-            prove -r -v tests/integration/http/
-        # docker run의 non-zero exit code가 step 실패로 전파됨
+      - name: Run integration tests via make test-docker
+        run: make test-docker
+        # make test-docker: build + docker run + EXIT_CODE 전파 (Makefile 위임)

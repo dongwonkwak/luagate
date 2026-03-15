@@ -1,9 +1,10 @@
 # ── Dockerfile.test ────────────────────────────────────────────────────────
-# OpenResty 1.25.x + Perl + Test::Nginx (Alpine 패키지)
+# OpenResty 1.25.x + Perl + Test::Nginx + busted (Alpine 패키지)
 # DON-133: Docker 기반 Test::Nginx 통합 테스트 환경
 #
 # 빌드:  docker build -f Dockerfile.test -t luagate-test .
 # 실행:  docker run --rm luagate-test prove -r -v tests/integration/http/
+# busted 확인: docker run --rm luagate-test busted --version
 # ───────────────────────────────────────────────────────────────────────────
 
 FROM openresty/openresty:1.25.3.2-alpine
@@ -12,6 +13,7 @@ FROM openresty/openresty:1.25.3.2-alpine
 # perl-test-nginx: Test::Nginx::Socket 포함 (Alpine community repo)
 # perl-app-cpanminus: cpanm (추가 CPAN 모듈 필요 시 대비)
 # build-base: XS 모듈 컴파일 (Test::Nginx 의존 모듈용)
+# luarocks / lua5.1-dev / unzip: busted 설치용 (luarocks-5.1)
 RUN apk add --no-cache \
     perl \
     perl-dev \
@@ -19,7 +21,15 @@ RUN apk add --no-cache \
     perl-app-cpanminus \
     build-base \
     curl \
-    ca-certificates
+    ca-certificates \
+    luarocks \
+    lua5.1-dev \
+    unzip
+
+# ── busted 설치 ───────────────────────────────────────────────────────────
+# luarocks-5.1 + --lua-dir: OpenResty LuaJIT(/usr/local) 경로에 설치
+# busted 바이너리는 /usr/local/bin/busted에 배치됨
+RUN luarocks-5.1 install --lua-dir /usr/local/openresty/luajit busted
 
 # ── 작업 디렉토리 ─────────────────────────────────────────────────────────
 WORKDIR /luagate
