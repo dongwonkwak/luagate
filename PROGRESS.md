@@ -103,3 +103,5 @@ COMPLETED_REVIEW: DON-124-design (2026-03-15)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-15 | DON-97 | Nginx conf template + HTTP reverse proxy basic setup | `conf/nginx.conf`, `tests/integration/http/test_nginx_basic.t` | shared dict 8개 선언, 보안 강화(admin IP 제한, server_tokens off, XFF 차단). 1회 Codex 리뷰 예정 |
+
+PENDING_REVIEW: DON-97-code
