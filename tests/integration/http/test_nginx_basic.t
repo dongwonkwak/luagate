@@ -25,6 +25,11 @@ our $http_config = <<'_END_HTTP_CONFIG_';
         default  $request_id;
         ~^.+$    $http_x_request_id;
     }
+
+    map $request_uri $luagate_path_raw_default {
+        ~^([^?]*) $1;
+        default   $uri;
+    }
 _END_HTTP_CONFIG_
 
 run_tests();
@@ -213,6 +218,8 @@ dict_ok
 === TEST 10: Nginx 변수 — luagate_action 기본값이 "allow"
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -236,6 +243,8 @@ allow
 === TEST 11: Nginx 변수 — luagate_decision_source 기본값이 "nginx_core"
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -259,6 +268,8 @@ nginx_core
 === TEST 12: Nginx 변수 — rewrite_by_lua_block 이후 decision_source가 "policy_engine"으로 갱신
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -291,6 +302,8 @@ policy_engine
 === TEST 13: Nginx 변수 — luagate_active_version 기본값이 "none"
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -354,6 +367,8 @@ has_request_id
 === TEST 16: ngx.ctx.luagate 초기화 — request_id, path_raw, action 필드 존재
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -365,12 +380,16 @@ has_request_id
         rewrite_by_lua_block {
             ngx.var.luagate_decision_source = "nginx_core"
             ngx.var.luagate_action          = "allow"
+            local request_uri = ngx.var.request_uri or ngx.var.uri
+            local path_raw = request_uri:match("^([^?]*)") or ngx.var.uri
+            ngx.var.luagate_path_raw = path_raw
+            ngx.var.luagate_path_normalized = ngx.var.uri
             local ver = ngx.shared.luagate_policy:get("http:active_version")
             ngx.var.luagate_active_version = ver or "none"
             ngx.ctx.luagate = {
                 request_id       = ngx.var.luagate_request_id,
-                path_raw         = ngx.var.uri,
-                path_normalized  = ngx.var.uri,
+                path_raw         = path_raw,
+                path_normalized  = ngx.var.luagate_path_normalized,
                 query_raw        = ngx.var.args or "",
                 query_normalized = ngx.var.args or "",
                 action           = "allow",
@@ -414,6 +433,8 @@ ctx_ok
 === TEST 17: ngx.ctx.luagate — action 초기값이 "allow"
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -443,6 +464,8 @@ allow
 === TEST 18: 프록시 — upstream 연결 실패 시 502 반환 (no upstream)
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -454,12 +477,16 @@ allow
         rewrite_by_lua_block {
             ngx.var.luagate_decision_source = "nginx_core"
             ngx.var.luagate_action          = "allow"
+            local request_uri = ngx.var.request_uri or ngx.var.uri
+            local path_raw = request_uri:match("^([^?]*)") or ngx.var.uri
+            ngx.var.luagate_path_raw = path_raw
+            ngx.var.luagate_path_normalized = ngx.var.uri
             local ver = ngx.shared.luagate_policy:get("http:active_version")
             ngx.var.luagate_active_version = ver or "none"
             ngx.ctx.luagate = {
                 request_id       = ngx.var.luagate_request_id,
-                path_raw         = ngx.var.uri,
-                path_normalized  = ngx.var.uri,
+                path_raw         = path_raw,
+                path_normalized  = ngx.var.luagate_path_normalized,
                 query_raw        = ngx.var.args or "",
                 query_normalized = ngx.var.args or "",
                 action           = "allow",
@@ -490,6 +517,8 @@ GET /
 === TEST 19: HTTP 프록시 성공 경로 — upstream 200 응답 전달
 --- http_config eval: $::http_config
 --- config
+    set $luagate_path_raw        $luagate_path_raw_default;
+    set $luagate_path_normalized $uri;
     set $luagate_action          "allow";
     set $luagate_matched_rule    "null";
     set $luagate_decision_source "nginx_core";
@@ -512,11 +541,15 @@ GET /
             ngx.var.luagate_matched_rule    = "null"
             ngx.var.luagate_threat_type     = "null"
             ngx.var.luagate_rule_name       = "null"
+            local request_uri = ngx.var.request_uri or ngx.var.uri
+            local path_raw = request_uri:match("^([^?]*)") or ngx.var.uri
+            ngx.var.luagate_path_raw = path_raw
+            ngx.var.luagate_path_normalized = ngx.var.uri
             local ver = ngx.shared.luagate_policy:get("http:active_version")
             ngx.var.luagate_active_version  = ver or "none"
             ngx.ctx.luagate = {
                 request_id      = ngx.var.luagate_request_id,
-                path_raw        = ngx.var.uri,
+                path_raw        = path_raw,
                 action          = "allow",
                 decision_source = "nginx_core",
                 active_version  = ver or "none",
@@ -587,12 +620,13 @@ GET /api/policies
 
 
 
-=== TEST 22: path_raw — $uri만 사용, query string 제외 검증
+=== TEST 22: path_raw — request_uri에서 query 제거 후 원본 경로 유지
 --- http_config eval: $::http_config
 --- config
     location / {
         content_by_lua_block {
-            local path_raw  = ngx.var.uri
+            local request_uri = ngx.var.request_uri or ngx.var.uri
+            local path_raw  = request_uri:match("^([^?]*)") or ngx.var.uri
             local query_str = ngx.var.args or ""
             ngx.header["Content-Type"] = "application/json"
             ngx.say('{"path_raw":"' .. path_raw .. '","query_string":"' .. query_str .. '"}')
@@ -603,4 +637,26 @@ GET /api/test?foo=bar&baz=qux
 --- response_code: 200
 --- response_body_like: "path_raw":"/api/test"
 --- response_body_like: "query_string":"foo=bar
+--- LAST
+
+
+
+=== TEST 23: path_raw/path_normalized — 인코딩된 우회 시도는 raw에 보존되고 normalized와 구분됨
+--- http_config eval: $::http_config
+--- config
+    location / {
+        content_by_lua_block {
+            local request_uri = ngx.var.request_uri or ngx.var.uri
+            local path_raw = request_uri:match("^([^?]*)") or ngx.var.uri
+            local path_normalized = ngx.var.uri
+            local different = tostring(path_raw ~= path_normalized)
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"path_raw":"' .. path_raw .. '","path_normalized":"' .. path_normalized .. '","different":' .. different .. '}')
+        }
+    }
+--- request
+GET /api/v1/%2e%2e/admin?foo=bar
+--- response_code: 200
+--- response_body_like: "path_raw":"/api/v1/%2e%2e/admin"
+--- response_body_like: "different":true
 --- LAST
