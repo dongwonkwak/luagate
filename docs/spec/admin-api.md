@@ -78,20 +78,25 @@ Content-Type: application/json
 
 | 엔드포인트 | 동작 | If-Match |
 | --- | --- | --- |
-| `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`<http_active_version>` 형식) |
-| `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거만 | 선택 |
+| `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`<source_version>` 형식 — `GET /api/v1/policies` ETag와 동일) |
+| `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거만 | 선택 (`<http_active_version>` 형식) |
 
 > **PUT /api/v1/policies**: 저장 + validate + conflict_detect + compile + commit을 한 번에 수행.
 > 실패 시 canonical file을 변경하지 않는다. Partial commit은 §policy-engine.md commit 단계 규칙 따름.
 
 ## 5. ETag / If-Match
 
-- `GET /api/v1/policies` 응답에 `ETag: "<http_active_version>"` 포함
-- `PUT /api/v1/policies` 요청에 `If-Match: "<http_active_version>"` 필수
+- `GET /api/v1/policies` 응답에 `ETag: "<source_version>"` 포함
+  - `source_version`은 canonical source 파일(conf/policies.yaml) 전체 raw bytes의 SHA256이다.
+  - 응답 본문이 canonical source 파일을 그대로 반환하므로, ETag validator는 `source_version` 기준이다.
+- `PUT /api/v1/policies` 요청에 `If-Match: "<source_version>"` 필수 (`GET /api/v1/policies` ETag와 동일 기준)
   - 불일치 시 → `409 Conflict` + `error: "version_mismatch"`
-- `POST /api/v1/policies/reload`에 `If-Match` 선택. 제공 시 불일치이면 `409 Conflict`
+- `POST /api/v1/policies/reload`에 `If-Match` 선택. 제공 시 `http:active_version`과 비교하여 불일치이면 `409 Conflict`
   - 불일치 시 → `error: "version_mismatch"`
-- Admin API의 optimistic concurrency 기준값은 `GET /api/v1/policies` 응답의 `ETag`와 동일한 HTTP active version이다.
+- **ETag / If-Match 기준값 분리**:
+  - `GET /api/v1/policies` ETag, `PUT /api/v1/policies` If-Match: `source_version`
+  - `POST /api/v1/policies/reload` If-Match: `http:active_version`
+  - Stream active_version은 If-Match 비교 대상이 아님 (조회 전용: `GET /api/v1/policies/version` 응답 참조)
 
 ## 6. 엔드포인트
 
@@ -151,6 +156,10 @@ Authorization: Bearer <token>
 
 현재 canonical source (`conf/policies.yaml`) 반환.
 
+> **ETag 기준값**: `source_version` (canonical source 파일 전체 raw bytes의 SHA256). `PUT /api/v1/policies` If-Match와 동일 기준이다.
+>
+> **YAML schema**: HTTP 규칙은 top-level `rules:` 키, 스트림 규칙은 top-level `stream_rules:` 키를 사용한다 (flat 구조 — `http.rules`/`stream.rules` 중첩 아님). 상세: [policy-engine.md §2.0](./policy-engine.md#20-top-level-canonical-schema) 참조.
+
 **응답 200:**
 
 ```http
@@ -160,8 +169,11 @@ ETag: "a3f2c1d4..."
 version: "1.0"
 global:
   default_action: deny
-rules:
+rules:                    # HTTP 규칙 (flat top-level key)
   - id: allow-health
+    ...
+stream_rules:             # 스트림 규칙 (flat top-level key)
+  - id: allow-tls-443
     ...
 ```
 
@@ -194,7 +206,7 @@ PUT /api/v1/policies
 Authorization: Bearer <token>
 Content-Type: application/x-yaml
 Content-Length: <bytes>
-If-Match: "<http_active_version>"
+If-Match: "<source_version>"
 
 <새 정책 YAML>
 ```
@@ -257,7 +269,7 @@ If-Match: "<http_active_version>"
 ```http
 POST /api/v1/policies/reload
 Authorization: Bearer <token>
-If-Match: "<http_active_version>"   (선택)
+If-Match: "<http_active_version>"   (선택 — 제공 시 http:active_version과 비교)
 ```
 
 현재 `conf/policies.yaml`에서 reload 트리거 (ADR-003).
@@ -400,8 +412,52 @@ Authorization: Bearer <token>
 
 감사 로그 상세 스키마: [log-schema.md §5](./log-schema.md#5-감사-로그-auditlog-adr-004-63)
 
+역방향 참조: [policy-engine.md §6 Reload Audit Log](./policy-engine.md#6-reload-audit-log) ↔ 이 섹션은 감사 로그 필드 및 드롭 금지 원칙을 공유한다.
+
 > **감사 로그 드롭 금지**: audit 기록 실패 = mutation/reload 거부.
 > 이 규칙은 코드 불변식이며 설정으로 우회 불가.
+
+### Reload 이벤트 Audit Log Shape
+
+reload 성공/실패/partial 각 경우의 감사 로그 엔트리 shape:
+
+**성공 (event: "policy_reload_success")**:
+
+```json
+{
+  "timestamp": "2026-03-14T07:00:00Z",
+  "event": "policy_reload_success",
+  "actor_ip": "127.0.0.1",
+  "previous_version": "a3f2c1d4...",
+  "new_version": "b4e3f2a1...",
+  "subsystem": "http"
+}
+```
+
+**실패 (event: "policy_reload_failure")**:
+
+```json
+{
+  "timestamp": "2026-03-14T07:00:00Z",
+  "event": "policy_reload_failure",
+  "actor_ip": "127.0.0.1",
+  "stage": "compile",
+  "reason": "YAML parse error at line 42",
+  "current_version": "a3f2c1d4..."
+}
+```
+
+**Partial (event: "policy_reload_partial")**:
+
+```json
+{
+  "timestamp": "2026-03-14T07:00:00Z",
+  "event": "policy_reload_partial",
+  "actor_ip": "127.0.0.1",
+  "http_result": "committed",
+  "stream_result": "lkg_retained"
+}
+```
 
 ## 8. CORS
 
