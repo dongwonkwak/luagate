@@ -18,7 +18,6 @@ RUN apk add --no-cache \
     perl \
     perl-dev \
     perl-test-nginx \
-    perl-app-cpanminus \
     build-base \
     curl \
     ca-certificates \
@@ -51,6 +50,9 @@ ENV TEST_NGINX_PORT=1984
 # tests/ 볼륨을 :ro로 마운트할 때 t/servroot 생성 실패를 방지
 ENV TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot
 ENV PATH=/usr/local/openresty/bin:/usr/local/openresty/nginx/sbin:$PATH
+
+# ── non-root 실행 ──────────────────────────────────────────────────────────
+USER nobody
 
 # ── 기본 명령 ─────────────────────────────────────────────────────────────
 CMD ["prove", "-r", "-v", "tests/integration/http/"]
