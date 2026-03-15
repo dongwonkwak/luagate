@@ -3,10 +3,13 @@
 std = "luajit"
 max_line_length = 120
 
--- OpenResty read-only globals (write access is an error, not a feature)
-read_globals = {
+-- OpenResty globals: ngx/ndk는 필드 쓰기가 허용됨 (ngx.status, ngx.header 등)
+globals = {
   "ngx",
   "ndk",
+}
+
+read_globals = {
   "require",
   "pcall",
   "xpcall",
@@ -28,8 +31,6 @@ read_globals = {
   "io",
   "os",
 }
-
-globals = {}
 
 -- Ignore generated / vendor files
 exclude_files = {

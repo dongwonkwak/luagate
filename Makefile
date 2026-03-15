@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-c test-integration-http test-integration-stream test-reload lint bench bench-http bench-stream up down implement install-hooks clean
+.PHONY: build test test-unit test-unit-lua test-unit-c test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean
 
 # ── Build ──────────────────────────────────────────────────────────────────
 build:
@@ -46,6 +46,23 @@ test-reload:
 	else \
 	  echo "  (skipping — tests/unit/reload/ not yet created)"; \
 	fi
+
+# ── Docker Test ────────────────────────────────────────────────────────────
+test-docker:
+	@echo "==> Building test Docker image..."
+	docker build -f Dockerfile.test -t luagate-test .
+	@echo "==> Running integration tests inside Docker container..."
+	docker run --rm \
+	  -v "$(CURDIR)/lua/luagate:/usr/local/openresty/lualib/luagate:ro" \
+	  -v "$(CURDIR)/conf/nginx.conf:/luagate/conf/nginx.conf:ro" \
+	  -v "$(CURDIR)/tests:/luagate/tests:ro" \
+	  -v "$(CURDIR)/policies:/luagate/policies:ro" \
+	  -e TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot \
+	  luagate-test \
+	  prove -r -v tests/integration/http/; \
+	EXIT_CODE=$$?; \
+	echo "==> Test container exited with code $$EXIT_CODE"; \
+	exit $$EXIT_CODE
 
 # ── Lint ───────────────────────────────────────────────────────────────────
 lint:

@@ -1,0 +1,35 @@
+# ── integration-test.yml ───────────────────────────────────────────────────
+# GitHub Actions: Docker 기반 Test::Nginx 통합 테스트
+# DON-133: make test-docker 호출 — OpenResty + Test::Nginx 컨테이너 실행
+#
+# 트리거:
+#   - main 브랜치 push
+#   - PR (모든 브랜치)
+# ───────────────────────────────────────────────────────────────────────────
+
+name: Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-docker:
+    name: Test::Nginx (Docker)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run integration tests via make test-docker
+        run: make test-docker
+        # make test-docker: build + docker run + EXIT_CODE 전파 (Makefile 위임)

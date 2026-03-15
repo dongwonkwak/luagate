@@ -105,3 +105,11 @@ COMPLETED_REVIEW: DON-124-design (2026-03-15)
 | 2026-03-15 | DON-97 | Nginx conf template + HTTP reverse proxy basic setup | `conf/nginx.conf`, `tests/integration/http/test_nginx_basic.t` | shared dict 8개 선언, 보안 강화(admin IP 제한, server_tokens off, XFF 차단). 1회 Codex 리뷰 예정 |
 
 COMPLETED_REVIEW: DON-97-code (2026-03-15)
+
+COMPLETED_REVIEW: DON-133-code (2026-03-15)
+
+## Phase 1-Infra: Docker + 벤치마크 + CI
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-15 | DON-133 | Docker 기반 Test::Nginx 테스트 환경 구축 | `Dockerfile.test`, `docker-compose.test.yml`, `.github/workflows/integration-test.yml` | busted 2.3.0 포함, non-root 실행, CI permissions:read. 미반영: 인라인 테스트 구조 + admin auth 계약 충돌 별도 이슈 예정 |

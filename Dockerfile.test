@@ -1,0 +1,58 @@
+# ── Dockerfile.test ────────────────────────────────────────────────────────
+# OpenResty 1.25.x + Perl + Test::Nginx + busted (Alpine 패키지)
+# DON-133: Docker 기반 Test::Nginx 통합 테스트 환경
+#
+# 빌드:  docker build -f Dockerfile.test -t luagate-test .
+# 실행:  docker run --rm luagate-test prove -r -v tests/integration/http/
+# busted 확인: docker run --rm luagate-test busted --version
+# ───────────────────────────────────────────────────────────────────────────
+
+FROM openresty/openresty:1.25.3.2-alpine
+
+# ── 시스템 패키지 ─────────────────────────────────────────────────────────
+# perl-test-nginx: Test::Nginx::Socket 포함 (Alpine community repo)
+# perl-app-cpanminus: cpanm (추가 CPAN 모듈 필요 시 대비)
+# build-base: XS 모듈 컴파일 (Test::Nginx 의존 모듈용)
+# luarocks / lua5.1-dev / unzip: busted 설치용 (luarocks-5.1)
+RUN apk add --no-cache \
+    perl \
+    perl-dev \
+    perl-test-nginx \
+    build-base \
+    curl \
+    ca-certificates \
+    luarocks \
+    lua5.1-dev \
+    unzip
+
+# ── busted 설치 ───────────────────────────────────────────────────────────
+# luarocks-5.1 + --lua-dir: OpenResty LuaJIT(/usr/local) 경로에 설치
+# busted 바이너리는 /usr/local/bin/busted에 배치됨
+RUN luarocks-5.1 install --lua-dir /usr/local/openresty/luajit busted
+
+# ── 작업 디렉토리 ─────────────────────────────────────────────────────────
+WORKDIR /luagate
+
+# ── 소스 복사 ─────────────────────────────────────────────────────────────
+# Lua 모듈: OpenResty lualib 경로에 직접 복사
+COPY lua/luagate /usr/local/openresty/lualib/luagate/
+# nginx 설정, 테스트, 정책 파일
+COPY conf/nginx.conf /luagate/conf/nginx.conf
+COPY tests/ /luagate/tests/
+COPY policies/ /luagate/policies/
+
+# ── 환경 변수 ─────────────────────────────────────────────────────────────
+# TEST_NGINX_BINARY: Test::Nginx가 임시 서버를 띄울 때 사용할 nginx 바이너리
+ENV TEST_NGINX_BINARY=/usr/local/openresty/bin/openresty
+# TEST_NGINX_PORT: 테스트용 nginx 리스닝 포트 (기본 1984)
+ENV TEST_NGINX_PORT=1984
+# TEST_NGINX_SERVROOT: 임시 nginx servroot 경로 (/tmp 아래로 지정해야 컨테이너 내 쓰기 가능)
+# tests/ 볼륨을 :ro로 마운트할 때 t/servroot 생성 실패를 방지
+ENV TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot
+ENV PATH=/usr/local/openresty/bin:/usr/local/openresty/nginx/sbin:$PATH
+
+# ── non-root 실행 ──────────────────────────────────────────────────────────
+USER nobody
+
+# ── 기본 명령 ─────────────────────────────────────────────────────────────
+CMD ["prove", "-r", "-v", "tests/integration/http/"]
