@@ -484,4 +484,123 @@ allow
 --- request
 GET /
 --- response_code: 502
+
+
+
+=== TEST 19: HTTP 프록시 성공 경로 — upstream 200 응답 전달
+--- http_config eval: $::http_config
+--- config
+    set $luagate_action          "allow";
+    set $luagate_matched_rule    "null";
+    set $luagate_decision_source "nginx_core";
+    set $luagate_threat_type     "null";
+    set $luagate_rule_name       "null";
+    set $luagate_active_version  "none";
+
+    location /upstream_mock {
+        content_by_lua_block {
+            ngx.status = 200
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"message":"from upstream"}')
+        }
+    }
+
+    location / {
+        rewrite_by_lua_block {
+            ngx.var.luagate_decision_source = "nginx_core"
+            ngx.var.luagate_action          = "allow"
+            ngx.var.luagate_matched_rule    = "null"
+            ngx.var.luagate_threat_type     = "null"
+            ngx.var.luagate_rule_name       = "null"
+            local ver = ngx.shared.luagate_policy:get("http:active_version")
+            ngx.var.luagate_active_version  = ver or "none"
+            ngx.ctx.luagate = {
+                request_id      = ngx.var.luagate_request_id,
+                path_raw        = ngx.var.uri,
+                action          = "allow",
+                decision_source = "nginx_core",
+                active_version  = ver or "none",
+                start_time_ms   = ngx.now() * 1000,
+            }
+        }
+        access_by_lua_block {
+            ngx.var.luagate_decision_source = "policy_engine"
+            ngx.var.luagate_action          = "allow"
+        }
+        proxy_pass http://127.0.0.1:$TEST_NGINX_SERVER_PORT/upstream_mock;
+        proxy_set_header Host $host;
+    }
+--- request
+GET /
+--- response_code: 200
+--- response_body_like: "message":"from upstream"
+
+
+
+=== TEST 20: Admin /api/ — Authorization 헤더 없음 → 401
+--- http_config eval: $::http_config
+--- config
+    location /api/ {
+        content_by_lua_block {
+            local auth = ngx.req.get_headers()["Authorization"]
+            if not auth or not auth:match("^Bearer .+") then
+                ngx.status = 401
+                ngx.header["Content-Type"] = "application/json"
+                ngx.header["WWW-Authenticate"] = 'Bearer realm="luagate-admin"'
+                ngx.say('{"error":"Unauthorized"}')
+                return
+            end
+            ngx.status = 501
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"error":"Not Implemented"}')
+        }
+    }
+--- request
+GET /api/policies
+--- response_code: 401
+--- response_body_like: "error":"Unauthorized"
+
+
+
+=== TEST 21: Admin /api/ — 유효한 Bearer token → 501 Not Implemented
+--- http_config eval: $::http_config
+--- config
+    location /api/ {
+        content_by_lua_block {
+            local auth = ngx.req.get_headers()["Authorization"]
+            if not auth or not auth:match("^Bearer .+") then
+                ngx.status = 401
+                ngx.header["Content-Type"] = "application/json"
+                ngx.header["WWW-Authenticate"] = 'Bearer realm="luagate-admin"'
+                ngx.say('{"error":"Unauthorized"}')
+                return
+            end
+            ngx.status = 501
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"error":"Not Implemented"}')
+        }
+    }
+--- request eval
+"GET /api/policies HTTP/1.0\r\nAuthorization: Bearer test-token-12345\r\n\r\n"
+--- response_code: 501
+--- response_body_like: "error":"Not Implemented"
+
+
+
+=== TEST 22: path_raw — $uri만 사용, query string 제외 검증
+--- http_config eval: $::http_config
+--- config
+    location / {
+        content_by_lua_block {
+            local path_raw  = ngx.var.uri
+            local query_str = ngx.var.args or ""
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"path_raw":"' .. path_raw .. '","query_string":"' .. query_str .. '"}')
+        }
+    }
+--- request
+GET /api/test?foo=bar&baz=qux
+--- response_code: 200
+--- response_body_like: "path_raw":"/api/test"
+--- response_body_like: "query_string":"foo=bar
 --- LAST
