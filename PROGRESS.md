@@ -83,3 +83,8 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 
 COMPLETED_REVIEW: DON-128-code (2026-03-14)
 COMPLETED_REVIEW: DON-99-code (2026-03-15)
+
+COMPLETED_REVIEW: DON-100-code (2026-03-15)
+| 2026-03-15 | DON-100 | 원자성 모델 정리: envelope vs state zone, Stream metrics | `docs/spec/architecture.md`, `docs/spec/policy-engine.md`, `docs/design/adr/ADR-003`, `docs/design/adr/ADR-004` | Codex 리뷰 3건 반영 |
+
+COMPLETED_REVIEW: DON-100-code (2026-03-15)

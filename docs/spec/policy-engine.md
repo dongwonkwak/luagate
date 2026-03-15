@@ -206,8 +206,9 @@ load_policy(filepath):
 
 > **Partial success 범위**: [7] commit 단계에 한정.
 > [3] validate / [6] compile은 **전체 또는 전무(all-or-nothing)** — 하나라도 실패 시 전체 거부.
-> **Reload 실패 시**: 기존 active 정책(LKG) 유지. 실패한 버전은 폐기.
-> LKG(Last-Known-Good)는 첫 성공 reload 후 형성되며, 이후 reload 실패 시 복원 대상이 된다.
+> **Reload 실패 시 (commit 이전)**: active pointer가 변경되지 않았으므로 **롤백 불필요**. 기존 active version의 blob/meta가 shared dict에 그대로 유지된다. 실패한 신규 버전의 blob/meta는 폐기 대상이지만, 정리 타이밍은 구현 재량이다.
+> **Reload 실패 시 (commit 단계 partial)**: 실패한 서브시스템의 active pointer는 변경되지 않으며, 해당 서브시스템은 이전 성공 버전(LKG)을 계속 사용한다.
+> **LKG(Last-Known-Good)**: 첫 성공 reload 이후 형성된다. cold start 시에는 LKG 없음 — 정책 로드 실패 시 fail-closed (기동 거부). LKG는 자동 롤백 트리거가 아니라 "이전 성공 버전 데이터가 shared dict에 남아 있는 상태"다 (architecture.md §3.5 참조).
 
 ### 4.2 Schema Validation
 
@@ -237,6 +238,13 @@ end
 ```
 
 ### 4.3 Active Version Canonical Serialization
+
+> **Envelope 모델 (pointer swap 원자성)**: `luagate_policy` zone은 **Envelope zone**으로 분류된다. 원자성 보장 방식은 다음과 같다:
+> 1. 새 버전의 `policy:<new_ver>:blob`와 `policy:<new_ver>:meta`를 shared dict에 먼저 기록 (이 시점에 기존 active pointer는 변경되지 않음)
+> 2. `http:active_version` 또는 `stream:active_version` 포인터 키를 단일 write로 교체 — 이것이 **원자적 단위**
+> 3. pointer swap 이전까지 기존 worker는 old version blob을 계속 사용 (무중단)
+>
+> shared dict는 다중 키 트랜잭션을 제공하지 않는다. blob + meta는 pointer swap 이전에 기록되고 swap 이후에도 유지된다(LKG). Envelope vs State zone 분류 상세는 [architecture.md §3.1](./architecture.md#31-zone-분류-모델) 참조.
 
 `active_version`은 정책 파일 전체(raw bytes) 기준 **SHA256 hex string(lowercase, 64자)**로 정의한다.
 
