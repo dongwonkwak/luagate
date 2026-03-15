@@ -24,3 +24,13 @@ MD024:
 # MD007 — unordered list indent: 2 spaces
 MD007:
   indent: 2
+
+# MD031/MD032 — allow tighter docs layout used in specs/ADR files
+MD031: false
+MD032: false
+
+# MD040 — many spec snippets intentionally omit an info string
+MD040: false
+
+# MD060 — project tables use compact pipe formatting
+MD060: false
