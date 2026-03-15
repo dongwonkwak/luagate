@@ -407,27 +407,27 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 
 ## 7. 메트릭 목록
 
-`luagate_metrics` (HTTP) + `luagate_stream_metrics` (Stream) zone:
+`luagate_metrics` (HTTP) + `luagate_stream_metrics` (Stream) zone. 레이블 허용 목록 및 키 스키마 상세: [ADR-006](../design/adr/ADR-006-metrics-cardinality-export-model.md) 참조.
 
-| 메트릭 | 타입 | 설명 |
-|--------|------|------|
-| `luagate_http_requests_total` | counter | HTTP 전체 요청 수 |
-| `luagate_http_requests_denied_total` | counter | deny된 요청 수 |
-| `luagate_http_response_time_ms` | histogram | 응답 시간 분포 |
-| `luagate_http_upstream_errors_total` | counter | upstream 502 수 |
-| `luagate_active_connections{type="http"}` | gauge | 현재 HTTP 활성 연결 |
-| `luagate_stream_connections_total` | counter | 전체 스트림 연결 수 |
-| `luagate_stream_connections_denied_total` | counter | deny된 연결 수 |
-| `luagate_stream_bytes_sent_total` | counter | 총 송신 바이트 |
-| `luagate_stream_bytes_received_total` | counter | 총 수신 바이트 |
-| `luagate_active_connections{type="stream"}` | gauge | 현재 Stream 활성 연결 |
-| `luagate_stream_protocol_detected_total` | counter | 탐지된 프로토콜별 (label: protocol) |
-| `luagate_policy_reload_total` | counter | reload 시도 횟수 |
-| `luagate_policy_reload_failures_total` | counter | reload 실패 횟수 |
-| `luagate_shared_dict_capacity_bytes{zone}` | gauge | shared_dict 용량 (zone별) |
-| `luagate_shared_dict_free_bytes{zone}` | gauge | shared_dict 여유 공간 (zone별) |
+| 메트릭 | 타입 | 레이블 | 설명 |
+|--------|------|--------|------|
+| `luagate_http_requests_total` | counter | `action` | HTTP 전체 요청 수 |
+| `luagate_http_requests_denied_total` | counter | — | deny된 요청 수 (정책 + 스캐너 모두) |
+| `luagate_http_scanner_threats_total` | counter | `threat_type` | 스캐너 deny 시 위협 유형별 카운터 (ADR-006 §1.2) |
+| `luagate_http_response_time_ms` | histogram | — | 응답 시간 분포 |
+| `luagate_http_upstream_errors_total` | counter | — | upstream 502 수 |
+| `luagate_active_connections` | gauge | `type` (`http`/`stream`) | 현재 활성 연결 |
+| `luagate_stream_connections_total` | counter | — | 전체 스트림 연결 수 |
+| `luagate_stream_connections_denied_total` | counter | — | deny된 연결 수 |
+| `luagate_stream_bytes_sent_total` | counter | — | 총 송신 바이트 |
+| `luagate_stream_bytes_received_total` | counter | — | 총 수신 바이트 |
+| `luagate_stream_protocol_detected_total` | counter | `protocol` | 탐지된 프로토콜별 카운터 |
+| `luagate_policy_reload_total` | counter | — | reload 시도 횟수 |
+| `luagate_policy_reload_failures_total` | counter | — | reload 실패 횟수 |
+| `luagate_shared_dict_capacity_bytes` | gauge | `zone` | shared_dict 용량 (zone별) |
+| `luagate_shared_dict_free_bytes` | gauge | `zone` | shared_dict 여유 공간 (zone별) |
 
-> **shared_dict 메트릭**: `capacity`와 `free`를 별도 gauge로 분리. zone 레이블로 구분.
+> **shared_dict 메트릭**: `capacity`와 `free`를 별도 gauge로 분리. zone 레이블로 구분. 모든 5개 zone(`luagate_policy`, `luagate_state`, `luagate_metrics`, `luagate_stream_metrics`, `luagate_connections`)에서 노출.
 
 ## 8. Nginx 로그 설정
 
@@ -495,9 +495,6 @@ access_log /var/log/luagate/access.log luagate_access_json buffer=64k flush=5s;
     endscript
 }
 ```
-
-<!-- ADR 필요 -->
-> **TODO**: metrics-cardinality-and-export — low-cardinality 레이블 정책, route 정규화 전략, Prometheus export 형식 결정 시 ADR 필요
 
 <!-- ADR 필요 -->
 > **TODO**: log-redaction-and-retention — 민감정보 마스킹 대상/방법, 로그 보존 기간, 파기 정책 결정 시 ADR 필요

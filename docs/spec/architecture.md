@@ -62,13 +62,15 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 | --- | --- | --- | --- | --- |
 | `luagate_policy` | 정책 버전 포인터 + 버전별 blob | **Envelope**: `http:active_version`, `stream:active_version`(포인터) + `policy:<ver>:blob`, `policy:<ver>:meta`(blob); `source_version`(commit 기준) | reload worker | active_version pointer 교체 단위 (subsystem별 독립) |
 | `luagate_stream_metrics` | Stream 메트릭 (ADR-004) | 단순 카운터: `stream:metrics:*` | 각 worker (incr) | 키 단위 |
-| `luagate_metrics` | HTTP 메트릭 | 단순 카운터: `metrics:*` | 각 worker (incr) | 키 단위 |
+| `luagate_metrics` | HTTP 메트릭 | 단순 카운터: `metrics:*` + Histogram: `latency:*` (ADR-006 §3.2 참조) | 각 worker (incr) | 키 단위 |
 | `luagate_connections` | 활성 연결 수 | 단순 카운터: `active_http`, `active_stream` | 해당 worker | 키 단위 |
 | `luagate_state` | Reload/health 플래그 | **State**: `state:reload_flag`, `state:health` — version 필드 없음 | reload worker | 키 단위 |
 
 > **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):
 > 새 정책을 `policy:<new_version>:blob`에 먼저 기록한 뒤, `http:active_version` / `stream:active_version` 포인터를 교체한다.
 > 이렇게 하면 pointer 교체 이전까지 기존 worker는 old version을 계속 사용하며 무중단이 보장된다.
+
+> **메트릭 키 스키마 상세**: [ADR-006 §3.2](../design/adr/ADR-006-metrics-cardinality-export-model.md#32-전체-키-스키마-luagate_metrics-zone) 참조.
 
 ### 3.3 `luagate_policy` Versioned Keyspace 구조
 

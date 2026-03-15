@@ -153,10 +153,10 @@ TCP 스트림 프록시 세션 종료 시 아래 레코드를 `stream.log`에 �
 #### 4.3 메트릭 스키마
 
 Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
-집계 기준: **path_normalized** (path_raw가 아님).
+집계 기준: 경로 정규화(`path_normalized` 계산)는 로그 목적으로 `rewrite_by_lua`에서 수행한다. **메트릭 레이블에 경로를 사용하지 않는다** (ADR-006 §2 참조).
 
 **Cardinality 원칙**: 메트릭 레이블은 cardinality 폭발을 방지하기 위해 **low-cardinality** 값만 허용한다.
-- `path_normalized`: 허용. 그러나 UUID/세션ID 등 고유값이 포함된 경로는 정규화 단계에서 제거되어야 함 (예: `/api/v1/users/12345` → `/api/v1/users/:id`)
+- `path_normalized`: **메트릭 레이블 사용 금지** (ADR-006 §1.3). cardinality 폭발 위험. 로그 필드(`path_normalized`)로만 사용하며, 메트릭 집계 차원으로 사용하지 않는다.
 - `active_version`: cardinality 위험 있음. **메트릭 레이블에서 제거**, 정책 버전 추적은 `GET /api/v1/policies/status`로 조회
 - `deny_reason`: low-cardinality enum으로 제한 (최대 20개 고정값). 임의 문자열 허용 금지
 
@@ -187,6 +187,8 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
   - `luagate_stream_metrics` 키 prefix: `stream:metrics:*`
 - Histogram 버킷은 `latency:bucket:<ms>` 키로 shared dict에 저장 (ADR-001 §1.1 참조)
 - 메트릭 읽기는 `/metrics` 요청 시 `luagate_metrics` + `luagate_stream_metrics` 두 zone에서 집계
+
+> **ADR-006 보완**: 레이블 허용 목록, Histogram 키 스키마, export 모델, shared dict 용량 계획은 [ADR-006](./ADR-006-metrics-cardinality-export-model.md)에서 확정한다.
 
 ### §6 관리면 보안
 
