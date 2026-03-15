@@ -1,0 +1,29 @@
+{
+  "name": "luagate",
+  "version": "1.0.0",
+  "description": "> OpenResty(Nginx + LuaJIT) 기반 정책 구동 API/보안 게이트웨이",
+  "main": "commitlint.config.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dongwonkwak/luagate.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/dongwonkwak/luagate/issues"
+  },
+  "homepage": "https://github.com/dongwonkwak/luagate#readme",
+  "devDependencies": {
+    "@commitlint/cli": "^20.4.4",
+    "@commitlint/config-conventional": "^20.4.4"
+  }
+}
