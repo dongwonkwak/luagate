@@ -97,3 +97,11 @@ COMPLETED_REVIEW: DON-123-design (2026-03-15)
 | 2026-03-15 | DON-124 | ADR-007: Log redaction and retention policy | `docs/design/adr/ADR-007-log-redaction-and-retention.md`, `docs/spec/log-schema.md`, `docs/design/adr/ADR-004-log-metrics-admin-security.md` (§4.2b 부분 대체 주석) | 2회 리뷰 완료. 보안 리뷰 PASS |
 
 COMPLETED_REVIEW: DON-124-design (2026-03-15)
+
+## Phase 1-Core: HTTP 프록시 + 정책 엔진
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-15 | DON-97 | Nginx conf template + HTTP reverse proxy basic setup | `conf/nginx.conf`, `tests/integration/http/test_nginx_basic.t` | shared dict 8개 선언, 보안 강화(admin IP 제한, server_tokens off, XFF 차단). 1회 Codex 리뷰 예정 |
+
+COMPLETED_REVIEW: DON-97-code (2026-03-15)
