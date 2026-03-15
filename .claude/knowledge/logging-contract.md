@@ -9,22 +9,25 @@
 | Nginx native `access_log` | 기본 필드 (상태코드, latency 등) | 버퍼링, rotate(USR1), 성능 | 동적 필드 추가 제한 |
 | `log_by_lua` + `ngx.var` 설정 | LuaGate 전용 22개 필드 | 완전한 커스텀 | ngx.ctx 값 직접 접근 |
 
-**LuaGate 방식**: `log_by_lua`에서 `ngx.var.luagate_log_json` 변수를 설정하고,
-Nginx `log_format`이 이 변수를 access.log에 기록.
+**LuaGate 방식**: `log_by_lua`에서 전체 레코드를 `cjson.encode()`로 직렬화해
+`ngx.var.luagate_log_json`에 넣고, Nginx `log_format`이 이 값을 access.log에 기록.
+이미 JSON 한 줄이므로 `escape=json`을 다시 적용하지 않는다.
 
 ```nginx
-log_format luagate_json escape=json '$luagate_log_json';
+log_format luagate_json '$luagate_log_json';
 access_log /var/log/luagate/access.log luagate_json buffer=64k flush=5s;
 ```
 
 ```lua
 -- log_by_lua
+local cjson = require("cjson.safe")
+
 local record = {
     timestamp = ngx.var.time_iso8601,
     request_id = ngx.ctx.luagate.request_id,
     -- ... 22개 필드
 }
-ngx.var.luagate_log_json = cjson.encode(record)
+ngx.var.luagate_log_json = assert(cjson.encode(record))
 ```
 
 ## Decision Fields (판정 관련 필드)
