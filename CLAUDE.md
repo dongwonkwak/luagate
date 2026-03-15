@@ -12,7 +12,7 @@ CLAUDE.md는 Claude Code의 **coordinator** 역할을 정의한다.
 
 - AGENTS.md 불변식 전체 (`luagate_` prefix, fail-closed, `ngx.worker.id()`, hot reload 7단계, same-PR)
 - AGENTS.md 리뷰 관련 불변식 (Codex 역할 제한, result-template.md 경로 명시, 재리뷰 기해결 항목 지적 금지)
-- **이슈 시작 전 브랜치 생성** — 첫 파일 수정 전 `git checkout -b <Linear gitBranchName>` 필수 (AGENTS.md 불변식 7)
+- **이슈 시작 전 브랜치 생성** — 사용자 승인 직후 즉시 `git checkout -b <Linear gitBranchName>` 실행. 상세 규칙: [AGENTS.md 불변식 7](./AGENTS.md)
 - **spec/ADR 수정 시 sync-spec 필수** — `docs/spec/` 또는 `docs/design/adr/` 변경 시 Done 전환 전 `sync-spec` 스킬 invoke (AGENTS.md 불변식 8)
 - `ngx.ctx`에 정책 캐시 저장 금지
 - blocking I/O 핸들러 금지

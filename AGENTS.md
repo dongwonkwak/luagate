@@ -34,7 +34,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 4. **Hot Reload 7단계 준수** — staged → validate → hash → blob store → pointer swap (실패 시 LKG 유지)
 5. **Same-PR 규칙** — 코드 변경과 문서/spec 변경은 같은 PR에 포함
 6. **Linear 파일 경로 포인터** — 이슈 코멘트에 구현/테스트 파일 경로 포함
-7. **이슈 시작 전 브랜치 생성 필수** — 첫 번째 파일 수정 전 Linear `gitBranchName`으로 브랜치를 반드시 생성. main/epic 브랜치에 직접 커밋 금지. (`git checkout -b <branch>`)
+7. **이슈 시작 전 브랜치 생성 필수** — 사용자가 이슈 진행을 승인하는 순간 다른 어떤 작업보다 먼저 브랜치를 생성한다. 첫 번째 파일 수정 전 Linear `gitBranchName`으로 브랜치를 반드시 생성. main/epic 브랜치에 직접 커밋 금지. (`git checkout -b <gitBranchName>`)
 8. **spec/ADR 수정 시 sync-spec 필수** — `docs/spec/` 또는 `docs/design/adr/` 파일을 수정한 경우, 이슈 완료(Done 전환) 전에 반드시 `sync-spec` 스킬을 invoke하여 Linear 문서를 동기화한다.
 
 ## 리뷰 관련 불변식

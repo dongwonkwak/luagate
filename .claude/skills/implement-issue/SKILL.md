@@ -41,6 +41,15 @@ get_issue(DON-XXX) → 상세 조회
 
 `linear-update` 스킬 실행: 상태 변경 + 시작 코멘트
 
+### 3.5. 브랜치 생성 (필수 — 첫 파일 수정 전)
+
+```bash
+git checkout -b <Linear gitBranchName>
+# gitBranchName은 get_issue 응답의 gitBranchName 필드 사용
+```
+
+> **불변식**: 파일 수정 전 반드시 브랜치 생성. main에서 직접 수정 금지.
+
 ### 4. 에이전트 순차 호출
 
 #### 1회 리뷰 플로우
