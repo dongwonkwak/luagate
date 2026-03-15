@@ -24,7 +24,7 @@ version: "1.0"
 global:
   default_action: deny          # allow | deny (ADR-002: 기본값 deny)
 
-rules:                          # HTTP 규칙 목록 (http_rules 섹션)
+rules:                          # HTTP 규칙 목록 (top-level key: "rules")
   - id: allow-health            # 규칙 고유 식별자 (파일 전체 유일, subsystem 무관)
     description: "헬스체크 허용"
     enabled: true               # 기본값 true. false이면 평가 제외 (schema 검증은 수행)
@@ -45,7 +45,7 @@ rules:                          # HTTP 규칙 목록 (http_rules 섹션)
     action: deny
     tags: [security]
 
-stream_rules:                   # TCP 스트림 규칙 목록
+stream_rules:                   # TCP 스트림 규칙 목록 (top-level key: "stream_rules")
   - id: allow-tls-443
     description: "TLS 443 허용"
     enabled: true
@@ -242,7 +242,11 @@ active_version = sha256_hex(file_raw_bytes)
 
 - HTTP 서브시스템 active version: `luagate_policy["http:active_version"]`
 - Stream 서브시스템 active version: `luagate_policy["stream:active_version"]`
-- Admin API의 If-Match 비교 대상: `luagate_policy["http:active_version"]` (즉, `GET /api/v1/policies`의 `ETag`)
+- **If-Match 비교 대상 (subsystem별 분리)**:
+  - `PUT /api/v1/policies` 및 `POST /api/v1/policies/reload`의 `If-Match` 헤더 비교 대상: `luagate_policy["http:active_version"]`
+  - `GET /api/v1/policies`의 응답 `ETag` 값: `luagate_policy["http:active_version"]`
+  - Stream 서브시스템 active_version은 별도 조회 전용: `GET /api/v1/policies/version` 응답 내 `stream_version` 필드
+  - **근거**: PUT/reload API는 단일 정책 파일을 원자적으로 처리하며, http와 stream 규칙은 동일 파일에서 유래하므로 If-Match는 http active_version을 충돌 감지 기준으로 사용한다.
 
 ### 4.4 Hot Reload (ADR-003)
 
@@ -322,7 +326,8 @@ function detect_shadowed(rules):
 ## 6. Reload Audit Log
 
 정책 reload 성공/실패/partial 각 경우에 감사 로그를 기록한다.
-기록 필드 정의는 [admin-api.md — 감사 로그 섹션](./admin-api.md#감사-로그)을 참조한다.
+기록 필드 정의는 [admin-api.md §7 감사 로그 섹션](./admin-api.md#7-감사-로그-auditlog-섹션)을 참조한다.
+역방향 참조: admin-api.md §7 ↔ 이 섹션(policy-engine.md §6)은 감사 로그 필드 및 드롭 금지 원칙을 공유한다.
 
 | 결과 | 기록 필드 |
 | --- | --- |
@@ -335,13 +340,15 @@ function detect_shadowed(rules):
 
 ## 7. 관리 API 연동
 
-| 엔드포인트 | 기능 |
-| --- | --- |
-| `GET /api/v1/policies` | staged 정책 YAML 반환 (파일 기준 canonical source) |
-| `PUT /api/v1/policies` | 새 정책 저장 + validate + compile + commit. `If-Match: <http_active_version>` 필수 |
-| `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거. `If-Match` 선택 |
-| `GET /api/v1/policies/version` | 서브시스템별 active_version + ETag 반환 |
-| `GET /api/v1/policies/status` | 버전, 충돌 목록, 마지막 reload 시각 |
+| 엔드포인트 | 기능 | If-Match |
+| --- | --- | --- |
+| `GET /api/v1/policies` | staged 정책 YAML 반환 (파일 기준 canonical source). 응답 `ETag: "<http_active_version>"` 포함 | — |
+| `PUT /api/v1/policies` | 새 정책 저장 + validate + compile + commit | **필수** (`<http_active_version>`) |
+| `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거 | 선택 (제공 시 불일치이면 409) |
+| `GET /api/v1/policies/version` | 서브시스템별 active_version 조회 (`http_version`, `stream_version` 분리 반환) | — |
+| `GET /api/v1/policies/status` | 버전, 충돌 목록, 마지막 reload 시각 | — |
+
+> **If-Match 기준값**: `luagate_policy["http:active_version"]`. Stream 서브시스템의 active_version은 `GET /api/v1/policies/version` 응답의 `stream_version` 필드로만 조회 가능하며, If-Match 비교 대상이 아니다. 상세: §4.3 참조.
 
 ## 8. 의존성
 

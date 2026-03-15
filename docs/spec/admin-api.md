@@ -400,6 +400,8 @@ Authorization: Bearer <token>
 
 감사 로그 상세 스키마: [log-schema.md §5](./log-schema.md#5-감사-로그-auditlog-adr-004-63)
 
+역방향 참조: [policy-engine.md §6 Reload Audit Log](./policy-engine.md#6-reload-audit-log) ↔ 이 섹션은 감사 로그 필드 및 드롭 금지 원칙을 공유한다.
+
 > **감사 로그 드롭 금지**: audit 기록 실패 = mutation/reload 거부.
 > 이 규칙은 코드 불변식이며 설정으로 우회 불가.
 
