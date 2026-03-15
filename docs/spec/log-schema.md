@@ -314,7 +314,6 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
   "timestamp": "2026-03-14T07:00:00Z",
   "event": "policy_reload_success",
   "actor_ip": "127.0.0.1",
-  "trigger": "api",
   "previous_version": "a3f2c1d4...",
   "new_version": "b4e3f2a1...",
   "subsystem": "http"
@@ -327,10 +326,20 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
   "timestamp": "2026-03-14T07:00:01Z",
   "event": "policy_reload_failure",
   "actor_ip": "127.0.0.1",
-  "trigger": "api",
   "stage": "conflict_detect",
   "reason": "duplicate rule id: allow-health",
   "current_version": "a3f2c1d4..."
+}
+```
+
+**정책 reload partial (`policy_reload_partial`):**
+```json
+{
+  "timestamp": "2026-03-14T07:00:00Z",
+  "event": "policy_reload_partial",
+  "actor_ip": "127.0.0.1",
+  "http_result": "committed",
+  "stream_result": "lkg_retained"
 }
 ```
 

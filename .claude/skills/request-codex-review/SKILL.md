@@ -1,7 +1,7 @@
 ---
 name: request-codex-review
-description: "Codex CLI 리뷰 프롬프트 파일 생성 + PROGRESS.md 대기 상태 기록 + 사람에게 실행 명령 안내."
-trigger: "request-codex-review | codex 리뷰 | 리뷰 요청"
+description: "review.md 파일 생성 + PROGRESS.md PENDING_REVIEW 마커 기입 + 사람에게 실행 명령 안내. codex 자체는 실행하지 않음."
+trigger: "request-codex-review | codex 리뷰 파일 생성 | 리뷰 프롬프트 생성"
 ---
 
 # request-codex-review Skill
@@ -23,76 +23,83 @@ Codex CLI 리뷰를 위한 프롬프트 파일을 생성하고, 사람에게 실
 git diff main...HEAD --name-only
 ```
 
-### 2. 리뷰 프롬프트 파일 생성
+### 2. 생성 전 확인
+
+파일을 생성하기 전에 반드시 사람에게 확인을 받는다.
+
+**최초 리뷰 시:**
+```
+다음 파일을 생성합니다:
+
+  📄 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md
+  📄 결과 파일: .claude/reviews/DON-XXX-{type}-result.md  ← codex 실행 후 생성됨
+
+생성할까요? (변경 파일 목록: N개)
+```
+
+**재리뷰 시** (review.md 또는 result.md가 이미 존재하는 경우):
+```
+재리뷰를 준비합니다:
+
+  📄 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md  ← 이미 존재 (덮어쓰지 않음)
+  📄 결과 파일: .claude/reviews/DON-XXX-{type}-result.md  ← 이미 존재 (append됨)
+
+PROGRESS.md에 PENDING_REVIEW 마커를 재기입합니다. 진행할까요?
+```
+
+사람이 승인하면 3단계로 진행. 거부하면 중단.
+
+### 3. 리뷰 프롬프트 파일 생성
 
 출력 경로: `.claude/reviews/DON-XXX-{type}-review.md`
 
-**파일 내용:**
+`review-template.md`를 기반으로 아래 항목을 채워 생성한다:
 
-```markdown
-# Codex Review: DON-XXX — <이슈 제목> (<type>)
+- `{{ISSUE}}` → 이슈 번호 (예: `DON-97`)
+- `{{TYPE}}` → 리뷰 유형 (`code` | `design`)
+- `{{TYPE_LABEL}}` → 리뷰 유형 한국어 설명
+  - `code` → `코드 리뷰 — 구현 정확성, 보안, 테스트 완전성 검토`
+  - `design` → `설계 리뷰 — 아키텍처 결정의 타당성, 대안 검토, ADR 품질 검토`
+- `{{TITLE}}` → Linear 이슈 제목
+- `{{CHANGED_FILES}}` → `git diff main...HEAD --name-only` 결과
+- `{{SPEC_DOCS}}` → 관련 spec/ADR 경로
+- `{{ACCEPTANCE_CRITERIA}}` → Linear 이슈 AC 항목
+- `{{RESULT_PATH}}` → `.claude/reviews/DON-XXX-{type}-result.md`
 
-## 리뷰 유형
-<설계 리뷰 | 코드 리뷰>
+### 4. PROGRESS.md PENDING_REVIEW 마커 기입
 
-## 변경 파일 목록
-(git diff main...HEAD --name-only 결과)
+PROGRESS.md 끝에 아래 형식으로 추가한다:
 
-## 관련 스펙 문서
-- docs/spec/<관련파일>.md
-- docs/design/adr/ADR-NNN-*.md (해당 시)
-
-## Acceptance Criteria
-(Linear 이슈에서 추출)
-
-## 적용 불변식 (AGENTS.md)
-- luagate_ prefix 필수
-- fail-closed (에러 → deny)
-- ngx.worker.id() 사용 (PID 아님)
-- hot reload 7단계 준수
-- same-PR 규칙 (코드 + 문서)
-- FFI free 함수 호출 의무
-
-## 리뷰 체크리스트
-(docs/spec/ 및 .claude/knowledge/review-checklist.md 기준)
-
-### 코드 품질
-- [ ] 불변식 위반 없음
-- [ ] 에러 핸들링 (fail-closed)
-- [ ] 테스트 커버리지 충분
-
-### 보안
-- [ ] 인증/인가 처리
-- [ ] PII 레독션
-- [ ] OWASP 패턴
-
-## 리뷰 관점
-<설계 리뷰: 아키텍처 결정의 타당성, 대안 검토, ADR 품질>
-<코드 리뷰: 구현 정확성, 보안, 테스트 완전성>
-
-## 결과 파일 출력 경로
-.claude/reviews/DON-XXX-{type}-result.md
+```
+PENDING_REVIEW: DON-XXX-{type}
 ```
 
-### 3. PROGRESS.md 대기 상태 기록
+스크립트(`scripts/codex-review.sh`)가 이 마커를 읽어 리뷰 파일 경로를 자동으로 결정한다.
 
-PROGRESS.md의 `## 현재 대기 중` 섹션에 추가:
-```
-- DON-XXX: <type> 리뷰 대기 중 (.claude/reviews/DON-XXX-<type>-review.md)
-```
+> **NOTE (재리뷰 시)**: 이전 `COMPLETED_REVIEW: DON-XXX-{type} (날짜)` 라인이 이미 있더라도
+> 그 아래에 `PENDING_REVIEW: DON-XXX-{type}` 를 추가한다. 스크립트는 `tail -1`로
+> 마지막 마커를 읽으므로 정상 동작한다.
 
-### 4. 사람에게 실행 명령 안내
+### 5. 사람에게 실행 명령 안내
 
 ```
 리뷰 준비 완료.
 
-실행 명령:
-  codex exec - < .claude/reviews/DON-XXX-<type>-review.md
+리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md
+결과 파일: .claude/reviews/DON-XXX-{type}-result.md
+
+실행 명령 (스크립트 사용 — 권장):
+  ./scripts/codex-review.sh
+
+⚠️ 직접 실행은 최초 리뷰에만 사용. 재리뷰에서 사용하면 기존 result.md 이력이 덮어씌워집니다:
+  codex exec - < .claude/reviews/DON-XXX-{type}-review.md > .claude/reviews/DON-XXX-{type}-result.md
 
 결과 파일 생성 후 "계속 진행해"라고 말씀해주세요.
 ```
 
 ## 참조
 
+- `.claude/skills/request-codex-review/review-template.md` — 리뷰 프롬프트 템플릿
+- `.claude/skills/request-codex-review/result-template.md` — 결과 파일 포맷 템플릿
 - `.claude/knowledge/review-checklist.md` — 리뷰 체크리스트 전체
-- `AGENTS.md` — 불변식 목록
+- `AGENTS.md` — 불변식 목록 (리뷰 관련 불변식 포함)

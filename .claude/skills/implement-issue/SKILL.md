@@ -52,6 +52,7 @@ architect (필요 시: 설계 판단 필요 여부 확인)
   → request-codex-review (코드 리뷰)
   → [대기: 사람이 Codex CLI 실행]
   → 피드백 반영 (implementer/tester 재호출)
+  → result.md 체크박스 업데이트 (반영된 항목 [ ] → [x])
   → security-reviewer
   → 완료 처리
 ```
@@ -68,6 +69,7 @@ architect (설계 산출물 생성)
   → request-codex-review (코드 리뷰)
   → [대기: 사람이 Codex CLI 실행]
   → 코드 피드백 반영
+  → result.md 체크박스 업데이트 (반영된 항목 [ ] → [x])
   → security-reviewer
   → 완료 처리
 ```

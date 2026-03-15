@@ -73,3 +73,15 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 날짜 | 이슈 | 내용 |
 |------|------|------|
 | 2026-03-15 | DON-101~102, DON-112~114 | DON-121 리뷰 작업 중 선반영 확인 → Linear Done 전환. 모든 AC 충족. |
+
+## Epic 6: Codex 리뷰 워크플로우 구현 (DON-128)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-14 | DON-129 | AGENTS.md 리뷰 불변식 추가 | `AGENTS.md`, `CLAUDE.md` | 완료 |
+| 2026-03-14 | DON-130 | request-codex-review 스킬 생성 | `.claude/skills/request-codex-review/SKILL.md`, `review-template.md`, `result-template.md` | 완료 |
+| 2026-03-14 | DON-131 | scripts/codex-review.sh 생성 + scripts/README.md | `scripts/codex-review.sh`, `scripts/README.md` | 완료 |
+| 2026-03-14 | DON-132 | docs/workflow/codex-review.md 작성 | `docs/workflow/codex-review.md` | 완료 |
+
+COMPLETED_REVIEW: DON-128-code (2026-03-14)
+COMPLETED_REVIEW: DON-99-code (2026-03-15)
