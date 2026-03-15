@@ -53,7 +53,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 
-- **Envelope zone**: subsystem별 1 key에 data + version + metadata blob 전체를 하나로 원자적 교체. 버전 필드를 포함한다.
+- **Envelope zone**: versioned keyspace(`policy:<ver>:blob`, `policy:<ver>:meta`)에 새 버전을 미리 기록한 뒤 active version pointer 키(`http:active_version`, `stream:active_version`)를 교체하는 **pointer swap** 방식으로 원자성을 보장한다. blob + meta는 pointer swap 이전에 기록되고 swap 이후에도 유지된다. 원자적 단위는 pointer 키 하나(single key write)이며, shared dict는 다중 키 트랜잭션을 제공하지 않는다.
 - **State zone**: reload flag, health flag 등 단순 상태 플래그만 저장. version 필드 없음. 키 단위 독립 갱신.
 
 ### 3.2 Zone 목록 및 역할
@@ -87,8 +87,9 @@ luagate_policy["policy:<sha256>:blob"] = "<json>"
 luagate_policy["policy:<sha256>:meta"] = "<json>"
 ```
 
-> **LKG(Last-Known-Good)**: LKG 버전 포인터는 meta 내 `lkg_version` 필드로 보관한다.
-> commit 실패 시 active_version을 lkg_version으로 복원한다 (policy-engine.md §4.1 step [7] 참조).
+> **LKG(Last-Known-Good)**: LKG란 "마지막으로 성공적으로 activate된 버전의 versioned keyspace 데이터(`policy:<ver>:blob`, `policy:<ver>:meta`)가 shared dict에 남아 있는 상태"를 의미한다.
+> commit 실패 = pointer swap 이전이므로 `active_version` 포인터는 변경되지 않았다. 따라서 **롤백 불필요** — 기존 active pointer가 이미 이전 성공 버전을 가리키고 있다.
+> cold start 시 shared dict가 비어 있으면 LKG를 사용할 수 없다 (policy-engine.md §4.1 참조).
 
 ### 3.4 L1 캐시 무효화 전략
 
@@ -117,9 +118,11 @@ end
 
 ### 3.5 LKG (Last-Known-Good) 형성 및 사용
 
-- **형성**: 첫 번째 성공 reload 완료 시 LKG 포인터를 `luagate_policy["policy:<active_sha256>:meta"]`의 `lkg_version` 필드에 기록
-- **사용**: 다음 reload 실패(validate/compile/commit 오류) 시 현재 active 정책을 LKG로 복원
-- **Cold start 조건**: parse + validate + conflict_detect + compile 단계 중 하나라도 실패 시 LKG 사용. LKG 없으면 fail-closed (기동 거부)
+- **형성**: 첫 번째 성공 reload 완료 시 LKG가 형성된다. 구체적으로, `policy:<sha256>:blob`와 `policy:<sha256>:meta` 키가 shared dict에 기록되고 `http:active_version` / `stream:active_version` pointer 교체(commit)까지 성공한 상태다.
+- **사용**: 다음 reload 실패 시 **롤백 절차 없음** — commit 이전에 실패하면 active pointer가 변경되지 않았으므로 기존 버전의 blob/meta가 shared dict에 그대로 유지된다. 각 worker의 module-level upvalue는 active pointer가 변경되지 않은 한 자동으로 이전 캐시를 계속 사용한다.
+- **Partial commit**: commit 단계([7])에서 HTTP 서브시스템 성공, Stream 실패 시 HTTP `active_version`만 교체되고 Stream은 이전 버전 유지. 각 서브시스템은 독립적으로 LKG 상태를 보존한다.
+- **Cold start 제약**: 서버 최초 기동 시 shared dict가 비어 있으므로 LKG 없음. 이 경우 정책 로드 실패 → fail-closed (기동 거부). LKG는 첫 번째 성공적인 reload 이후에만 형성된다.
+- **LKG는 자동 롤백 메커니즘이 아님**: "이전 성공 버전이 메모리(shared dict)에 남아 있어 즉시 재활성화 가능한 상태"를 의미한다. 명시적 롤백이 필요하다면 `PUT /api/v1/policies`로 이전 YAML을 재제출하거나 `POST /api/v1/policies/reload`를 트리거해야 한다.
 
 ## 4. 요청 처리 파이프라인
 

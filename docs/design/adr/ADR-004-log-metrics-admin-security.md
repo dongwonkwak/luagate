@@ -155,9 +155,12 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 > **주의**: `luagate_requests_total`에서 `policy_version` 레이블 제거. 정책 버전 추적은 `luagate_policy_info` 게이지로 대체.
 
 **저장 방식:**
-- 카운터는 `luagate_metrics` shared dict에 원자적으로 증가
+- HTTP 카운터는 `luagate_metrics` shared dict에 원자적으로 증가
+- Stream 카운터는 **`luagate_stream_metrics`** shared dict에 원자적으로 증가 (HTTP metrics zone과 분리)
+  - 분리 이유: stream 파이프라인과 HTTP 파이프라인은 Nginx에서 독립적인 context를 사용하므로, zone을 분리하여 write 충돌 최소화 및 디버깅 용이성 확보
+  - `luagate_stream_metrics` 키 prefix: `stream:metrics:*`
 - Histogram 버킷은 `latency:bucket:<ms>` 키로 shared dict에 저장 (ADR-001 §1.1 참조)
-- 메트릭 읽기는 `/metrics` 요청 시 shared dict에서 직접 집계
+- 메트릭 읽기는 `/metrics` 요청 시 `luagate_metrics` + `luagate_stream_metrics` 두 zone에서 집계
 
 ### §6 관리면 보안
 
@@ -182,10 +185,10 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 
 | 이벤트 | 기록 필드 |
 |--------|----------|
-| 정책 변경 (`PUT /api/v1/policies`) | timestamp, event=policy_update, src_ip, staged_policy_version, active_policy_version |
-| 정책 리로드 (`POST /api/v1/policies/reload`) | timestamp, event=policy_reload, src_ip, trigger=api\|hup, status, policy_version |
+| 정책 변경 (`PUT /api/v1/policies`) | timestamp, event=policy_update, src_ip, staged_version, active_http_version, active_stream_version |
+| 정책 리로드 (`POST /api/v1/policies/reload`) | timestamp, event=policy_reload, src_ip, trigger=api\|hup, status, active_http_version, active_stream_version |
 | 인증 실패 | timestamp, event=auth_failure, src_ip, path, reason |
-| 서버 기동/종료 | timestamp, event=startup\|shutdown, policy_version |
+| 서버 기동/종료 | timestamp, event=startup\|shutdown, active_http_version, active_stream_version |
 
 #### 6.3b 위협 모델
 

@@ -98,12 +98,17 @@ sequenceDiagram
         A->>A: SHA256 해시 계산 (new_version)
         A->>SD: set("policy:<new_version>:blob", ...)
         A->>SD: set("policy:<new_version>:meta", ...)
-        A->>SD: set("active_policy_version", new_version)
+        Note over A,SD: commit 단계 — HTTP/Stream 서브시스템 독립적으로 pointer swap
+        A->>SD: set("http:active_version", new_version)
+        Note over SD: HTTP pointer swap 완료 (원자적 단위: 단일 key write)
+        A->>SD: set("stream:active_version", new_version)
+        Note over SD: Stream pointer swap 완료
+        A->>SD: set("source_version", new_version)
         A->>SD: delete("reload_lock")
         A->>A: 충돌 경고 로그 기록
         A-->>T: 200 OK
         Note over W: 다음 요청 처리 시
-        W->>SD: active_policy_version 확인
+        W->>SD: http:active_version 확인 (HTTP worker)
         alt 버전 변경 감지
             W->>SD: policy:<version>:blob 로드
         end
@@ -113,18 +118,35 @@ sequenceDiagram
 **정책 버전 관리:**
 
 - 버전 식별자: 정책 파일 전체 내용의 **SHA256 해시** (16진수 문자열)
-- 저장 위치: `luagate_policy` shared dict의 `active_policy_version` 키
+- 저장 위치: `luagate_policy` shared dict — **HTTP/Stream 서브시스템 분리 키**:
+  - `http:active_version` — HTTP 서브시스템 활성 버전 pointer
+  - `stream:active_version` — Stream 서브시스템 활성 버전 pointer
+  - `source_version` — canonical source 파일 SHA256 (PUT ETag/If-Match 기준)
 - 모든 요청 로그 및 메트릭에 현재 `policy_version` 포함
 - 예: `policy_version: "a3f2c1d4e5b6..."`
+
+**Partial commit (HTTP/Stream 독립적 commit):**
+
+commit 단계([7])에서 HTTP와 Stream의 pointer swap은 독립적으로 수행된다.
+한쪽 서브시스템의 pointer swap이 실패해도 성공한 서브시스템의 버전은 교체된 상태를 유지한다.
+실패한 서브시스템은 active pointer가 변경되지 않으므로 **롤백 불필요** — 이전 blob/meta가 shared dict에 그대로 유지된다.
+
+| 시나리오 | HTTP active_version | Stream active_version |
+|----------|--------------------|-----------------------|
+| 전체 성공 | new_version | new_version |
+| HTTP 성공, Stream 실패 | new_version | 이전 버전 유지 |
+| HTTP 실패, Stream 성공 | 이전 버전 유지 | new_version |
+| 전체 실패 | 이전 버전 유지 | 이전 버전 유지 |
 
 **Worker 전파 메커니즘:**
 
 각 worker는 요청 처리 시작 시(`access_by_lua_block` 진입 전):
-1. `luagate_policy:get("active_policy_version")`으로 shared dict 버전 확인
+1. HTTP: `luagate_policy:get("http:active_version")`으로 shared dict 버전 확인
 2. 로컬 캐시 버전과 다르면 `policy:<version>:blob`를 shared dict에서 읽어 worker module upvalue에 캐시
 3. 로컬 버전 업데이트
 4. 요청 처리 계속
 
+Stream worker는 동일한 방식으로 `stream:active_version`을 확인한다.
 이 방식으로 reload 완료 후 **모든 worker가 다음 요청 시** 새 정책을 사용한다.
 
 **실패 안전성 (last-known-good):**
@@ -134,7 +156,7 @@ sequenceDiagram
 | YAML 파싱 오류 | last-known-good 유지, ERROR 로그 |
 | Schema 검증 실패 | last-known-good 유지, ERROR 로그 |
 | 충돌 감지 | 로드 계속, WARN 로그 |
-| shared dict 쓰기 실패 | last-known-good 유지, ERROR 로그, `active_policy_version` 미변경 |
+| shared dict 쓰기 실패 | last-known-good 유지, ERROR 로그, `http:active_version` / `stream:active_version` 미변경 |
 | 동시 reload 요청 | 첫 요청만 lock 획득, 나머지는 `409 ReloadInProgress` 반환 |
 
 서버 최초 기동 시 정책 로드 실패 → 서버 시작 실패(fatal).
@@ -146,7 +168,7 @@ sequenceDiagram
 ### 긍정적 결과
 
 - **무중단 업데이트**: 정책 변경 시 Nginx worker 재시작 불필요
-- **원자성**: versioned keyspace 저장 후 `active_policy_version` 단일 키 교체로 partial update 방지
+- **원자성**: versioned keyspace(blob + meta) 저장 후 `http:active_version` / `stream:active_version` 단일 키 교체(pointer swap)로 partial update 방지. 서브시스템별 독립 commit으로 한쪽 실패 시에도 성공한 서브시스템은 새 버전 적용
 - **실패 안전**: last-known-good 보장으로 잘못된 정책이 적용되지 않음
 - **감사 추적**: 모든 로그/메트릭에 policy_version 포함
 
