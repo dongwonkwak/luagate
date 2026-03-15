@@ -68,6 +68,8 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 2026-03-14 | DON-113 | security-scanner + admin-api 수정 | `docs/spec/security-scanner.md`, `docs/spec/admin-api.md` | 에러 3계층, 스캔 계약, 상태 머신, 에러 contract |
 | 2026-03-14 | DON-114 | c-ffi-modules ABI 문서 격상 | `docs/spec/c-ffi-modules.md` | 헤더 시그니처, 에러 enum, radix lifecycle, fuzzing |
 
-## 현재 대기 중
+## Epic 5: Spec Review Fixes — Linear 상태 정리 (2026-03-15)
 
-- DON-121: design 리뷰 대기 중 (`.claude/reviews/DON-121-design-review.md`)
+| 날짜 | 이슈 | 내용 |
+|------|------|------|
+| 2026-03-15 | DON-101~102, DON-112~114 | DON-121 리뷰 작업 중 선반영 확인 → Linear Done 전환. 모든 AC 충족. |
