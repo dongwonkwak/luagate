@@ -82,3 +82,4 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 2026-03-14 | DON-132 | docs/workflow/codex-review.md 작성 | `docs/workflow/codex-review.md` | 완료 |
 
 COMPLETED_REVIEW: DON-128-code (2026-03-14)
+COMPLETED_REVIEW: DON-99-code (2026-03-15)
