@@ -53,7 +53,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 | Zone | 역할 | Key Model | Write Owner | Atomicity Unit |
 | --- | --- | --- | --- | --- |
-| `luagate_policy` | 정책 버전 포인터 + 버전별 blob | `http:active_version`, `stream:active_version`, `policy:<ver>:blob`, `policy:<ver>:meta` | reload worker | active_version pointer 교체 단위 |
+| `luagate_policy` | 정책 버전 포인터 + 버전별 blob | `http:active_version`, `stream:active_version`, `source_version`, `policy:<ver>:blob`, `policy:<ver>:meta` | reload worker | active_version pointer 교체 단위 |
 | `luagate_stream_metrics` | Stream 메트릭 | `stream:metrics:*` | 각 worker (incr) | 키 단위 |
 | `luagate_metrics` | HTTP 메트릭 | `metrics:*` | 각 worker (incr) | 키 단위 |
 | `luagate_connections` | 활성 연결 수 | `active_http`, `active_stream` | 해당 worker | 키 단위 |
@@ -69,6 +69,9 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 -- 서브시스템별 active version pointer (단순 string 값)
 luagate_policy["http:active_version"]   = "<sha256 hex>"   -- HTTP 활성 버전
 luagate_policy["stream:active_version"] = "<sha256 hex>"   -- Stream 활성 버전
+
+-- canonical source 파일 버전 (GET /api/v1/policies ETag 및 PUT If-Match 기준)
+luagate_policy["source_version"]        = "<sha256 hex>"   -- canonical source SHA256 (commit 완료 후 기록)
 
 -- 버전별 blob (JSON 직렬화된 compiled rules)
 luagate_policy["policy:<sha256>:blob"] = "<json>"
