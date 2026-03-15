@@ -94,3 +94,6 @@ COMPLETED_REVIEW: DON-123-design (2026-03-15)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-15 | DON-123 | ADR-006: Metrics cardinality and export model | `docs/design/adr/ADR-006-metrics-cardinality-export-model.md`, `docs/design/adr/ADR-004-log-metrics-admin-security.md` (§4.3 수정), `docs/spec/architecture.md` (§3.2 수정), `docs/spec/log-schema.md` (§7 수정) | 2회 리뷰 완료. 보안 리뷰 PASS |
+| 2026-03-15 | DON-124 | ADR-007: Log redaction and retention policy | `docs/design/adr/ADR-007-log-redaction-and-retention.md`, `docs/spec/log-schema.md`, `docs/design/adr/ADR-004-log-metrics-admin-security.md` (§4.2b 부분 대체 주석) | 2회 리뷰 완료. 보안 리뷰 PASS |
+
+COMPLETED_REVIEW: DON-124-design (2026-03-15)

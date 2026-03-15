@@ -483,7 +483,33 @@ access_log /var/log/luagate/access.log luagate_access_json buffer=64k flush=5s;
 
 ```
 # /etc/logrotate.d/luagate
-/var/log/luagate/*.log {
+# 보존 기간은 ADR-007 §4.2 확정 정책 기준
+/var/log/luagate/access.log
+/var/log/luagate/stream.log {
+    daily
+    rotate 90
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        kill -USR1 $(cat /var/run/nginx.pid)
+    endscript
+}
+
+/var/log/luagate/audit.log {
+    daily
+    rotate 365
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        kill -USR1 $(cat /var/run/nginx.pid)
+    endscript
+}
+
+/var/log/luagate/error.log {
     daily
     rotate 30
     compress
@@ -496,12 +522,14 @@ access_log /var/log/luagate/access.log luagate_access_json buffer=64k flush=5s;
 }
 ```
 
-<!-- ADR 필요 -->
-> **TODO**: log-redaction-and-retention — 민감정보 마스킹 대상/방법, 로그 보존 기간, 파기 정책 결정 시 ADR 필요
+> **Redaction 및 보존 정책**: [ADR-007 로그 Redaction 정책 + 보존/파기 기간](../design/adr/ADR-007-log-redaction-and-retention.md) 참조.
+> 민감 헤더(Authorization, Cookie, X-API-Key, X-Auth-Token) 전체 마스킹, query_string 패턴 기반 부분 마스킹,
+> access.log 90일 / audit.log 365일 보존, redaction 실패 시 fail-closed(전체 마스킹) 확정.
 
 ## 10. 의존성
 
 - [ADR-004](../design/adr/ADR-004-log-metrics-admin-security.md) — 스키마 원본 정의
+- [ADR-007](../design/adr/ADR-007-log-redaction-and-retention.md) — Redaction 정책 + 보존/파기 기간
 - [spec/http-pipeline.md](./http-pipeline.md) — access.log 생성 단계 (27필드)
 - [spec/stream-pipeline.md](./stream-pipeline.md) — stream.log 생성 단계 (18필드)
 - [spec/admin-api.md](./admin-api.md) — audit.log 생성 단계
