@@ -660,3 +660,30 @@ GET /api/v1/%2e%2e/admin?foo=bar
 --- response_body_like: "path_raw":"/api/v1/%2e%2e/admin"
 --- response_body_like: "different":true
 --- LAST
+
+
+
+=== TEST 24: Admin /api/ — 401 응답에 WWW-Authenticate 헤더 포함
+--- http_config eval: $::http_config
+--- config
+    location /api/ {
+        content_by_lua_block {
+            local auth = ngx.req.get_headers()["Authorization"]
+            if not auth or not auth:match("^Bearer .+") then
+                ngx.status = 401
+                ngx.header["Content-Type"] = "application/json"
+                ngx.header["WWW-Authenticate"] = 'Bearer realm="luagate-admin"'
+                ngx.say('{"error":"Unauthorized"}')
+                return
+            end
+            ngx.status = 501
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"error":"Not Implemented"}')
+        }
+    }
+--- request
+GET /api/policies
+--- response_code: 401
+--- response_headers
+WWW-Authenticate: Bearer realm="luagate-admin"
+--- LAST

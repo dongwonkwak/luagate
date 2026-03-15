@@ -58,7 +58,6 @@ test-docker:
 	  -v "$(CURDIR)/tests:/luagate/tests:ro" \
 	  -v "$(CURDIR)/policies:/luagate/policies:ro" \
 	  -e TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot \
-	  --name luagate-test-run \
 	  luagate-test \
 	  prove -r -v tests/integration/http/; \
 	EXIT_CODE=$$?; \
