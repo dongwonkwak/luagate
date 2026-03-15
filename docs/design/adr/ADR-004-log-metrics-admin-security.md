@@ -128,6 +128,13 @@ TCP 스트림 프록시 세션 종료 시 아래 레코드를 `stream.log`에 �
 
 #### 4.2b 로그 Redaction 정책
 
+> **[ADR-007에 의해 부분 대체]** 이 조항의 일부 결정은 [ADR-007](./ADR-007-log-redaction-and-retention.md)에 의해 갱신되었다:
+> - `X-API-Key`, `X-Auth-Token` 헤더: P2(권장) → **P1(필수)** 격상
+> - `query_string` redaction 수행 시점: `log_by_lua` → **`rewrite_by_lua`** 변경
+> - 민감 query 파라미터 목록 확장 및 패턴 매칭 규칙 구체화
+>
+> 현행 정책은 [ADR-007 §1~§3](./ADR-007-log-redaction-and-retention.md)을 따른다.
+
 보안/개인정보 보호를 위해 다음 헤더/필드의 값을 로그에 기록하기 전에 마스킹한다.
 
 **마스킹 대상 (우선순위 순):**

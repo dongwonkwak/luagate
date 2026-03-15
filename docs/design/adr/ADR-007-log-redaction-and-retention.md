@@ -7,6 +7,7 @@
 | **Deciders** | LuaGate Architects |
 | **Issue** | [DON-124](https://linear.app/dongwon/issue/DON-124) |
 | **Depends on** | [ADR-004](./ADR-004-log-metrics-admin-security.md) |
+| **Supersedes** | ADR-004 §4.2b (redaction 우선순위 P2 → P1 격상: `X-API-Key`, `X-Auth-Token` 헤더; query_string redaction 수행 시점 `log_by_lua` → `rewrite_by_lua` 변경) |
 
 ---
 
@@ -191,29 +192,20 @@ ADR-004 §6.3의 원칙을 이 ADR에서도 재확인한다: **감사 로그 기
 
 GDPR Article 17(잊힐 권리) 삭제 요청이 수신된 경우, 자동화 파이프라인이 구축되기 전까지 아래 임시 절차를 적용한다.
 
+**원칙: 감사 로그 원본 직접 수정 금지**
+
+§4.3의 immutability 원칙에 따라, GDPR 삭제 요청이 수신되더라도 logrotate 자동 만료 전에는 감사 로그 원본 파일을 직접 수정(`sed -i` 등)하지 않는다. GDPR 삭제 의무는 logrotate 보존 기간 만료를 통한 자동 파기 + erasure ledger 기록 + 접근 통제로 이행한다.
+
 **임시 절차 (수동):**
 
-1. ops 팀이 삭제 대상 `src_ip` 또는 식별자를 확정한다.
-2. 아래 스크립트를 수동으로 실행하여 해당 레코드를 로그 파일에서 제거한다.
+1. ops 팀이 삭제 대상 식별자(`src_ip` 등)와 관련 로그 날짜 범위를 확정한다.
+2. 해당 식별자와 날짜 범위를 erasure ledger에 즉시 기록한다.
+   - 기록 항목: 접수 시각, 담당자, 대상 식별자, 날짜 범위, 예상 자동 파기 시점(보존 기간 만료일)
+3. 해당 날짜 범위 로그 파일에 대한 외부 접근(로그 수집 파이프라인, 분석 도구 등)을 차단한다.
+4. logrotate 보존 기간 만료 후 해당 로그 파일이 자동 삭제됨을 확인하고 ledger에 완료 기록을 추가한다.
+5. 삭제 완료(logrotate 자동 파기 확인) 사실을 요청자에게 회신한다.
 
-```bash
-# /opt/luagate/ops/gdpr-erasure.sh (수동 실행 전용)
-# 사용법: sudo bash gdpr-erasure.sh <대상_IP>
-TARGET_IP="$1"
-LOG_FILES=(
-    /var/log/luagate/access.log*
-    /var/log/luagate/stream.log*
-    /var/log/luagate/audit.log*
-)
-for f in "${LOG_FILES[@]}"; do
-    [ -f "$f" ] && sed -i "/${TARGET_IP}/d" "$f"
-done
-```
-
-3. 실행 결과(실행 시각, 담당자, 대상 식별자)를 별도 삭제 대장(erasure ledger)에 기록한다.
-4. 삭제 완료 확인을 요청자에게 회신한다.
-
-> **주의**: 이 절차는 압축된 로테이션 파일(`.gz`)에는 적용되지 않는다. 압축 파일에 대한 처리는 `gunzip` 후 동일 절차를 적용하고 재압축한다.
+> **근거**: §4.3 immutability 원칙에 따라 보존 기간 내 로그 원본 수정은 logrotate 자동화만 허용한다. erasure ledger 기록 + 접근 통제 적용으로 GDPR 요구사항(삭제 의사 표명 처리 및 기록 보관)을 충족한다.
 
 **영구 자동화 계획:**
 

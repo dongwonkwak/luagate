@@ -483,7 +483,33 @@ access_log /var/log/luagate/access.log luagate_access_json buffer=64k flush=5s;
 
 ```
 # /etc/logrotate.d/luagate
-/var/log/luagate/*.log {
+# 보존 기간은 ADR-007 §4.2 확정 정책 기준
+/var/log/luagate/access.log
+/var/log/luagate/stream.log {
+    daily
+    rotate 90
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        kill -USR1 $(cat /var/run/nginx.pid)
+    endscript
+}
+
+/var/log/luagate/audit.log {
+    daily
+    rotate 365
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        kill -USR1 $(cat /var/run/nginx.pid)
+    endscript
+}
+
+/var/log/luagate/error.log {
     daily
     rotate 30
     compress
