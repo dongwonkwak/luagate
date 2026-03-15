@@ -12,6 +12,8 @@ CLAUDE.md는 Claude Code의 **coordinator** 역할을 정의한다.
 
 - AGENTS.md 불변식 전체 (`luagate_` prefix, fail-closed, `ngx.worker.id()`, hot reload 7단계, same-PR)
 - AGENTS.md 리뷰 관련 불변식 (Codex 역할 제한, result-template.md 경로 명시, 재리뷰 기해결 항목 지적 금지)
+- **이슈 시작 전 브랜치 생성** — 첫 파일 수정 전 `git checkout -b <Linear gitBranchName>` 필수 (AGENTS.md 불변식 7)
+- **spec/ADR 수정 시 sync-spec 필수** — `docs/spec/` 또는 `docs/design/adr/` 변경 시 Done 전환 전 `sync-spec` 스킬 invoke (AGENTS.md 불변식 8)
 - `ngx.ctx`에 정책 캐시 저장 금지
 - blocking I/O 핸들러 금지
 - Lua access_log 직접 쓰기 금지 (Nginx native 사용)
@@ -82,11 +84,12 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 - [ ] 테스트 추가/통과 (`make test`)
 - [ ] 관련 spec/ADR 준수 확인 (AGENTS.md 불변식)
 - [ ] 문서 갱신 (코드와 같은 PR — same-PR 규칙)
+- [ ] `docs/spec/` 또는 `docs/design/adr/` 변경 시 `sync-spec` 스킬 완료 (AGENTS.md 불변식 8)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터 포함
 - [ ] PROGRESS.md append (날짜/이슈/산출물/비고)
 
 > **AGENTS.md 불변식 확인**: `luagate_` prefix, fail-closed, `ngx.worker.id()`,
-> hot reload 7단계, same-PR — 이 중 하나라도 위반하면 Done 전환 불가
+> hot reload 7단계, same-PR, 브랜치 선생성, sync-spec — 이 중 하나라도 위반하면 Done 전환 불가
 
 ## Linear 이슈 코멘트 템플릿
 
