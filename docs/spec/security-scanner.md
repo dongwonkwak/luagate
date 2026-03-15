@@ -24,12 +24,14 @@ ADR-002 정책 평가 제외와 동일 규칙.
 |-------------|------|------|
 | `sqli` | SQL Injection | OWASP CRS, 패턴 매칭 |
 | `xss` | Cross-Site Scripting | OWASP CRS, DOM 패턴 |
-| `path-traversal` | 경로 탐색 공격 | `../`, `%2e%2e` 등 |
-| `cmd-injection` | OS 커맨드 인젝션 | 셸 메타문자 패턴 |
+| `path_traversal` | 경로 탐색 공격 | `../`, `%2e%2e` 등 |
+| `cmd_injection` | OS 커맨드 인젝션 | 셸 메타문자 패턴 |
 | `ssrf` | Server-Side Request Forgery | IP/도메인 패턴 |
 | `xxe` | XML External Entity | XML DTD 패턴 |
 | `log4shell` | Log4j RCE (CVE-2021-44228) | `${jndi:...}` 패턴 |
 | `scanner` | 자동화 스캐너 탐지 | User-Agent, 탐색 패턴 |
+
+> **enum 표기 원칙**: `threat_type` 값은 underscore(`_`) 구분자를 사용한다. hyphen(`-`) 표기는 사용하지 않는다. http-pipeline.md §5 및 log-schema.md §3의 `threat_type` 열거값과 동일 기준이다.
 
 ### threat_type 동시 탐지 규칙
 

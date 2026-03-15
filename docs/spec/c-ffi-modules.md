@@ -45,7 +45,7 @@ enum luagate_result {
 
 ## 3. 메모리 Ownership 원칙
 
-> **caller-allocated output buffer 방식**: 모든 함수는 caller가 제공한 버퍼에 결과를 기록한다.
+> **caller-allocated output buffer 방식 (기본)**: 일반 변환/스캔 함수는 caller가 제공한 버퍼에 결과를 기록한다.
 > Rust가 메모리를 할당하여 반환하지 않는다 (malloc → free 패턴 대신).
 
 ```text
@@ -59,6 +59,16 @@ Rust 책임:
   - out_len에 실제 기록 바이트 수 설정
   - 버퍼 초과 시 LUAGATE_BUFFER_TOO_SMALL 반환 (버퍼 내용 미정)
 ```
+
+> **예외 — Radix Tree API**: `luagate_radix_build()` / `luagate_radix_lookup()` / `luagate_radix_free()`는 caller-allocated 원칙의 예외다.
+> Rust가 tree 객체를 heap에 할당하고 opaque 포인터(`luagate_radix_t *`)를 반환한다.
+> caller(Lua wrapper)는 포인터만 저장하며, 사용 완료 후 **반드시 `luagate_radix_free()`를 호출**하여 Rust가 할당한 메모리를 해제해야 한다.
+> tree 교체(hot reload) 시에는 구 tree 포인터를 atomic swap 후 즉시 `luagate_radix_free()`로 해제한다 (§6.4 Radix Tree Lifecycle 참조).
+>
+> | 함수 유형 | 메모리 소유권 | free 의무 |
+> |---------|------------|---------|
+> | 변환/스캔 함수 (`luagate_normalize_*`, `luagate_scan_*`, `luagate_detect_*`, `luagate_extract_*`) | caller-allocated 버퍼 | 없음 (caller 버퍼는 caller가 관리) |
+> | Radix tree 빌드 (`luagate_radix_build`) | Rust가 tree 할당 | **필수**: `luagate_radix_free()` 호출 |
 
 ## 4. 보안 스캐너 (`luagate_scanner.so`)
 

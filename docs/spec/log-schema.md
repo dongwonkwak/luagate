@@ -74,7 +74,16 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 > local path_raw = uri:match("^([^?]*)") or uri
 > ```
 
-### 3.2 request_state 값 정의표 (HTTP)
+### 3.2 decision_source 값 정의표 (HTTP)
+
+| 값 | 설명 |
+|----|------|
+| `policy_engine` | 정책 엔진이 판정 (allow 또는 policy deny) |
+| `security_scanner` | 보안 스캐너가 탐지하여 deny |
+| `rate_limiter` | 레이트 리밋으로 deny (MVP 비범위) |
+| `nginx_core` | nginx core early short-circuit (400/413/414/502 등) |
+
+### 3.3 request_state 값 정의표 (HTTP)
 
 | 값 | 조건 |
 |----|------|
@@ -85,7 +94,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `upstream_error` | allow 판정이었으나 업스트림 502 |
 | `short_circuited` | nginx_core early termination (400/413/414 등) — 기본값 |
 
-### 3.3 예시 JSON — HTTP allow
+### 3.4 예시 JSON — HTTP allow
 
 ```json
 {
@@ -119,7 +128,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-### 3.4 예시 JSON — HTTP policy deny
+### 3.5 예시 JSON — HTTP policy deny
 
 ```json
 {
@@ -153,7 +162,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-### 3.5 예시 JSON — HTTP scanner deny
+### 3.6 예시 JSON — HTTP scanner deny
 
 ```json
 {
@@ -187,7 +196,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-### 3.6 예시 JSON — nginx_core early short-circuit (413)
+### 3.7 예시 JSON — nginx_core early short-circuit (413)
 
 ```json
 {
@@ -418,6 +427,11 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 # log_by_lua에서 ngx.var를 사용하여 JSON을 구성하고,
 # nginx log_format + access_log 지시자로 파일에 기록한다.
 # 이 방식은 Nginx의 log buffering, rotation 시그널(USR1) 처리를 활용한다.
+#
+# 아래 예시는 27개 필드 중 일부만 포함한다.
+# 전체 27개 필드 목록은 §3.1 필드 정의 테이블을 참조한다.
+# nullable 필드($luagate_matched_rule, $luagate_deny_reason 등)는
+# log_by_lua에서 JSON null로 사전 할당하여 "-" 대신 null로 직렬화한다 (§2 참조).
 
 log_format luagate_access_json escape=json
     '{"timestamp":"$time_iso8601",'
@@ -431,12 +445,19 @@ log_format luagate_access_json escape=json
     '"path_normalized":"$luagate_path_normalized",'
     '"query_string":"$luagate_query_string",'
     '"action":"$luagate_action",'
+    '"matched_rule_id":$luagate_matched_rule,'
+    '"deny_reason":$luagate_deny_reason,'
     '"decision_source":"$luagate_decision_source",'
+    '"threat_type":$luagate_threat_type,'
     '"request_state":"$luagate_request_state",'
     '"response_status":$status,'
     '"bytes_sent":$bytes_sent,'
     '"active_version":"$luagate_active_version",'
     '"worker_id":$luagate_worker_id}';
+    # 나머지 필드(http_version, user_agent, content_length, threat_score,
+    # rule_name, latency_ms, upstream_latency_ms, src_port, dst_port 등)는
+    # log_by_lua에서 ngx.var로 설정하여 이 log_format에 포함하거나,
+    # log_by_lua에서 직접 JSON을 조립하는 방식으로 출력한다.
 
 access_log /var/log/luagate/access.log luagate_access_json buffer=64k flush=5s;
 ```

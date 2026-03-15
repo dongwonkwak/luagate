@@ -193,9 +193,11 @@ Authorization: Bearer <token>
   "source_version": "b4e3f2a1...",
   "active_http_version": "a3f2c1d4...",
   "active_stream_version": "a3f2c1d4...",
-  "etag": "a3f2c1d4..."
+  "etag": "b4e3f2a1..."
 }
 ```
+
+> **etag 기준**: `GET /api/v1/policies`의 ETag와 동일하게 `source_version`을 기준으로 한다. `active_http_version`/`active_stream_version`과 값이 다를 수 있다 (활성 버전은 reload 결과, source_version은 현재 canonical 파일 기준).
 
 ---
 
@@ -295,12 +297,14 @@ If-Match: "<http_active_version>"   (선택 — 제공 시 http:active_version�
 ```json
 {
   "error": "reload_failed",
-  "stage": "compile",
-  "details": ["YAML parse error at line 42: unexpected token"],
+  "stage": "reload",
+  "details": ["parse error at line 42: unexpected token"],
   "current_http_version": "a3f2c1d4...",
   "current_stream_version": "a3f2c1d4..."
 }
 ```
+
+> **stage 값**: §3 에러 Contract에 따라 `reload_failed`의 stage는 `"reload"`다. 실패가 발생한 내부 단계(parse/validate/compile 등)는 `details` 배열 메시지에 기술한다.
 
 **응답 409 (동시 reload 충돌):**
 

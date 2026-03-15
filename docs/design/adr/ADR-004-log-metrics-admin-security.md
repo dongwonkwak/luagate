@@ -31,34 +31,40 @@ LuaGate는 API 게이트웨이이자 보안 게이트웨이로서 두 가지 관
 
 ### §4 로그/메트릭 데이터 모델
 
-#### 4.1 HTTP 요청 로그 스키마 (22개 필드)
+#### 4.1 HTTP 요청 로그 스키마 (27개 필드)
 
 각 HTTP 요청 처리 완료 시 아래 JSON 레코드를 `access.log`에 기록한다.
+상세 필드 정의 및 예시: [spec/log-schema.md §3](../../spec/log-schema.md#3-http-요청-로그-accesslog--27개-필드)
 
 | # | 필드명 | 타입 | 설명 |
 |---|--------|------|------|
 | 1 | `timestamp` | ISO-8601 string | 요청 수신 시각 (UTC) |
 | 2 | `request_id` | UUID string | 요청별 고유 식별자 |
-| 3 | `src_ip` | string | 클라이언트 원본 IP (X-Forwarded-For 처리 후) |
+| 3 | `src_ip` | string | 클라이언트 원본 IP (PROXY Protocol > XFF 최좌측 non-trusted > `$remote_addr`) |
 | 4 | `src_port` | number | 클라이언트 원본 포트 |
 | 5 | `dst_port` | number | 서버 리슨 포트 |
 | 6 | `method` | string | HTTP 메서드 (GET, POST 등) |
-| 7 | `path_raw` | string | 원본 요청 경로 (디코딩 전, 그대로) |
-| 8 | `path_normalized` | string | 정규화된 경로 (URL 디코딩, 경로 정규화 후) |
-| 9 | `query_string` | string | 원본 쿼리 스트링 |
-| 10 | `http_version` | string | HTTP 버전 (1.0/1.1/2.0) |
-| 11 | `user_agent` | string | User-Agent 헤더값 |
-| 12 | `content_length` | number \| null | 요청 본문 크기 (바이트) |
-| 13 | `action` | enum | `allow` \| `deny` |
-| 14 | `matched_rule_id` | string \| null | 매칭된 규칙 ID (기본 정책 적용 시 null) |
-| 15 | `deny_reason` | string \| null | 차단 이유 (action=deny일 때만) |
-| 16 | `threat_type` | string \| null | 탐지된 위협 유형 (sqli/xss/path-traversal 등) |
-| 17 | `threat_score` | number \| null | 위협 점수 (0.0 ~ 1.0) |
-| 18 | `latency_ms` | number | 총 처리 시간 (밀리초) |
-| 19 | `upstream_latency_ms` | number \| null | 업스트림 응답 시간 |
-| 20 | `response_status` | number | HTTP 응답 상태 코드 |
-| 21 | `policy_version` | string | 요청 처리 시 활성 정책의 SHA256 해시 |
-| 22 | `worker_pid` | number | 처리한 Nginx worker PID |
+| 7 | `host` | string | HTTP Host 헤더값 |
+| 8 | `path_raw` | string | 원본 요청 경로 (`?` 이전 Lua 계산값, 디코딩 전) |
+| 9 | `path_normalized` | string | 정규화된 경로 (URL 디코딩, 경로 정규화 후) |
+| 10 | `query_string` | string | redaction 적용된 raw 쿼리 (없으면 `""`) |
+| 11 | `http_version` | string | HTTP 버전 (`"HTTP/1.0"`, `"HTTP/1.1"`, `"HTTP/2.0"`) |
+| 12 | `user_agent` | string \| null | User-Agent 헤더값. 없으면 null |
+| 13 | `content_length` | number \| null | 요청 본문 크기 (바이트). 없으면 null |
+| 14 | `action` | enum | `allow` \| `deny` |
+| 15 | `matched_rule_id` | string \| null | 매칭된 규칙 ID (기본 정책 적용 시 null) |
+| 16 | `deny_reason` | string \| null | 차단 이유 (action=allow 시 null) |
+| 17 | `decision_source` | enum | `policy_engine` \| `security_scanner` \| `rate_limiter` \| `nginx_core` |
+| 18 | `threat_type` | string \| null | 탐지된 위협 유형 (`sqli`/`xss`/`path_traversal` 등). 없으면 null |
+| 19 | `threat_score` | number \| null | 위협 점수 (0.0 ~ 1.0). 스캐너 미실행 시 null |
+| 20 | `rule_name` | string \| null | 스캐너 매칭 내부 rule_name. null if no match |
+| 21 | `request_state` | enum | `allowed` \| `policy_denied` \| `scanner_denied` \| `rate_limited` \| `upstream_error` \| `short_circuited` |
+| 22 | `latency_ms` | number | 총 처리 시간 (밀리초) |
+| 23 | `upstream_latency_ms` | number \| null | 업스트림 응답 시간. deny 시 null |
+| 24 | `response_status` | number | HTTP 응답 상태 코드 |
+| 25 | `bytes_sent` | number | 헤더 포함 total bytes (클라이언트로 전송) |
+| 26 | `active_version` | string | 요청 시작 시 스냅샷한 HTTP 활성 정책 SHA256 |
+| 27 | `worker_id` | number | 처리한 Nginx worker ID (`ngx.worker.id()`) |
 
 **로그 예시:**
 
@@ -70,43 +76,55 @@ LuaGate는 API 게이트웨이이자 보안 게이트웨이로서 두 가지 관
   "src_port": 54321,
   "dst_port": 80,
   "method": "GET",
+  "host": "api.example.com",
   "path_raw": "/api/v1/%2e%2e/admin",
   "path_normalized": "/admin",
   "query_string": "id=1%27OR%271%27%3D%271",
-  "http_version": "1.1",
+  "http_version": "HTTP/1.1",
   "user_agent": "Mozilla/5.0 ...",
   "content_length": null,
   "action": "deny",
   "matched_rule_id": "deny-path-traversal",
   "deny_reason": "path traversal detected",
-  "threat_type": "path-traversal",
+  "decision_source": "security_scanner",
+  "threat_type": "path_traversal",
   "threat_score": 0.95,
+  "rule_name": "path-traversal-dotdot",
+  "request_state": "scanner_denied",
   "latency_ms": 0.8,
   "upstream_latency_ms": null,
   "response_status": 403,
-  "policy_version": "a3f2c1d4e5b6789012345678901234567890abcd",
-  "worker_pid": 12345
+  "bytes_sent": 91,
+  "active_version": "a3f2c1d4e5b6789012345678901234567890abcd",
+  "worker_id": 2
 }
 ```
 
-#### 4.2 TCP 세션 로그 스키마 (12개 필드)
+#### 4.2 TCP 세션 로그 스키마 (18개 필드)
 
 TCP 스트림 프록시 세션 종료 시 아래 레코드를 `stream.log`에 기록한다.
+상세 필드 정의 및 예시: [spec/log-schema.md §4](../../spec/log-schema.md#4-tcp-세션-로그-streamlog--18개-필드)
 
 | # | 필드명 | 타입 | 설명 |
 |---|--------|------|------|
-| 1 | `timestamp` | ISO-8601 string | 세션 시작 시각 (UTC) |
+| 1 | `timestamp` | ISO-8601 string | 연결 종료 시각 (UTC) |
 | 2 | `connection_id` | UUID string | 세션별 고유 식별자 |
-| 3 | `src_ip` | string | 클라이언트 IP |
+| 3 | `src_ip` | string | 클라이언트 IP (PROXY Protocol > `$remote_addr`) |
 | 4 | `src_port` | number | 클라이언트 포트 |
 | 5 | `dst_port` | number | 서버 리슨 포트 |
-| 6 | `detected_protocol` | string | 탐지된 애플리케이션 프로토콜 (http/tls/ssh/unknown 등) |
-| 7 | `sni` | string \| null | TLS SNI 값 (TLS 세션인 경우) |
+| 6 | `detected_protocol` | string | 탐지된 프로토콜 (`tls` \| `http` \| `raw`) |
+| 7 | `sni` | string \| null | TLS SNI 값 (TLS 세션인 경우). 그 외 null |
 | 8 | `action` | enum | `proxy` \| `deny` |
-| 9 | `deny_reason` | string \| null | 차단 이유 |
-| 10 | `duration_ms` | number | 세션 지속 시간 (밀리초) |
-| 11 | `bytes_tx` | number | 클라이언트→서버 전송 바이트 |
-| 12 | `bytes_rx` | number | 서버→클라이언트 수신 바이트 |
+| 9 | `matched_rule_id` | string \| null | 매칭된 규칙 ID. default deny 시 null |
+| 10 | `decision_source` | enum | `policy_engine` \| `nginx_core` |
+| 11 | `active_version` | string | 연결 시작 시 스냅샷한 Stream 활성 정책 SHA256 |
+| 12 | `upstream` | string \| null | `"host:port"`. deny 시 null |
+| 13 | `session_duration_ms` | number | 세션 지속 시간 (밀리초) |
+| 14 | `bytes_sent` | number | 헤더 포함 total bytes |
+| 15 | `bytes_received` | number | upstream에서 수신 bytes |
+| 16 | `upstream_connect_time_ms` | number \| null | deny 시 null |
+| 17 | `request_state` | enum | `proxied` \| `denied` \| `upstream_error` \| `short_circuited` |
+| 18 | `worker_id` | number | 처리한 Nginx worker ID (`ngx.worker.id()`) |
 
 #### 4.2b 로그 Redaction 정책
 
@@ -139,20 +157,28 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 
 **Cardinality 원칙**: 메트릭 레이블은 cardinality 폭발을 방지하기 위해 **low-cardinality** 값만 허용한다.
 - `path_normalized`: 허용. 그러나 UUID/세션ID 등 고유값이 포함된 경로는 정규화 단계에서 제거되어야 함 (예: `/api/v1/users/12345` → `/api/v1/users/:id`)
-- `policy_version`: cardinality 위험 있음. **메트릭 레이블에서 제거**, 대신 게이지 `luagate_policy_info`로 별도 노출
+- `active_version`: cardinality 위험 있음. **메트릭 레이블에서 제거**, 정책 버전 추적은 `GET /api/v1/policies/status`로 조회
 - `deny_reason`: low-cardinality enum으로 제한 (최대 20개 고정값). 임의 문자열 허용 금지
 
 | 메트릭 이름 | 타입 | 레이블 | 설명 |
 |------------|------|--------|------|
-| `luagate_requests_total` | Counter | `action`, `method`, `route` | 총 HTTP 요청 수. `route`는 정규화된 경로 패턴 (`/api/v1/users/:id` 등) |
-| `luagate_blocked_total` | Counter | `threat_type`, `rule_id` | 차단된 요청 수. `rule_id`는 정책 규칙 ID (고정 enum) |
-| `luagate_latency_seconds` | Histogram | `method`, `route` | 요청 처리 latency. 버킷: 0.0001/0.0005/0.001/0.005/0.01/0.05/0.1/0.5/1.0s |
+| `luagate_http_requests_total` | Counter | `action` | HTTP 전체 요청 수 |
+| `luagate_http_requests_denied_total` | Counter | — | deny된 요청 수 |
+| `luagate_http_response_time_ms` | Histogram | — | 응답 시간 분포. 버킷: 0.1/0.5/1/5/10/50/100/500/1000ms |
+| `luagate_http_upstream_errors_total` | Counter | — | upstream 502 수 |
 | `luagate_active_connections` | Gauge | `type` (`http`/`stream`) | 현재 활성 연결 수 |
-| `luagate_policy_reload_total` | Counter | `status` (`success`/`failure`) | 정책 리로드 횟수 |
-| `luagate_policy_conflicts_gauge` | Gauge | — | 현재 정책의 충돌 규칙 수 |
-| `luagate_policy_info` | Gauge | `version`, `rules_count` | 현재 활성 정책 메타데이터 (값 항상 1) |
+| `luagate_stream_connections_total` | Counter | — | 전체 스트림 연결 수 |
+| `luagate_stream_connections_denied_total` | Counter | — | deny된 연결 수 |
+| `luagate_stream_bytes_sent_total` | Counter | — | 총 송신 바이트 |
+| `luagate_stream_bytes_received_total` | Counter | — | 총 수신 바이트 |
+| `luagate_stream_protocol_detected_total` | Counter | `protocol` | 탐지된 프로토콜별 카운터 |
+| `luagate_policy_reload_total` | Counter | — | reload 시도 횟수 |
+| `luagate_policy_reload_failures_total` | Counter | — | reload 실패 횟수 |
+| `luagate_shared_dict_capacity_bytes` | Gauge | `zone` | shared_dict 용량 (zone별) |
+| `luagate_shared_dict_free_bytes` | Gauge | `zone` | shared_dict 여유 공간 (zone별) |
 
-> **주의**: `luagate_requests_total`에서 `policy_version` 레이블 제거. 정책 버전 추적은 `luagate_policy_info` 게이지로 대체.
+> **저장소 분리**: HTTP 메트릭은 `luagate_metrics` zone(`metrics:*` 키), Stream 메트릭은 `luagate_stream_metrics` zone(`stream:metrics:*` 키)에 저장한다 (architecture.md §3.1 참조).
+> **active_version 레이블 제거**: cardinality 폭발 방지. 정책 버전 추적은 `GET /api/v1/policies/status`로 조회한다.
 
 **저장 방식:**
 - 카운터는 `luagate_metrics` shared dict에 원자적으로 증가
@@ -182,10 +208,14 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 
 | 이벤트 | 기록 필드 |
 |--------|----------|
-| 정책 변경 (`PUT /api/v1/policies`) | timestamp, event=policy_update, src_ip, staged_policy_version, active_policy_version |
-| 정책 리로드 (`POST /api/v1/policies/reload`) | timestamp, event=policy_reload, src_ip, trigger=api\|hup, status, policy_version |
-| 인증 실패 | timestamp, event=auth_failure, src_ip, path, reason |
-| 서버 기동/종료 | timestamp, event=startup\|shutdown, policy_version |
+| 정책 변경 (`PUT /api/v1/policies`) | `timestamp`, `event=policy_update`, `actor_ip`, `staged_version`, `active_version` (현재 source_version), `warnings_count` |
+| 정책 리로드 성공 (`POST /api/v1/policies/reload`) | `timestamp`, `event=policy_reload_success`, `actor_ip`, `previous_version`, `new_version`, `subsystem` |
+| 정책 리로드 실패 | `timestamp`, `event=policy_reload_failure`, `actor_ip`, `stage`, `reason`, `current_version` |
+| 정책 리로드 부분 성공 | `timestamp`, `event=policy_reload_partial`, `actor_ip`, `http_result`, `stream_result` |
+| 인증 실패 | `timestamp`, `event=auth_failure`, `actor_ip`, `path`, `reason` |
+| 서버 기동/종료 | `timestamp`, `event=startup\|shutdown`, `active_version` (기동 시 활성 버전), `version` (luagate 버전) |
+
+> **active_version 분리**: reload 이벤트에서 HTTP와 Stream의 active_version은 `subsystem` 필드로 구분한다. `active_http_version`/`active_stream_version`을 한 레코드에 나란히 기록해야 하는 경우(partial 등)는 `http_result`/`stream_result`로 표현한다. 상세 스키마: [spec/log-schema.md §5](../../spec/log-schema.md#5-감사-로그-auditlog-adr-004-63) 참조.
 
 #### 6.3b 위협 모델
 
@@ -220,13 +250,13 @@ Admin API에 대한 주요 위협과 완화 방안:
 ### 긍정적 결과
 
 - **보안 분석**: raw + normalized 경로 모두 저장으로 우회 시도 탐지 가능
-- **관찰 가능성**: 22개 HTTP 로그 필드 + 메트릭으로 풍부한 분석 환경
+- **관찰 가능성**: 27개 HTTP 로그 필드 + 18개 Stream 로그 필드 + 메트릭으로 풍부한 분석 환경
 - **관리면 보호**: localhost 바인딩 + Bearer token으로 최소 공격 표면
 - **감사 추적**: 정책 변경 이력이 audit.log에 기록됨
 
 ### 부정적 결과
 
-- **로그 볼륨**: 요청마다 22개 필드 → 고트래픽 환경에서 디스크 I/O 주의 필요.
+- **로그 볼륨**: 요청마다 27개 HTTP 필드 / 18개 Stream 필드 → 고트래픽 환경에서 디스크 I/O 주의 필요.
   로그 로테이션 정책과 외부 로그 집계(ELK 등) 설정 권장
 - **Static Token 한계**: 토큰 교체 시 재시작 필요.
   토큰 교체 무중단화는 별도 ADR에서 결정

@@ -54,7 +54,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 ```
 
 **중요**:
-- `path_raw`는 항상 원본 그대로 보존 (로그 기록 목적, ADR-004)
+- `path_raw`는 항상 원본 그대로 보존 (로그 기록 목적, ADR-004). **정의**: query를 제외한 `?` 이전 경로만 (Lua 계산값, 디코딩 전). `$request_uri` 전체가 아님. 상세: [log-schema.md §3.1](./log-schema.md#31-필드-정의-adr-004-41)의 path_raw 정의 참조
 - URL 정규화는 **`rewrite_by_lua` 단계에서만** 수행한다. `access_by_lua` 이후 단계에서는 정규화 로직을 중복 실행하지 않는다.
 - `rewrite_by_lua` 완료 후 결과는 `ngx.ctx.luagate.path_normalized`에 저장된다. 이후 모든 단계(`access_by_lua`, `log_by_lua`)는 이 값만 읽고 재정규화하지 않는다.
 - **정규화 책임**: policy-engine.md §2.2 매칭 연산자 정의가 source of truth. 여기는 파이프라인 흐름만 기술한다.
@@ -130,16 +130,17 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 |------|------|------|-------------|
 | `$luagate_request_id` | string | 요청 UUID | rewrite_by_lua |
 | `$luagate_action` | string | `allow` \| `deny` | access_by_lua |
-| `$luagate_matched_rule` | string \| `-` | 매칭된 규칙 ID | access_by_lua |
+| `$luagate_matched_rule` | string \| null | 매칭된 규칙 ID. 없으면 null | access_by_lua |
 | `$luagate_decision_source` | string | decision_source enum | access_by_lua |
-| `$luagate_threat_type` | string \| `-` | threat_type enum | access_by_lua |
-| `$luagate_rule_name` | string \| `-` | 스캐너 매칭 rule_name | access_by_lua |
+| `$luagate_threat_type` | string \| null | threat_type enum. 없으면 null | access_by_lua |
+| `$luagate_rule_name` | string \| null | 스캐너 매칭 rule_name. 없으면 null | access_by_lua |
 | `$luagate_active_version` | string | 요청 시점 active_version | rewrite_by_lua |
 | `$luagate_request_state` | string | request_state enum | log_by_lua |
 
 > **기본값 선할당**: `rewrite_by_lua` 진입 시 아래 기본값으로 초기화.
 > `access_by_lua`에서 실제 판정 결과로 override, `log_by_lua`에서 finalize.
 > 이를 통해 nginx_core early short-circuit(malformed request, 400/413/414) 시에도 27필드가 채워진다.
+> **Null 표현**: Nginx 기본 `-` 대신 JSON `null`을 사용한다 (log-schema.md §2 참조).
 
 | 변수 | 기본값 |
 |------|--------|
@@ -147,6 +148,8 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | `$luagate_threat_type` | `null` (JSON null — log-schema.md §2 참조) |
 | `$luagate_request_state` | `short_circuited` |
 | `$luagate_rule_name` | `null` (JSON null) |
+| `$luagate_matched_rule` | `null` (JSON null) |
+| `$luagate_deny_reason` | `null` (JSON null) |
 
 ## 4. decision_source 값 체계
 
@@ -189,11 +192,12 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 우선순위 (높은 순):
 
 1. **PROXY Protocol** — nginx `proxy_protocol on` 설정 시 `$proxy_protocol_addr`
-2. **X-Forwarded-For** (첫 번째 IP) — trusted proxy CIDR 범위 내에서만 신뢰
+2. **X-Forwarded-For** (최좌측 non-trusted IP) — `$remote_addr`이 trusted proxy CIDR 범위 내일 때만 신뢰. XFF 헤더에서 최좌측 non-trusted IP를 추출한다
 3. **`$remote_addr`** — fallback (직접 연결 IP)
 
 > **Trusted proxy**: nginx.conf에서 `set_real_ip_from` CIDR로 설정한 범위.
 > 범위 미설정 시 XFF 헤더 무시, `$remote_addr` 사용.
+> "최좌측 non-trusted IP" 기준은 log-schema.md §6과 동일하다.
 
 ## 8. 멀티레이어 디코딩 (§5)
 
@@ -232,7 +236,7 @@ ngx.ctx.luagate = {
   action            = "allow" | "deny",
   matched_rule_id   = string | nil,
   deny_reason       = string | nil,
-  decision_source   = "policy_engine" | "security_scanner" | "rate_limiter" | "nginx_core",
+  decision_source   = "policy_engine" | "security_scanner" | "rate_limiter" | "nginx_core",  -- rate_limiter: MVP 비범위
   threat_type       = string | nil,
   rule_name         = string | nil,   -- 스캐너 매칭 rule_name
   active_version    = string,         -- 요청 시작 시 스냅샷
