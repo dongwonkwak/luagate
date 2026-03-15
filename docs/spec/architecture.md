@@ -49,21 +49,28 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 ## 3. Shared Dict Zone 모델
 
-### 3.1 Zone 목록 및 역할
+### 3.1 Zone 분류 모델
+
+Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
+
+- **Envelope zone**: subsystem별 1 key에 data + version + metadata blob 전체를 하나로 원자적 교체. 버전 필드를 포함한다.
+- **State zone**: reload flag, health flag 등 단순 상태 플래그만 저장. version 필드 없음. 키 단위 독립 갱신.
+
+### 3.2 Zone 목록 및 역할
 
 | Zone | 역할 | Key Model | Write Owner | Atomicity Unit |
 | --- | --- | --- | --- | --- |
-| `luagate_policy` | 정책 버전 포인터 + 버전별 blob | `http:active_version`, `stream:active_version`, `source_version`, `policy:<ver>:blob`, `policy:<ver>:meta` | reload worker | active_version pointer 교체 단위 |
-| `luagate_stream_metrics` | Stream 메트릭 | `stream:metrics:*` | 각 worker (incr) | 키 단위 |
-| `luagate_metrics` | HTTP 메트릭 | `metrics:*` | 각 worker (incr) | 키 단위 |
-| `luagate_connections` | 활성 연결 수 | `active_http`, `active_stream` | 해당 worker | 키 단위 |
-| `luagate_state` | Reload/health 플래그 | `state:reload_flag`, `state:health` | reload worker | 키 단위 |
+| `luagate_policy` | 정책 버전 포인터 + 버전별 blob | **Envelope**: `http:active_version`, `stream:active_version`(포인터) + `policy:<ver>:blob`, `policy:<ver>:meta`(blob); `source_version`(commit 기준) | reload worker | active_version pointer 교체 단위 (subsystem별 독립) |
+| `luagate_stream_metrics` | Stream 메트릭 (ADR-004) | 단순 카운터: `stream:metrics:*` | 각 worker (incr) | 키 단위 |
+| `luagate_metrics` | HTTP 메트릭 | 단순 카운터: `metrics:*` | 각 worker (incr) | 키 단위 |
+| `luagate_connections` | 활성 연결 수 | 단순 카운터: `active_http`, `active_stream` | 해당 worker | 키 단위 |
+| `luagate_state` | Reload/health 플래그 | **State**: `state:reload_flag`, `state:health` — version 필드 없음 | reload worker | 키 단위 |
 
 > **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):
 > 새 정책을 `policy:<new_version>:blob`에 먼저 기록한 뒤, `http:active_version` / `stream:active_version` 포인터를 교체한다.
 > 이렇게 하면 pointer 교체 이전까지 기존 worker는 old version을 계속 사용하며 무중단이 보장된다.
 
-### 3.2 `luagate_policy` Versioned Keyspace 구조
+### 3.3 `luagate_policy` Versioned Keyspace 구조
 
 ```text
 -- 서브시스템별 active version pointer (단순 string 값)
@@ -83,13 +90,18 @@ luagate_policy["policy:<sha256>:meta"] = "<json>"
 > **LKG(Last-Known-Good)**: LKG 버전 포인터는 meta 내 `lkg_version` 필드로 보관한다.
 > commit 실패 시 active_version을 lkg_version으로 복원한다 (policy-engine.md §4.1 step [7] 참조).
 
-### 3.3 L1 캐시 무효화 전략
+### 3.4 L1 캐시 무효화 전략
 
 각 worker는 module-level upvalue로 정책을 캐싱한다.
 갱신 조건: `active_version != _cached_version` (요청 진입 시 shared dict에서 확인).
 
+**불변식**: L1 캐시(`_cached_policy`, `_cached_version`)는 반드시 worker-local module-level upvalue에만 저장한다.
+`ngx.ctx`는 요청(request) 단위 스코프로, 요청 종료 시 GC된다. `ngx.ctx`에 정책 캐시를 저장하면 매 요청마다 shared dict를 조회하게 되므로 **`ngx.ctx`에 정책 캐시 저장 금지** (policy-engine.md §4.4 참조).
+
 ```lua
 -- worker-local L1 캐시 갱신 흐름 (policy-engine.md §4.4 참조)
+-- L1 = worker-level module upvalue (ngx.ctx 금지)
+-- L2 = shared dict (luagate_policy)
 local current_version = ngx.shared.luagate_policy:get("http:active_version")
 if current_version ~= _cached_version then
     -- shared dict(L2)에서 버전별 blob 로드
@@ -103,7 +115,7 @@ if current_version ~= _cached_version then
 end
 ```
 
-### 3.4 LKG (Last-Known-Good) 형성 및 사용
+### 3.5 LKG (Last-Known-Good) 형성 및 사용
 
 - **형성**: 첫 번째 성공 reload 완료 시 LKG 포인터를 `luagate_policy["policy:<active_sha256>:meta"]`의 `lkg_version` 필드에 기록
 - **사용**: 다음 reload 실패(validate/compile/commit 오류) 시 현재 active 정책을 LKG로 복원

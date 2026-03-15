@@ -238,6 +238,8 @@ end
 
 ### 4.3 Active Version Canonical Serialization
 
+> **Envelope 모델**: `luagate_policy` zone은 **Envelope zone**으로 분류된다. subsystem별 active_version 포인터 키(`http:active_version`, `stream:active_version`)가 blob + meta 키 전체를 envelope로 묶어 원자적으로 교체한다. Envelope vs State zone 분류 상세는 [architecture.md §3.1](./architecture.md#31-zone-분류-모델) 참조.
+
 `active_version`은 정책 파일 전체(raw bytes) 기준 **SHA256 hex string(lowercase, 64자)**로 정의한다.
 
 ```text
