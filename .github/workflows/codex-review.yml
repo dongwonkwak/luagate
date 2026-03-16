@@ -10,7 +10,7 @@
 #   int_test   — tests/**/*.t
 #   frontend   — frontend/**
 #   ci_build   — .github/**, Makefile, flake.nix, CMakeLists.txt
-#   docs       — docs/**/*.md
+#   docs       — docs/**/*.md, .claude/knowledge/*.md, *.md (root)
 #   policy     — policies/**/*.yaml
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: files } = await github.rest.pulls.listFiles({
+            const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
@@ -64,7 +64,7 @@ jobs:
               int_test:   is([/^tests\/.+\.t$/]),
               frontend:   is([/^frontend\//]),
               ci_build:   is([/^\.github\//, 'Makefile', 'flake.nix', 'CMakeLists.txt']),
-              docs:       is([/^docs\/.+\.md$/]),
+              docs:       is([/^docs\/.+\.md$/, /^\.claude\/knowledge\/.+\.md$/, /^[^/]+\.md$/]),
               policy:     is([/^policies\/.+\.yaml$/]),
             };
 
