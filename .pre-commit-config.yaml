@@ -53,7 +53,7 @@ repos:
       - id: markdownlint
         name: markdownlint
         language: system
-        entry: markdownlint --config .markdownlint.yaml
+        entry: scripts/markdownlint-wrapper.sh --config .markdownlint.yaml
         types: [markdown]
         pass_filenames: true
 
