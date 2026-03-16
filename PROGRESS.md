@@ -138,3 +138,9 @@ COMPLETED_REVIEW: DON-98-code (2026-03-16)
 
 COMPLETED_REVIEW: DON-103-code (2026-03-16)
 | 2026-03-16 | DON-103 | GitHub Actions: PR file detection codex review auto directive | `.github/workflows/codex-review.yml` | 9개 카테고리 감지, 페이지네이션, 중복 코멘트 방지. Codex 리뷰 2건 반영. 보안 리뷰 PASS |
+
+## Phase 0-B: 워크플로우 설계서 v2 (DON-127)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-16 | DON-127 | Update workflow design doc v2 after Phase 0-B completion | Linear 문서 `24e2cc7ac680` (v1 → v2) | 에이전트 frontmatter 정확화, 스킬 이름 정정(doc-sync-hook→doc-sync), ADR-005~007 반영, 구현 완료 항목 표시. ADR-005 파일 미생성 사실 명시 |
