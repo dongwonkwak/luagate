@@ -135,3 +135,6 @@ COMPLETED_REVIEW: DON-134-code (2026-03-16)
 | 2026-03-16 | DON-98 | 보안 리뷰 수정 (M-1, R-2, R-3) | `lua/luagate/policy/validator.lua`, `tests/unit/policy/validator_spec.lua` | CIDR octet/prefix 범위 검증, port 1-65535 범위 검증. 132개 busted 테스트 통과. 보안 리뷰 PASS |
 
 COMPLETED_REVIEW: DON-98-code (2026-03-16)
+
+COMPLETED_REVIEW: DON-103-code (2026-03-16)
+| 2026-03-16 | DON-103 | GitHub Actions: PR file detection codex review auto directive | `.github/workflows/codex-review.yml` | 9개 카테고리 감지, 페이지네이션, 중복 코멘트 방지. Codex 리뷰 2건 반영. 보안 리뷰 PASS |
