@@ -62,6 +62,7 @@ repos:
         name: detect-secrets (secret detection)
         language: system
         entry: scripts/detect-secrets-hook-wrapper.sh
+        args: ["--baseline", ".secrets.baseline"]
         exclude: >-
           (?x)^(
             \.pre-commit-config\.yaml|
