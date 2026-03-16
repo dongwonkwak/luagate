@@ -132,5 +132,6 @@ COMPLETED_REVIEW: DON-134-code (2026-03-16)
 |------|------|------|--------|------|
 | 2026-03-16 | DON-98 | YAML policy parser + schema validator | `lua/luagate/policy/parser.lua`, `lua/luagate/policy/validator.lua`, `tests/unit/policy/parser_spec.lua`, `tests/unit/policy/validator_spec.lua` | 95개 busted 테스트 통과. Codex 리뷰 대기 |
 | 2026-03-16 | DON-98 | Codex 리뷰 피드백 반영 (3건) | `lua/luagate/policy/parser.lua`, `lua/luagate/policy/validator.lua`, `tests/unit/policy/parser_spec.lua`, `tests/unit/policy/validator_spec.lua` | 비리스트 입력 guard, upstream host:port 형식 검증, CIDR/port-range 형식 검증 추가. 115개 busted 테스트 통과 |
+| 2026-03-16 | DON-98 | 보안 리뷰 수정 (M-1, R-2, R-3) | `lua/luagate/policy/validator.lua`, `tests/unit/policy/validator_spec.lua` | CIDR octet/prefix 범위 검증, port 1-65535 범위 검증. 132개 busted 테스트 통과. 보안 리뷰 PASS |
 
 COMPLETED_REVIEW: DON-98-code (2026-03-16)
