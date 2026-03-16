@@ -64,9 +64,18 @@ local function validate_http_scope(scope, rule_id)
     end
   end
 
-  -- src_ip_cidr: string
-  if scope.src_ip_cidr ~= nil and type(scope.src_ip_cidr) ~= "string" then
-    return "rule '" .. rule_id .. "': scope.src_ip_cidr must be a string"
+  -- src_ip_cidr: string, must match IPv4 CIDR format "d.d.d.d/prefix"
+  if scope.src_ip_cidr ~= nil then
+    if type(scope.src_ip_cidr) ~= "string" then
+      return "rule '" .. rule_id .. "': scope.src_ip_cidr must be a string"
+    end
+    if not string.match(scope.src_ip_cidr, "^%d+%.%d+%.%d+%.%d+/%d+$") then
+      return "rule '"
+        .. rule_id
+        .. "': scope.src_ip_cidr must be a valid IPv4 CIDR (e.g. '1.2.3.0/24'), got: '"
+        .. scope.src_ip_cidr
+        .. "'"
+    end
   end
 
   -- query_param: map (string → string)
@@ -106,9 +115,18 @@ local function validate_stream_scope(scope, rule_id)
     return "rule '" .. rule_id .. "': scope must be a map"
   end
 
-  -- src_ip_cidr: string
-  if scope.src_ip_cidr ~= nil and type(scope.src_ip_cidr) ~= "string" then
-    return "rule '" .. rule_id .. "': scope.src_ip_cidr must be a string"
+  -- src_ip_cidr: string, must match IPv4 CIDR format "d.d.d.d/prefix"
+  if scope.src_ip_cidr ~= nil then
+    if type(scope.src_ip_cidr) ~= "string" then
+      return "rule '" .. rule_id .. "': scope.src_ip_cidr must be a string"
+    end
+    if not string.match(scope.src_ip_cidr, "^%d+%.%d+%.%d+%.%d+/%d+$") then
+      return "rule '"
+        .. rule_id
+        .. "': scope.src_ip_cidr must be a valid IPv4 CIDR (e.g. '1.2.3.0/24'), got: '"
+        .. scope.src_ip_cidr
+        .. "'"
+    end
   end
 
   -- dst_port: string ("lo-hi" range) or integer (exact)
@@ -118,8 +136,21 @@ local function validate_stream_scope(scope, rule_id)
       if not is_integer(scope.dst_port) then
         return "rule '" .. rule_id .. "': scope.dst_port must be an integer"
       end
-    elseif dt ~= "string" then
-      -- "string" accepts "lo-hi" range format — content validated at evaluation time
+    elseif dt == "string" then
+      -- Must match "lo-hi" range format with lo <= hi
+      local lo_str, hi_str = string.match(scope.dst_port, "^(%d+)-(%d+)$")
+      if not lo_str then
+        return "rule '"
+          .. rule_id
+          .. "': scope.dst_port range must be in 'lo-hi' format (e.g. '1024-65535'), got: '"
+          .. scope.dst_port
+          .. "'"
+      end
+      local lo, hi = tonumber(lo_str), tonumber(hi_str)
+      if lo > hi then
+        return "rule '" .. rule_id .. "': scope.dst_port range lo must be <= hi, got: '" .. scope.dst_port .. "'"
+      end
+    else
       return "rule '" .. rule_id .. "': scope.dst_port must be a string or integer"
     end
   end
@@ -210,10 +241,17 @@ local function validate_stream_rule(rule)
     return "stream rule '" .. rule.id .. "': 'action' must be 'proxy' or 'deny', got: " .. tostring(rule.action)
   end
 
-  -- upstream: required when action == proxy
+  -- upstream: required when action == proxy, must be "host:port" format
   if rule.action == "proxy" then
     if not is_nonempty_string(rule.upstream) then
       return "stream rule '" .. rule.id .. "': 'upstream' is required when action is 'proxy' (must be 'host:port')"
+    end
+    -- Verify "host:port" format: host part non-empty, port part numeric
+    -- Accepts: "backend:8443", "192.168.1.1:80"
+    -- Rejects: "backend" (no colon), "host:" (empty port), ":8080" (empty host)
+    local host_part = string.match(rule.upstream, "^(.+):[0-9]+$")
+    if not host_part or #host_part == 0 then
+      return "stream rule '" .. rule.id .. "': 'upstream' must be in 'host:port' format, got: '" .. rule.upstream .. "'"
     end
   end
 

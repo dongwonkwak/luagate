@@ -85,11 +85,15 @@ end
 -- Does NOT validate — call validator.validate_http_rule() separately.
 --
 -- @param raw_rules table  Value of policy_table["rules"] (may be nil)
--- @return table   List of normalised HTTP rule tables (empty list if absent)
--- @return nil
+-- @return table|nil   List of normalised HTTP rule tables, or nil on error
+-- @return string|nil  Error description, or nil on success
 function _M.parse_http_rules(raw_rules)
   if raw_rules == nil then
-    return {}
+    return {}, nil
+  end
+
+  if type(raw_rules) ~= "table" then
+    return nil, "rules must be a list (got " .. type(raw_rules) .. ")"
   end
 
   local rules = {}
@@ -102,7 +106,7 @@ function _M.parse_http_rules(raw_rules)
     normalise_rule(r, i)
     rules[i] = r
   end
-  return rules
+  return rules, nil
 end
 
 --- Parse a list of Stream rules from the top-level "stream_rules" key.
@@ -110,10 +114,15 @@ end
 -- Does NOT validate.
 --
 -- @param raw_rules table  Value of policy_table["stream_rules"] (may be nil)
--- @return table   List of normalised Stream rule tables (empty list if absent)
+-- @return table|nil   List of normalised Stream rule tables, or nil on error
+-- @return string|nil  Error description, or nil on success
 function _M.parse_stream_rules(raw_rules)
   if raw_rules == nil then
-    return {}
+    return {}, nil
+  end
+
+  if type(raw_rules) ~= "table" then
+    return nil, "stream_rules must be a list (got " .. type(raw_rules) .. ")"
   end
 
   local rules = {}
@@ -125,7 +134,7 @@ function _M.parse_stream_rules(raw_rules)
     normalise_rule(r, i)
     rules[i] = r
   end
-  return rules
+  return rules, nil
 end
 
 --- Parse a YAML string into the internal policy representation.
@@ -157,11 +166,21 @@ function _M.parse_string(yaml_str)
   end
 
   -- Build the canonical policy table.
+  local http_rules, http_err = _M.parse_http_rules(raw.rules)
+  if not http_rules then
+    return nil, http_err
+  end
+
+  local stream_rules, stream_err = _M.parse_stream_rules(raw.stream_rules)
+  if not stream_rules then
+    return nil, stream_err
+  end
+
   local policy = {
     version = raw.version, -- optional string
     global = raw.global or {},
-    rules = _M.parse_http_rules(raw.rules),
-    stream_rules = _M.parse_stream_rules(raw.stream_rules),
+    rules = http_rules,
+    stream_rules = stream_rules,
   }
 
   return policy, nil

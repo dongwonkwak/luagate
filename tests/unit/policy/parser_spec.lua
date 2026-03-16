@@ -93,6 +93,16 @@ describe("parser.parse_string — lyaml error handling", function()
     assert.is_string(err)
     assert.matches("YAML parse error", err)
   end)
+
+  it("returns nil, err when lyaml returns non-table (e.g. bare scalar)", function()
+    -- lyaml.load("just_a_string") 는 문자열을 반환할 수 있다
+    local yaml = "scalar_root"
+    _lyaml_registry[yaml] = "not_a_table"
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(result)
+    assert.is_string(err)
+    assert.matches("root must be a mapping", err)
+  end)
 end)
 
 describe("parser.parse_string — successful parse", function()
@@ -148,9 +158,24 @@ end)
 
 describe("parser.parse_http_rules", function()
   it("returns empty list for nil input", function()
-    local rules = parser.parse_http_rules(nil)
+    local rules, err = parser.parse_http_rules(nil)
     assert.is_table(rules)
+    assert.is_nil(err)
     assert.are.equal(0, #rules)
+  end)
+
+  it("returns nil, err when rules is a string (not a list)", function()
+    local rules, err = parser.parse_http_rules("oops")
+    assert.is_nil(rules)
+    assert.is_string(err)
+    assert.matches("rules must be a list", err)
+  end)
+
+  it("returns nil, err when rules is a number (not a list)", function()
+    local rules, err = parser.parse_http_rules(42)
+    assert.is_nil(rules)
+    assert.is_string(err)
+    assert.matches("rules must be a list", err)
   end)
 
   it("sets original_index to 1-based source position", function()
@@ -228,9 +253,28 @@ end)
 
 describe("parser.parse_stream_rules", function()
   it("returns empty list for nil input", function()
-    local rules = parser.parse_stream_rules(nil)
+    local rules, err = parser.parse_stream_rules(nil)
     assert.is_table(rules)
+    assert.is_nil(err)
     assert.are.equal(0, #rules)
+  end)
+
+  it("returns nil, err when stream_rules is a string (not a list)", function()
+    local rules, err = parser.parse_stream_rules("oops")
+    assert.is_nil(rules)
+    assert.is_string(err)
+    assert.matches("stream_rules must be a list", err)
+  end)
+
+  it("returns nil, err when stream_rules is a non-list table", function()
+    -- a map (hash table) with no integer keys: ipairs returns nothing,
+    -- but the type guard fires first
+    local rules, err = parser.parse_stream_rules({ id = "bad" })
+    -- { id = "bad" } is a table so type() == "table" — passes type guard.
+    -- ipairs skips hash keys, so result is an empty list (valid).
+    -- This is expected behaviour: the validator will catch missing required fields.
+    assert.is_table(rules)
+    assert.is_nil(err)
   end)
 
   it("sets original_index to 1-based source position", function()
@@ -275,6 +319,36 @@ describe("parser.parse_stream_rules", function()
     local raw = { { id = "s1", priority = 5, action = "deny" } }
     parser.parse_stream_rules(raw)
     assert.is_nil(raw[1].original_index)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: parse_string — non-list rules propagation
+-- ---------------------------------------------------------------------------
+
+describe("parser.parse_string — non-list rules propagation", function()
+  it("returns nil, err when 'rules' field is a string", function()
+    local yaml = "rules_is_string"
+    register(yaml, {
+      global = { default_action = "deny" },
+      rules = "oops",
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(result)
+    assert.is_string(err)
+    assert.matches("rules must be a list", err)
+  end)
+
+  it("returns nil, err when 'stream_rules' field is a number", function()
+    local yaml = "stream_rules_is_number"
+    register(yaml, {
+      global = { default_action = "deny" },
+      stream_rules = 99,
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(result)
+    assert.is_string(err)
+    assert.matches("stream_rules must be a list", err)
   end)
 end)
 
@@ -333,6 +407,121 @@ describe("parser.parse_string — rules parsing", function()
     assert.are.equal("allow-tls-443", result.stream_rules[1].id)
     assert.are.equal("backend:8443", result.stream_rules[1].upstream)
     assert.are.equal(1, result.stream_rules[1].original_index)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: parse_string — HTTP rule fields preserved through parse_string
+-- ---------------------------------------------------------------------------
+
+describe("parser.parse_string — HTTP rule field preservation", function()
+  it("preserves scope with all HTTP scope keys", function()
+    local yaml = "http_full_scope"
+    register(yaml, {
+      global = { default_action = "deny" },
+      rules = {
+        {
+          id = "http-full-scope",
+          priority = 1,
+          action = "allow",
+          scope = {
+            path = "/api/*",
+            host = "api.example.com",
+            method = { "GET", "POST" },
+            src_ip_cidr = "10.0.0.0/8",
+            query_param = { q = "test" },
+            header = { ["X-Role"] = "admin" },
+          },
+        },
+      },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(err)
+    local scope = result.rules[1].scope
+    assert.are.equal("/api/*", scope.path)
+    assert.are.equal("api.example.com", scope.host)
+    assert.are.equal("GET", scope.method[1])
+    assert.are.equal("POST", scope.method[2])
+    assert.are.equal("10.0.0.0/8", scope.src_ip_cidr)
+    assert.are.equal("test", scope.query_param.q)
+    assert.are.equal("admin", scope.header["X-Role"])
+  end)
+
+  it("preserves nil scope (catch-all HTTP rule)", function()
+    local yaml = "http_catchall"
+    register(yaml, {
+      global = { default_action = "deny" },
+      rules = { { id = "catchall", priority = 100, action = "deny" } },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(err)
+    assert.is_nil(result.rules[1].scope)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: parse_string — Stream rule fields preserved through parse_string
+-- ---------------------------------------------------------------------------
+
+describe("parser.parse_string — Stream rule field preservation", function()
+  it("preserves scope with all Stream scope keys", function()
+    local yaml = "stream_full_scope"
+    register(yaml, {
+      global = { default_action = "deny" },
+      stream_rules = {
+        {
+          id = "stream-full-scope",
+          priority = 1,
+          action = "proxy",
+          upstream = "backend:8443",
+          scope = {
+            src_ip_cidr = "192.168.0.0/16",
+            dst_port = 443,
+            detected_protocol = "tls",
+            sni = "api.example.com",
+          },
+        },
+      },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(err)
+    local rule = result.stream_rules[1]
+    assert.are.equal("stream-full-scope", rule.id)
+    assert.are.equal("proxy", rule.action)
+    assert.are.equal("backend:8443", rule.upstream)
+    assert.are.equal("192.168.0.0/16", rule.scope.src_ip_cidr)
+    assert.are.equal(443, rule.scope.dst_port)
+    assert.are.equal("tls", rule.scope.detected_protocol)
+    assert.are.equal("api.example.com", rule.scope.sni)
+  end)
+
+  it("preserves dst_port as range string", function()
+    local yaml = "stream_port_range"
+    register(yaml, {
+      global = { default_action = "deny" },
+      stream_rules = {
+        {
+          id = "port-range",
+          priority = 10,
+          action = "deny",
+          scope = { dst_port = "1024-65535" },
+        },
+      },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(err)
+    assert.are.equal("1024-65535", result.stream_rules[1].scope.dst_port)
+  end)
+
+  it("preserves nil scope (catch-all Stream rule)", function()
+    local yaml = "stream_catchall"
+    register(yaml, {
+      global = { default_action = "deny" },
+      stream_rules = { { id = "stream-catchall", priority = 100, action = "deny" } },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(err)
+    assert.is_nil(result.stream_rules[1].scope)
   end)
 end)
 

@@ -225,6 +225,31 @@ describe("validator.validate — HTTP rules", function()
     assert.is_nil(err)
   end)
 
+  it("rejects HTTP rule with malformed src_ip_cidr (no prefix)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "10.0.0.0" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects HTTP rule with malformed src_ip_cidr (not-a-cidr)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "not-a-cidr" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("accepts HTTP rule with valid src_ip_cidr", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "192.168.0.0/16" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
   it("accepts HTTP rule with method as list", function()
     local p = minimal_policy()
     p.rules = { http_rule({ scope = { method = { "GET", "POST" } } }) }
@@ -255,6 +280,96 @@ describe("validator.validate — HTTP rules", function()
     p.rules = { http_rule({ scope = nil }) }
     local _, err = validator.validate(p)
     assert.is_nil(err)
+  end)
+
+  it("rejects HTTP rule with non-string description", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ description = 42 }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("description", err)
+  end)
+
+  it("rejects HTTP rule with non-list tags", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ tags = "security" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("tags", err)
+  end)
+
+  it("rejects HTTP rule with non-string element in tags list", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ tags = { "valid", 42 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("tags", err)
+  end)
+
+  it("rejects HTTP rule with non-string scope.src_ip_cidr", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = 12345 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects HTTP rule with non-string scope.host", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { host = true } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("host", err)
+  end)
+
+  it("rejects HTTP rule with non-string scope.path", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { path = 123 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("path", err)
+  end)
+
+  it("rejects HTTP rule with non-string element in scope.method list", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { method = { "GET", 99 } } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("method", err)
+  end)
+
+  it("rejects HTTP rule with non-map scope.query_param", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { query_param = "not-a-map" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("query_param", err)
+  end)
+
+  it("rejects HTTP rule with non-map scope.header", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { header = 123 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("header", err)
+  end)
+
+  it("rejects policy.rules when it is not a list", function()
+    local p = minimal_policy()
+    p.rules = "not-a-list"
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("rules", err)
   end)
 end)
 
@@ -295,6 +410,47 @@ describe("validator.validate — Stream rules", function()
     assert.is_nil(_)
     assert.is_string(err)
     assert.matches("upstream", err)
+  end)
+
+  it("rejects Stream proxy rule with upstream missing port (no colon)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ action = "proxy", upstream = "backend" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("upstream", err)
+  end)
+
+  it("rejects Stream proxy rule with upstream having empty port (trailing colon)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ action = "proxy", upstream = "host:" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("upstream", err)
+  end)
+
+  it("rejects Stream proxy rule with upstream having empty host (leading colon)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ action = "proxy", upstream = ":8080" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("upstream", err)
+  end)
+
+  it("accepts Stream proxy rule with valid upstream 'host:port'", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ action = "proxy", upstream = "backend:9000" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("accepts Stream proxy rule with valid upstream IP:port", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ action = "proxy", upstream = "192.168.1.1:443" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
   end)
 
   it("rejects Stream rule with invalid action", function()
@@ -354,6 +510,56 @@ describe("validator.validate — Stream rules", function()
     assert.matches("dst_port", err)
   end)
 
+  it("rejects Stream rule with dst_port range missing dash (bare string)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = "abc" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("dst_port", err)
+  end)
+
+  it("rejects Stream rule with dst_port range in reverse order (lo > hi)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = "100-50" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("dst_port", err)
+  end)
+
+  it("accepts Stream rule with equal lo and hi in dst_port range", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = "443-443" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects Stream rule with malformed src_ip_cidr (no prefix)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "10.0.0.1" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects Stream rule with malformed src_ip_cidr (not-a-cidr)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "not-a-cidr" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("accepts Stream rule with valid src_ip_cidr", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "10.0.0.0/8" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
   it("accepts Stream rule with valid detected_protocol", function()
     local protocols = { "tls", "http", "raw" }
     for _, proto in ipairs(protocols) do
@@ -371,6 +577,94 @@ describe("validator.validate — Stream rules", function()
     assert.is_nil(_)
     assert.is_string(err)
     assert.matches("detected_protocol", err)
+  end)
+
+  it("rejects Stream rule with non-boolean enabled", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ enabled = "true" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("enabled", err)
+  end)
+
+  it("rejects Stream rule with non-string description", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ description = 99 }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("description", err)
+  end)
+
+  it("rejects Stream rule with non-list tags", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ tags = "security" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("tags", err)
+  end)
+
+  it("rejects Stream rule with non-string element in tags list", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ tags = { "valid", false } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("tags", err)
+  end)
+
+  it("rejects Stream rule with non-table scope", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = "invalid-scope" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("scope", err)
+  end)
+
+  it("rejects Stream rule with non-string scope.src_ip_cidr", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = 123 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects Stream rule with non-string scope.sni", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { sni = 443 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("sni", err)
+  end)
+
+  it("rejects Stream rule with non-integer float dst_port", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = 443.5 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("dst_port", err)
+  end)
+
+  it("rejects policy.stream_rules when it is not a list", function()
+    local p = minimal_policy()
+    p.stream_rules = "not-a-list"
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("stream_rules", err)
+  end)
+
+  it("accepts Stream deny rule without upstream (upstream not required for deny)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ action = "deny", upstream = REMOVE }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
   end)
 end)
 
