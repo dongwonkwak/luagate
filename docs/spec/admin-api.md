@@ -9,7 +9,7 @@
 
 Admin API는 LuaGate의 관리 인터페이스로, 정책 관리, 상태 조회, 메트릭 노출을 담당한다.
 
-- **바인딩**: `127.0.0.1:8080` (ADR-004 §6.1) — server block identity로 data plane과 분리
+- **바인딩**: `127.0.0.1:9090` (ADR-004 §6.1) — server block identity로 data plane과 분리
 - **인증**: Static Bearer Token (ADR-004 §6.2)
 - **프로토콜**: HTTP/1.1
 - **구현**: `lua/luagate/admin/`
@@ -36,8 +36,11 @@ Authorization: Bearer <token>
 HTTP/1.1 401 Unauthorized
 Content-Type: application/json
 
-{"error": "unauthorized", "stage": "auth", "details": ["missing or invalid bearer token"]}
+{"error": "Unauthorized", "message": "Invalid or missing Bearer token"}
 ```
+
+> **WWW-Authenticate 헤더**: 포함하지 않음 (Bearer realm 노출 불필요 — admin-auth-contract.md 참조).
+> **body 형식 근거**: `admin-auth-contract.md`의 `_reject()` 구현이 Source of Truth. 상세 이유(`reason`)는 정보 노출 방지를 위해 응답 body에 미포함하며 감사 로그에만 기록한다.
 
 인증 실패 시 감사 로그 기록 (ADR-004 §6.3).
 
@@ -55,7 +58,7 @@ Content-Type: application/json
 
 | error 코드 | stage | HTTP 상태 |
 | --- | --- | --- |
-| `unauthorized` | `auth` | 401 |
+| `Unauthorized` | n/a (auth 계층) | 401 |
 | `validation_failed` | `validate` | 422 |
 | `conflict_detected` | `conflict_detect` | 422 |
 | `compile_failed` | `compile` | 422 |

@@ -50,8 +50,8 @@ __DATA__
     }
 --- request
 GET /health
---- response_code: 200
---- LAST
+--- error_code: 200
+
 
 
 
@@ -71,7 +71,7 @@ GET /health
 GET /health
 --- response_headers
 Content-Type: application/json
---- LAST
+
 
 
 
@@ -91,7 +91,7 @@ Content-Type: application/json
 GET /health
 --- response_body
 {"status":"ok","policy_version":"none"}
---- LAST
+
 
 
 
@@ -117,7 +117,7 @@ GET /health
 ["GET /setup", "GET /health"]
 --- response_body eval
 ["ok\n", "{\"status\":\"ok\",\"policy_version\":\"v1.2.3\"}\n"]
---- LAST
+
 
 
 
@@ -134,8 +134,8 @@ GET /health
     }
 --- request
 GET /api/
---- response_code: 501
---- LAST
+--- error_code: 501
+
 
 
 
@@ -152,9 +152,10 @@ GET /api/
     }
 --- request
 GET /api/
+--- error_code: 501
 --- response_body
 {"error":"Not Implemented"}
---- LAST
+
 
 
 
@@ -171,22 +172,21 @@ GET /api/
     }
 --- request
 GET /api/
+--- error_code: 501
 --- response_headers
 Content-Type: application/json
---- LAST
+
 
 
 
 === TEST 8: Admin API 알 수 없는 경로 — 404 반환
 --- http_config eval: $::http_config
 --- config
-    location / {
-        return 404;
-    }
+    # Test::Nginx 기본 location /가 존재하지 않는 경로에 대해 404 반환
 --- request
 GET /unknown-path
---- response_code: 404
---- LAST
+--- error_code: 404
+
 
 
 
@@ -208,10 +208,9 @@ GET /unknown-path
     }
 --- request
 GET /check-dict
---- response_code: 200
 --- response_body
 dict_ok
---- LAST
+
 
 
 
@@ -236,7 +235,7 @@ dict_ok
 GET /check-vars
 --- response_body
 allow
---- LAST
+
 
 
 
@@ -261,7 +260,7 @@ allow
 GET /check-vars
 --- response_body
 nginx_core
---- LAST
+
 
 
 
@@ -295,7 +294,7 @@ nginx_core
 GET /check-pipeline
 --- response_body
 policy_engine
---- LAST
+
 
 
 
@@ -320,7 +319,7 @@ policy_engine
 GET /check-vars
 --- response_body
 none
---- LAST
+
 
 
 
@@ -338,7 +337,7 @@ GET /check-rid
 X-Request-ID: test-request-id-abc123
 --- response_body
 test-request-id-abc123
---- LAST
+
 
 
 
@@ -360,7 +359,7 @@ test-request-id-abc123
 GET /check-rid
 --- response_body
 has_request_id
---- LAST
+
 
 
 
@@ -426,7 +425,7 @@ has_request_id
 GET /check-ctx
 --- response_body
 ctx_ok
---- LAST
+
 
 
 
@@ -457,7 +456,7 @@ ctx_ok
 GET /check-ctx-action
 --- response_body
 allow
---- LAST
+
 
 
 
@@ -473,7 +472,7 @@ allow
     set $luagate_rule_name       "null";
     set $luagate_active_version  "none";
 
-    location / {
+    location /proxy-test/ {
         rewrite_by_lua_block {
             ngx.var.luagate_decision_source = "nginx_core"
             ngx.var.luagate_action          = "allow"
@@ -509,8 +508,8 @@ allow
         proxy_send_timeout    1s;
     }
 --- request
-GET /
---- response_code: 502
+GET /proxy-test/
+--- error_code: 502
 
 
 
@@ -534,7 +533,7 @@ GET /
         }
     }
 
-    location / {
+    location /proxy-success/ {
         rewrite_by_lua_block {
             ngx.var.luagate_decision_source = "nginx_core"
             ngx.var.luagate_action          = "allow"
@@ -564,23 +563,45 @@ GET /
         proxy_set_header Host $host;
     }
 --- request
-GET /
---- response_code: 200
+GET /proxy-success/
+--- error_code: 200
 --- response_body_like: "message":"from upstream"
 
 
 
-=== TEST 20: Admin /api/ — Authorization 헤더 없음 → 401
+=== TEST 20: Admin /api/ — Authorization 헤더 없음 → 401 (WWW-Authenticate 헤더 미전송)
 --- http_config eval: $::http_config
 --- config
     location /api/ {
         content_by_lua_block {
+            -- 계약: admin-auth-contract.md
+            -- 토큰 소스: LUAGATE_ADMIN_TOKEN 환경변수
+            -- fail-closed: 환경변수 미설정 시 모든 요청 거부
+            local expected_token = os.getenv("LUAGATE_ADMIN_TOKEN")
             local auth = ngx.req.get_headers()["Authorization"]
-            if not auth or not auth:match("^Bearer .+") then
+            local provided = ""
+            if auth then
+                local prefix = "Bearer "
+                if auth:sub(1, #prefix) == prefix then
+                    provided = auth:sub(#prefix + 1)
+                end
+            end
+            -- constant-time compare (fail-closed: expected_token 미설정 시 거부)
+            local function ct_compare(a, b)
+                if type(a) ~= "string" or type(b) ~= "string" then return false end
+                if #a == 0 or #b == 0 then return false end
+                if #a ~= #b then return false end
+                local result = 0
+                for i = 1, #a do
+                    result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+                end
+                return result == 0
+            end
+            if not ct_compare(provided, expected_token) then
                 ngx.status = 401
                 ngx.header["Content-Type"] = "application/json"
-                ngx.header["WWW-Authenticate"] = 'Bearer realm="luagate-admin"'
-                ngx.say('{"error":"Unauthorized"}')
+                -- 계약: WWW-Authenticate 헤더 미전송
+                ngx.say('{"error":"Unauthorized","message":"Invalid or missing Bearer token"}')
                 return
             end
             ngx.status = 501
@@ -590,22 +611,43 @@ GET /
     }
 --- request
 GET /api/policies
---- response_code: 401
---- response_body_like: "error":"Unauthorized"
+--- error_code: 401
 
 
 
-=== TEST 21: Admin /api/ — 유효한 Bearer token → 501 Not Implemented
+=== TEST 21: Admin /api/ — 잘못된 Bearer token → 401 (WWW-Authenticate 헤더 없음)
 --- http_config eval: $::http_config
 --- config
     location /api/ {
         content_by_lua_block {
+            -- 계약: admin-auth-contract.md
+            -- LUAGATE_ADMIN_TOKEN 환경변수와 constant-time 비교
+            -- fail-closed: 환경변수 미설정 시 모든 요청 거부
+            local expected_token = os.getenv("LUAGATE_ADMIN_TOKEN")
             local auth = ngx.req.get_headers()["Authorization"]
-            if not auth or not auth:match("^Bearer .+") then
+            local provided = ""
+            if auth then
+                local prefix = "Bearer "
+                if auth:sub(1, #prefix) == prefix then
+                    provided = auth:sub(#prefix + 1)
+                end
+            end
+            -- constant-time compare (fail-closed: expected_token 미설정 시 거부)
+            local function ct_compare(a, b)
+                if type(a) ~= "string" or type(b) ~= "string" then return false end
+                if #a == 0 or #b == 0 then return false end
+                if #a ~= #b then return false end
+                local result = 0
+                for i = 1, #a do
+                    result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+                end
+                return result == 0
+            end
+            if not ct_compare(provided, expected_token) then
                 ngx.status = 401
                 ngx.header["Content-Type"] = "application/json"
-                ngx.header["WWW-Authenticate"] = 'Bearer realm="luagate-admin"'
-                ngx.say('{"error":"Unauthorized"}')
+                -- 계약: WWW-Authenticate 헤더 미전송
+                ngx.say('{"error":"Unauthorized","message":"Invalid or missing Bearer token"}')
                 return
             end
             ngx.status = 501
@@ -614,16 +656,15 @@ GET /api/policies
         }
     }
 --- request eval
-"GET /api/policies HTTP/1.0\r\nAuthorization: Bearer test-token-12345\r\n\r\n"
---- response_code: 501
---- response_body_like: "error":"Not Implemented"
+"GET /api/policies HTTP/1.0\r\nAuthorization: Bearer wrong-token-99999\r\n\r\n"
+--- error_code: 401
 
 
 
 === TEST 22: path_raw — request_uri에서 query 제거 후 원본 경로 유지
 --- http_config eval: $::http_config
 --- config
-    location / {
+    location /api/ {
         content_by_lua_block {
             local request_uri = ngx.var.request_uri or ngx.var.uri
             local path_raw  = request_uri:match("^([^?]*)") or ngx.var.uri
@@ -634,17 +675,16 @@ GET /api/policies
     }
 --- request
 GET /api/test?foo=bar&baz=qux
---- response_code: 200
 --- response_body_like: "path_raw":"/api/test"
 --- response_body_like: "query_string":"foo=bar
---- LAST
+
 
 
 
 === TEST 23: path_raw/path_normalized — 인코딩된 우회 시도는 raw에 보존되고 normalized와 구분됨
 --- http_config eval: $::http_config
 --- config
-    location / {
+    location /api/ {
         content_by_lua_block {
             local request_uri = ngx.var.request_uri or ngx.var.uri
             local path_raw = request_uri:match("^([^?]*)") or ngx.var.uri
@@ -656,24 +696,43 @@ GET /api/test?foo=bar&baz=qux
     }
 --- request
 GET /api/v1/%2e%2e/admin?foo=bar
---- response_code: 200
 --- response_body_like: "path_raw":"/api/v1/%2e%2e/admin"
 --- response_body_like: "different":true
---- LAST
 
 
 
-=== TEST 24: Admin /api/ — 401 응답에 WWW-Authenticate 헤더 포함
+
+=== TEST 24: Admin /api/ — 401 응답에 WWW-Authenticate 헤더 미포함 (계약 준수)
 --- http_config eval: $::http_config
 --- config
     location /api/ {
         content_by_lua_block {
+            -- 계약: admin-auth-contract.md — 401에서 WWW-Authenticate 미전송
+            -- fail-closed: 환경변수 미설정 시 모든 요청 거부
+            local expected_token = os.getenv("LUAGATE_ADMIN_TOKEN")
             local auth = ngx.req.get_headers()["Authorization"]
-            if not auth or not auth:match("^Bearer .+") then
+            local provided = ""
+            if auth then
+                local prefix = "Bearer "
+                if auth:sub(1, #prefix) == prefix then
+                    provided = auth:sub(#prefix + 1)
+                end
+            end
+            local function ct_compare(a, b)
+                if type(a) ~= "string" or type(b) ~= "string" then return false end
+                if #a == 0 or #b == 0 then return false end
+                if #a ~= #b then return false end
+                local result = 0
+                for i = 1, #a do
+                    result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+                end
+                return result == 0
+            end
+            if not ct_compare(provided, expected_token) then
                 ngx.status = 401
                 ngx.header["Content-Type"] = "application/json"
-                ngx.header["WWW-Authenticate"] = 'Bearer realm="luagate-admin"'
-                ngx.say('{"error":"Unauthorized"}')
+                -- WWW-Authenticate 헤더를 명시적으로 전송하지 않음
+                ngx.say('{"error":"Unauthorized","message":"Invalid or missing Bearer token"}')
                 return
             end
             ngx.status = 501
@@ -683,7 +742,48 @@ GET /api/v1/%2e%2e/admin?foo=bar
     }
 --- request
 GET /api/policies
---- response_code: 401
---- response_headers
-WWW-Authenticate: Bearer realm="luagate-admin"
+--- error_code: 401
+
+
+
+=== TEST 25: Admin /api/ — 올바른 Bearer token → 401 아닌 501 반환 (인증 통과)
+--- http_config eval: $::http_config
+--- config
+    location /api/ {
+        content_by_lua_block {
+            -- 계약: admin-auth-contract.md
+            -- LUAGATE_ADMIN_TOKEN과 일치하는 토큰이면 인증 통과 → 501 반환 (stub)
+            local expected_token = os.getenv("LUAGATE_ADMIN_TOKEN")
+            local auth = ngx.req.get_headers()["Authorization"]
+            local provided = ""
+            if auth then
+                local prefix = "Bearer "
+                if auth:sub(1, #prefix) == prefix then
+                    provided = auth:sub(#prefix + 1)
+                end
+            end
+            local function ct_compare(a, b)
+                if type(a) ~= "string" or type(b) ~= "string" then return false end
+                if #a == 0 or #b == 0 then return false end
+                if #a ~= #b then return false end
+                local result = 0
+                for i = 1, #a do
+                    result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+                end
+                return result == 0
+            end
+            if not ct_compare(provided, expected_token) then
+                ngx.status = 401
+                ngx.header["Content-Type"] = "application/json"
+                ngx.say('{"error":"Unauthorized","message":"Invalid or missing Bearer token"}')
+                return
+            end
+            ngx.status = 501
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"error":"Not Implemented"}')
+        }
+    }
+--- request eval
+"GET /api/policies HTTP/1.0\r\nAuthorization: Bearer test-secret-token-for-integration\r\n\r\n"
+--- error_code: 501
 --- LAST

@@ -26,7 +26,7 @@ test-unit-c:
 test-integration-http:
 	@echo "==> Running HTTP integration tests (Test::Nginx)..."
 	@if [ -d tests/integration/http ]; then \
-	  prove -r tests/integration/http/; \
+	  LUAGATE_ADMIN_TOKEN=test-secret-token-for-integration prove -r tests/integration/http/; \
 	else \
 	  echo "  (skipping — tests/integration/http/ not yet created)"; \
 	fi
@@ -58,6 +58,7 @@ test-docker:
 	  -v "$(CURDIR)/tests:/luagate/tests:ro" \
 	  -v "$(CURDIR)/policies:/luagate/policies:ro" \
 	  -e TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot \
+	  -e LUAGATE_ADMIN_TOKEN=test-secret-token-for-integration \
 	  luagate-test \
 	  prove -r -v tests/integration/http/; \
 	EXIT_CODE=$$?; \
