@@ -655,8 +655,10 @@ GET /api/policies
             ngx.say('{"error":"Not Implemented"}')
         }
     }
---- request eval
-"GET /api/policies HTTP/1.0\r\nAuthorization: Bearer wrong-token-99999\r\n\r\n"
+--- request
+GET /api/policies
+--- more_headers
+Authorization: Bearer wrong-token-99999
 --- error_code: 401
 
 
@@ -703,6 +705,8 @@ GET /api/v1/%2e%2e/admin?foo=bar
 
 
 === TEST 24: Admin /api/ — 401 응답에 WWW-Authenticate 헤더 미포함 (계약 준수)
+--- main_config
+env LUAGATE_ADMIN_TOKEN;
 --- http_config eval: $::http_config
 --- config
     location /api/ {
@@ -747,6 +751,8 @@ GET /api/policies
 
 
 === TEST 25: Admin /api/ — 올바른 Bearer token → 401 아닌 501 반환 (인증 통과)
+--- main_config
+env LUAGATE_ADMIN_TOKEN;
 --- http_config eval: $::http_config
 --- config
     location /api/ {
@@ -783,7 +789,9 @@ GET /api/policies
             ngx.say('{"error":"Not Implemented"}')
         }
     }
---- request eval
-"GET /api/policies HTTP/1.0\r\nAuthorization: Bearer test-secret-token-for-integration\r\n\r\n"
+--- request
+GET /api/policies
+--- more_headers
+Authorization: Bearer test-secret-token-for-integration
 --- error_code: 501
 --- LAST
