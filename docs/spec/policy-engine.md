@@ -5,6 +5,7 @@
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
 > - [ADR-002 정책 평가 규칙 + 충돌 감지](../design/adr/ADR-002-policy-evaluation-conflict-detection.md)
 > - [ADR-003 정책 저장소 + Hot Reload](../design/adr/ADR-003-policy-storage-hot-reload.md)
+> - [ADR-005 정책 활성화 모델 + 동시성 제어](../design/adr/ADR-005-policy-activation-concurrency.md)
 
 ## 1. 개요
 
@@ -198,13 +199,14 @@ load_policy(filepath):
     [5] SHA256 해시 계산 (전체 파일 내용 기준)
     [6] compile: priority 오름차순 정렬 + radix tree 빌드
         - compile 실패 → 전체 거부 (전체 또는 전무)
-    [7] commit (partial success 허용 구간):
+    [7] commit:
         - HTTP 서브시스템 교체
         - Stream 서브시스템 교체
-        - 각 서브시스템은 독립적으로 commit. 한 쪽 실패 시 해당 서브시스템만 LKG 유지
+        - PUT /api/v1/policies: all-or-nothing. 한쪽 서브시스템 실패 시 전체 실패 반환 (ADR-005 §1)
+        - POST /api/v1/policies/reload: partial success 허용. 한 쪽 실패 시 해당 서브시스템만 LKG 유지 (ADR-003)
 ```
 
-> **Partial success 범위**: [7] commit 단계에 한정.
+> **Partial success 범위**: `POST /api/v1/policies/reload`의 [7] commit 단계에 한정. `PUT /api/v1/policies`는 [7]을 포함한 전 단계에서 all-or-nothing (ADR-005 §1).
 > [3] validate / [6] compile은 **전체 또는 전무(all-or-nothing)** — 하나라도 실패 시 전체 거부.
 > **Reload 실패 시 (commit 이전)**: active pointer가 변경되지 않았으므로 **롤백 불필요**. 기존 active version의 blob/meta가 shared dict에 그대로 유지된다. 실패한 신규 버전의 blob/meta는 폐기 대상이지만, 정리 타이밍은 구현 재량이다.
 > **Reload 실패 시 (commit 단계 partial)**: 실패한 서브시스템의 active pointer는 변경되지 않으며, 해당 서브시스템은 이전 성공 버전(LKG)을 계속 사용한다.
@@ -360,7 +362,7 @@ function detect_shadowed(rules):
 
 | 엔드포인트 | 기능 | If-Match |
 | --- | --- | --- |
-| `GET /api/v1/policies` | staged 정책 YAML 반환 (파일 기준 canonical source). 응답 `ETag: "<source_version>"` 포함 | — |
+| `GET /api/v1/policies` | 현재 canonical source (`conf/policies.yaml`) 반환. 응답 `ETag: "<source_version>"` 포함 | — |
 | `PUT /api/v1/policies` | 새 정책 저장 + validate + compile + commit | **필수** (`<source_version>`) |
 | `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거 | 선택 (제공 시 `http:active_version`과 비교, 불일치이면 409) |
 | `GET /api/v1/policies/version` | 서브시스템별 active_version 조회 (`active_http_version`, `active_stream_version` 분리 반환) | — |
@@ -375,4 +377,5 @@ function detect_shadowed(rules):
 
 - [ADR-002](../design/adr/ADR-002-policy-evaluation-conflict-detection.md) — 평가 규칙
 - [ADR-003](../design/adr/ADR-003-policy-storage-hot-reload.md) — Hot Reload
+- [ADR-005](../design/adr/ADR-005-policy-activation-concurrency.md) — 정책 활성화 모델 + 동시성 제어
 - [spec/admin-api.md](./admin-api.md) — 정책 관련 API, 감사 로그

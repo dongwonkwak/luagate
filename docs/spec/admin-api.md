@@ -4,6 +4,7 @@
 >
 > - [ADR-003 정책 저장소 + Hot Reload](../design/adr/ADR-003-policy-storage-hot-reload.md)
 > - [ADR-004 로그/메트릭 + 관리면 보안](../design/adr/ADR-004-log-metrics-admin-security.md)
+> - [ADR-005 정책 활성화 모델 + 동시성 제어](../design/adr/ADR-005-policy-activation-concurrency.md)
 
 ## 1. 개요
 
@@ -85,7 +86,7 @@ Content-Type: application/json
 | `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거만 | 선택 (`<http_active_version>` 형식) |
 
 > **PUT /api/v1/policies**: 저장 + validate + conflict_detect + compile + commit을 한 번에 수행.
-> 실패 시 canonical file을 변경하지 않는다. Partial commit은 §policy-engine.md commit 단계 규칙 따름.
+> 실패 시 canonical file을 변경하지 않는다. PUT은 all-or-nothing. 한쪽 서브시스템 실패 시 전체 실패 반환 (ADR-005 §1).
 
 ## 5. ETag / If-Match
 
@@ -508,5 +509,6 @@ if ($request_method = 'OPTIONS') {
 
 - [ADR-003](../design/adr/ADR-003-policy-storage-hot-reload.md) — 정책 reload 흐름
 - [ADR-004](../design/adr/ADR-004-log-metrics-admin-security.md) — 보안 설정, 감사 로그
+- [ADR-005](../design/adr/ADR-005-policy-activation-concurrency.md) — 정책 활성화 모델 + 동시성 제어
 - [spec/policy-engine.md](./policy-engine.md) — 정책 검증/평가, If-Match 대상
 - [spec/log-schema.md](./log-schema.md) — 감사 로그 스키마, 메트릭 목록
