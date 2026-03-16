@@ -71,8 +71,24 @@ nix develop
 make build
 
 # 전체 테스트
+# HTTP 통합 테스트는 로컬 Test::Nginx가 없으면 Docker Compose로 자동 fallback
 make test
 ```
+
+### 테스트 실행 요약
+
+```bash
+# 단위 테스트
+make test-unit
+
+# HTTP 통합 테스트만
+make test-integration-http
+
+# HTTP 통합 테스트를 Docker Compose로 고정 실행
+make test-docker
+```
+
+자세한 계약은 [docs/spec/test-strategy.md](docs/spec/test-strategy.md) 참조.
 
 ### 포트 표
 

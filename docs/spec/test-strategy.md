@@ -18,14 +18,42 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 | `make test-unit` | Lua + C 단위 테스트 | Yes |
 | `make test-unit-lua` | busted 단위 테스트만 | Yes |
 | `make test-unit-c` | CMocka 단위 테스트만 | Yes |
-| `make test-integration-http` | HTTP 통합 (Test::Nginx) | Yes |
+| `make test-integration-http` | HTTP 통합 (로컬 Test::Nginx 또는 Docker Compose fallback) | Yes |
 | `make test-integration-stream` | Stream 통합 (Test::Nginx::Stream) | Yes |
 | `make test-reload` | Hot reload 전용 테스트 | Yes |
+| `make test-docker` | Docker Compose 기반 HTTP 통합 테스트 | No |
 | `make bench` | 전체 벤치마크 (smoke) | No |
 | `make bench-http` | HTTP 벤치마크 (wrk/vegeta) | No |
 | `make bench-stream` | Stream 벤치마크 | No |
 
 > **PR blocking**: `make test`는 CI에서 필수. `make bench`는 성능 비교 시에만 실행.
+
+### 2.1 실행 환경 가이드
+
+**권장 순서**
+
+1. Nix dev shell에서 `make test-unit`
+2. `make test` 또는 `make test-integration-http`
+3. 필요 시 `make test-docker`로 HTTP 통합 테스트만 단독 실행
+
+**환경별 동작**
+
+- `nix develop` 환경은 `busted`, `prove`, `ctest`를 제공한다.
+- `make test-integration-http`는 로컬 Perl에 `Test::Nginx::Socket`이 있으면 직접 `prove`를 실행한다.
+- 로컬 `Test::Nginx::Socket`이 없고 Docker가 있으면 `make test-integration-http`는 자동으로 `make test-docker`로 fallback 한다.
+- CI의 HTTP 통합 테스트 source of truth는 `make test-docker`이다.
+- `make test-unit-c`는 `csrc/build/CTestTestfile.cmake`가 없으면 skip 한다.
+- `make test-integration-stream`, `make test-reload`는 해당 테스트 디렉터리가 없으면 skip 한다.
+
+**예시**
+
+```bash
+# Nix dev shell에서 전체 테스트
+nix --extra-experimental-features 'nix-command flakes' develop --command make test
+
+# HTTP 통합 테스트만 Docker Compose로 실행
+make test-docker
+```
 
 ## 3. 단위 테스트 (§7.1)
 
@@ -171,6 +199,21 @@ make test-integration-http
 ```
 
 **harness**: Test::Nginx (Perl) — `tests/integration/http/`
+
+실행 규칙:
+
+- 로컬에 `Test::Nginx::Socket`이 있으면 `LUAGATE_ADMIN_TOKEN=<token> prove -r tests/integration/http/`
+- 로컬 모듈이 없으면 Docker Compose fallback: `make test-docker`
+- 기본 admin 토큰 값은 `TEST_ADMIN_TOKEN` / `LUAGATE_ADMIN_TOKEN`의 기본값 `test-secret-token-for-integration`
+
+```bash
+make test-integration-http
+# 또는 명시적으로 Docker Compose 경로:
+make test-docker
+# 또는:
+LUAGATE_ADMIN_TOKEN=test-secret-token-for-integration \
+docker compose -f docker-compose.test.yml up --build --exit-code-from test
+```
 
 ### 4.2 Stream 통합 — Test::Nginx::Stream
 

@@ -1,5 +1,7 @@
 .PHONY: build test test-unit test-unit-lua test-unit-c test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean
 
+TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
+
 # ── Build ──────────────────────────────────────────────────────────────────
 build:
 	@echo "==> Building C extensions..."
@@ -25,10 +27,16 @@ test-unit-c:
 
 test-integration-http:
 	@echo "==> Running HTTP integration tests (Test::Nginx)..."
-	@if [ -d tests/integration/http ]; then \
-	  prove -r tests/integration/http/; \
-	else \
+	@if [ ! -d tests/integration/http ]; then \
 	  echo "  (skipping — tests/integration/http/ not yet created)"; \
+	elif perl -MTest::Nginx::Socket -e1 >/dev/null 2>&1; then \
+	  LUAGATE_ADMIN_TOKEN=$(TEST_ADMIN_TOKEN) prove -r tests/integration/http/; \
+	elif command -v docker >/dev/null 2>&1; then \
+	  echo "  (Test::Nginx::Socket not available locally — falling back to Docker Compose)"; \
+	  $(MAKE) test-docker; \
+	else \
+	  echo "  (cannot run HTTP integration tests: install Test::Nginx::Socket or use Docker)"; \
+	  exit 1; \
 	fi
 
 test-integration-stream:
@@ -49,20 +57,8 @@ test-reload:
 
 # ── Docker Test ────────────────────────────────────────────────────────────
 test-docker:
-	@echo "==> Building test Docker image..."
-	docker build -f Dockerfile.test -t luagate-test .
-	@echo "==> Running integration tests inside Docker container..."
-	docker run --rm \
-	  -v "$(CURDIR)/lua/luagate:/usr/local/openresty/lualib/luagate:ro" \
-	  -v "$(CURDIR)/conf/nginx.conf:/luagate/conf/nginx.conf:ro" \
-	  -v "$(CURDIR)/tests:/luagate/tests:ro" \
-	  -v "$(CURDIR)/policies:/luagate/policies:ro" \
-	  -e TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot \
-	  luagate-test \
-	  prove -r -v tests/integration/http/; \
-	EXIT_CODE=$$?; \
-	echo "==> Test container exited with code $$EXIT_CODE"; \
-	exit $$EXIT_CODE
+	@echo "==> Running HTTP integration tests in Docker Compose..."
+	LUAGATE_ADMIN_TOKEN=$(TEST_ADMIN_TOKEN) docker compose -f docker-compose.test.yml up --build --exit-code-from test
 
 # ── Lint ───────────────────────────────────────────────────────────────────
 lint:

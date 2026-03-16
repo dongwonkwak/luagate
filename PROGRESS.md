@@ -117,3 +117,11 @@ COMPLETED_REVIEW: DON-133-code (2026-03-15)
 | 2026-03-16 | DON-106 | Git hooks 설정 (detect-secrets 보완) | `.pre-commit-config.yaml`, `.secrets.baseline`, `scripts/detect-secrets-hook-wrapper.sh`, `scripts/shellcheck-wrapper.sh`, `flake.nix` | detect-secrets hook 추가, CI fail-hard, --baseline 인자 수정. Codex 리뷰 반영 완료 |
 
 COMPLETED_REVIEW: DON-106-code (2026-03-16)
+
+COMPLETED_REVIEW: DON-134-code (2026-03-16)
+
+## Phase 1-Core: Admin Auth 테스트 수정 (DON-134)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-16 | DON-134 | admin auth 테스트를 admin-auth-contract.md 계약에 맞게 수정 | `tests/integration/http/test_nginx_basic.t`, `conf/nginx.conf`, `Makefile`, `docs/spec/admin-api.md` | TEST 25 신규 추가, constant-time compare 구현, WWW-Authenticate 제거. 보안 리뷰 PASS |
