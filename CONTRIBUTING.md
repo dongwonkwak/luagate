@@ -47,6 +47,13 @@ make build
 
 # 5. 테스트 실행
 make test-unit
+
+# HTTP 통합 테스트
+# 로컬 Test::Nginx가 없으면 Docker Compose로 자동 fallback
+make test-integration-http
+
+# 전체 테스트
+make test
 ```
 
 ### 로컬 실행
@@ -123,6 +130,12 @@ docs(spec): update http-pipeline stream preread section [DON-90]
 ---
 
 ## 테스트 규칙
+
+실행 메모:
+
+- Nix dev shell에서는 `make test-unit`이 바로 동작한다.
+- `make test-integration-http`는 로컬 `Test::Nginx::Socket`이 없으면 Docker Compose로 자동 fallback 한다.
+- HTTP 통합 테스트만 고정 실행하려면 `make test-docker`를 사용한다.
 
 | 변경 유형 | 필수 테스트 |
 |----------|-----------|

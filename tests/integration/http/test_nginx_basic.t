@@ -616,6 +616,8 @@ GET /api/policies
 
 
 === TEST 21: Admin /api/ — 잘못된 Bearer token → 401 (WWW-Authenticate 헤더 없음)
+--- main_config
+env LUAGATE_ADMIN_TOKEN;
 --- http_config eval: $::http_config
 --- config
     location /api/ {
@@ -746,6 +748,7 @@ env LUAGATE_ADMIN_TOKEN;
     }
 --- request
 GET /api/policies
+--- raw_response_headers_unlike: (?mi)^WWW-Authenticate:
 --- error_code: 401
 
 
