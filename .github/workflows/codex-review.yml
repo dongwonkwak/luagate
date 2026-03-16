@@ -1,0 +1,211 @@
+# ── codex-review.yml ────────────────────────────────────────────────────────
+# GitHub Actions: PR 변경 파일 감지 → 카테고리별 Codex 리뷰 지시문 자동 게시
+# DON-103: PR opened/synchronize 이벤트 트리거
+#
+# 감지 카테고리:
+#   lua        — lua/**/*.lua
+#   c_ffi      — csrc/**/*.c, csrc/**/*.h
+#   nginx_conf — conf/**/*.conf
+#   lua_test   — tests/**/*.lua
+#   int_test   — tests/**/*.t
+#   frontend   — frontend/**
+#   ci_build   — .github/**, Makefile, flake.nix, CMakeLists.txt
+#   docs       — docs/**/*.md
+#   policy     — policies/**/*.yaml
+# ────────────────────────────────────────────────────────────────────────────
+
+name: Codex Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect-and-comment:
+    name: Detect changed files and post Codex review directive
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect files and build review comment
+        id: build-comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const filenames = files.map(f => f.filename);
+
+            // ── 카테고리 감지 ──────────────────────────────────────────────
+            const is = (patterns) => filenames.some(f => {
+              return patterns.some(p => {
+                if (p instanceof RegExp) return p.test(f);
+                return f === p || f.startsWith(p);
+              });
+            });
+
+            const cats = {
+              lua:        is([/^lua\/.+\.lua$/]),
+              c_ffi:      is([/^csrc\/.+\.(c|h)$/]),
+              nginx_conf: is([/^conf\/.+\.conf$/]),
+              lua_test:   is([/^tests\/.+\.lua$/]),
+              int_test:   is([/^tests\/.+\.t$/]),
+              frontend:   is([/^frontend\//]),
+              ci_build:   is([/^\.github\//, 'Makefile', 'flake.nix', 'CMakeLists.txt']),
+              docs:       is([/^docs\/.+\.md$/]),
+              policy:     is([/^policies\/.+\.yaml$/]),
+            };
+
+            const anyDetected = Object.values(cats).some(Boolean);
+            if (!anyDetected) {
+              core.setOutput('skip', 'true');
+              return;
+            }
+            core.setOutput('skip', 'false');
+
+            // ── 카테고리별 지시문 ─────────────────────────────────────────
+            const directives = [];
+
+            if (cats.lua) {
+              directives.push(`### Lua 코드 리뷰
+- 전역 변수 사용 금지 — 모든 상태는 module-level upvalue 또는 \`ngx.ctx.luagate\` (요청 범위)
+- blocking I/O 금지 — \`io.open\`, \`os.execute\` 등 핸들러 내 직접 호출 금지
+- cosocket 제약 준수 — \`init_by_lua\` / \`log_by_lua\` 단계에서 cosocket 사용 불가
+- \`ngx.shared.DICT:safe_set()\` 사용 — no-memory 에러 경로 처리 필수
+- \`table.sort\` 사용 시 stable sort 보장 — 동률 우선순위 시 \`original_index\` 비교 포함
+- StyLua 포맷 준수 (\`stylua --indent-type Spaces --indent-width 4\`)
+- luacheck 경고 없음
+- OpenResty 패턴/안티패턴 준수 — \`.claude/knowledge/openresty-patterns.md\` 기준`);
+            }
+
+            if (cats.c_ffi) {
+              directives.push(`### C FFI 코드 리뷰
+- 메모리 할당/해제 쌍 확인 — Rust 할당 메모리는 반드시 \`luagate_*_free()\` 호출로 해제
+- 버퍼 오버플로 방지 — 경계 검사 누락 여부 확인
+- NULL 포인터 체크 — 모든 포인터 역참조 전 NULL 검사 필수
+- visibility 선언 — 공개 API만 \`__attribute__((visibility("default")))\`
+- C11 표준 준수
+- clang-format 포맷 준수 (\`.clang-format\` 기준)
+- clang-tidy 경고 없음
+- \`pcall\` 래핑 필수 — FFI 호출부 Lua 측에서 \`pcall\`로 감싸기`);
+            }
+
+            if (cats.nginx_conf) {
+              directives.push(`### Nginx 설정 리뷰
+- shared dict zone 선언 확인 — zone 이름에 \`luagate_\` prefix 필수
+- \`lua_code_cache on\` 명시 여부 확인
+- server block 분리 — data plane(:8080)과 admin(:9090) 분리 유지
+- phase hook 순서 준수 — \`rewrite_by_lua\` → \`access_by_lua\` → \`log_by_lua\`
+- \`*_by_lua_block\` 또는 \`*_by_lua_file\` 사용 (구식 inline 금지)`);
+            }
+
+            if (cats.lua_test) {
+              directives.push(`### Lua 단위 테스트 리뷰
+- describe/it 구조 사용 — 한국어 서술형 BDD 스타일 준수
+- 테스트 독립성 — 각 테스트가 서로의 상태에 의존하지 않음
+- mock 사용 최소화 — \`package.preload\` 방식으로 의존성 stub 처리
+- 스펙 커버리지 — 새 기능의 주요 경로와 에러 경로 모두 커버
+- 파일 경로 포인터 포함 — 테스트 파일 상단에 구현 파일 경로 주석`);
+            }
+
+            if (cats.int_test) {
+              directives.push(`### 통합 테스트 리뷰 (Test::Nginx)
+- Test::Nginx 형식 준수 — \`=== TEST N:\` 헤더 형식
+- 테스트 독립성 — 각 블록이 독립적으로 실행 가능
+- 에러 시나리오 포함 — 정상 경로 외 에러 경로도 테스트
+- \`TEST_NGINX_SERVROOT\` 환경변수 사용 확인`);
+            }
+
+            if (cats.frontend) {
+              directives.push(`### Frontend 코드 리뷰
+- React/Vite 베스트 프랙티스 준수
+- 컴포넌트 재사용성 및 단일 책임 원칙
+- 번들 크기 영향 검토
+- 접근성(a11y) 기본 요건 확인`);
+            }
+
+            if (cats.ci_build) {
+              directives.push(`### CI/Build 설정 리뷰
+- 재현성 확인 — 동일 입력에 동일 출력 보장
+- 캐시 전략 적절성 — 캐시 키가 의존성 변경을 정확히 반영
+- 타겟 정합성 — Makefile 타겟이 실제 수행 작업과 일치
+- GitHub Actions YAML 문법 준수
+- workflow 권한 최소화 — \`permissions\` 블록에서 필요한 권한만 선언`);
+            }
+
+            if (cats.docs) {
+              directives.push(`### 문서 리뷰
+- ADR 참조 링크 유효성 — 언급된 ADR 번호가 실제 파일과 일치
+- 스펙 간 일관성 — 다른 스펙 파일과 용어/필드명 충돌 여부
+- \`<!-- ADR 필요 -->\` 마커 — 설계 결정이 필요한 구간에 마커 추가 여부
+- 코드 예시 정합성 — 문서 내 코드 예시가 실제 구현과 일치`);
+            }
+
+            if (cats.policy) {
+              directives.push(`### Policy YAML 리뷰
+- schema 준수 — 필수 필드(\`id\`, \`action\`, \`priority\`) 누락 여부
+- \`global.default_action\` 필수 — 최상위 기본 동작 선언 확인
+- rule id 유일성 — HTTP rules + stream_rules 합산 기준 중복 없음
+- \`src_ip_cidr\` 형식 — IPv4 CIDR (octet 0-255, prefix 0-32)
+- \`dst_port\` 범위 — 정수 또는 \`lo-hi\` 형식, 1-65535 범위`);
+            }
+
+            // ── 공통 리뷰 범위 ─────────────────────────────────────────────
+            const common = `### 공통 리뷰 범위 (모든 카테고리)
+- **코드 품질**: 명확성, 중복 제거, 단일 책임
+- **프로젝트 컨벤션**: \`.claude/knowledge/conventions.md\` 기준
+  - 커밋 메시지 형식 준수 (\`type(scope): description [DON-XX]\`)
+  - 코드와 문서 변경이 같은 PR에 포함 (same-PR 규칙)
+- **보안**: \`.claude/knowledge/review-checklist.md\` 기준
+  - 보안 경로 fail-closed (에러 → deny)
+  - PII 필드 redaction 적용 여부
+  - Admin API 타이밍 안전 토큰 비교
+- **성능**: 불필요한 shared dict 접근 최소화, 핫 패스에서 blocking 작업 없음`;
+
+            // ── 감지된 파일 목록 ──────────────────────────────────────────
+            const detected = Object.entries(cats)
+              .filter(([, v]) => v)
+              .map(([k]) => k)
+              .join(', ');
+
+            const body = [
+              '@codex review',
+              '',
+              `> 감지된 변경 카테고리: \`${detected}\``,
+              '',
+              ...directives,
+              '',
+              common,
+            ].join('\n');
+
+            core.setOutput('body', body);
+
+      - name: Find existing Codex review comment
+        if: steps.build-comment.outputs.skip != 'true'
+        id: find-comment
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '@codex review'
+
+      - name: Create or update Codex review comment
+        if: steps.build-comment.outputs.skip != 'true'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.build-comment.outputs.body }}
+          edit-mode: replace
