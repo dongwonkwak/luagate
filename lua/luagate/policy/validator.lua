@@ -29,6 +29,27 @@ local function is_integer(value)
   return type(value) == "number" and value == math.floor(value)
 end
 
+--- Check that `value` is a dense array table with 1-based consecutive indexes.
+local function is_dense_array_table(value)
+  if type(value) ~= "table" then
+    return false
+  end
+
+  local count = 0
+  local max_index = 0
+  for k, _ in pairs(value) do
+    if not is_integer(k) or k < 1 then
+      return false
+    end
+    count = count + 1
+    if k > max_index then
+      max_index = k
+    end
+  end
+
+  return max_index == count
+end
+
 --- Validate an IPv4 CIDR string "a.b.c.d/prefix".
 -- Returns true if valid, false otherwise.
 -- Rules: each octet 0-255, prefix 0-32.
@@ -348,7 +369,7 @@ function _M.validate(policy)
   -- 2. HTTP rules (policy.rules) — optional section, but each entry validated
   -- ---------------------------------------------------------------------------
   local http_rules = policy.rules or {}
-  if type(http_rules) ~= "table" then
+  if not is_dense_array_table(http_rules) then
     return nil, "policy.rules must be a list"
   end
 
@@ -366,7 +387,7 @@ function _M.validate(policy)
   -- 3. Stream rules (policy.stream_rules) — optional section
   -- ---------------------------------------------------------------------------
   local stream_rules = policy.stream_rules or {}
-  if type(stream_rules) ~= "table" then
+  if not is_dense_array_table(stream_rules) then
     return nil, "policy.stream_rules must be a list"
   end
 

@@ -178,6 +178,13 @@ describe("parser.parse_http_rules", function()
     assert.matches("rules must be a list", err)
   end)
 
+  it("returns nil, err when a rules item is not a mapping", function()
+    local rules, err = parser.parse_http_rules({ "bad" })
+    assert.is_nil(rules)
+    assert.is_string(err)
+    assert.matches("rules%[1%] must be a mapping", err)
+  end)
+
   it("sets original_index to 1-based source position", function()
     local raw = {
       { id = "r1", priority = 10, action = "allow" },
@@ -266,6 +273,13 @@ describe("parser.parse_stream_rules", function()
     assert.matches("stream_rules must be a list", err)
   end)
 
+  it("returns nil, err when a stream_rules item is not a mapping", function()
+    local rules, err = parser.parse_stream_rules({ "bad" })
+    assert.is_nil(rules)
+    assert.is_string(err)
+    assert.matches("stream_rules%[1%] must be a mapping", err)
+  end)
+
   it("returns nil, err when stream_rules is a non-list table", function()
     -- a map (hash table) with no integer keys: ipairs returns nothing,
     -- but the type guard fires first
@@ -349,6 +363,30 @@ describe("parser.parse_string — non-list rules propagation", function()
     assert.is_nil(result)
     assert.is_string(err)
     assert.matches("stream_rules must be a list", err)
+  end)
+
+  it("returns nil, err when a 'rules' entry is not a mapping", function()
+    local yaml = "rules_item_is_scalar"
+    register(yaml, {
+      global = { default_action = "deny" },
+      rules = { "bad" },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(result)
+    assert.is_string(err)
+    assert.matches("rules%[1%] must be a mapping", err)
+  end)
+
+  it("returns nil, err when a 'stream_rules' entry is not a mapping", function()
+    local yaml = "stream_rules_item_is_scalar"
+    register(yaml, {
+      global = { default_action = "deny" },
+      stream_rules = { "bad" },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(result)
+    assert.is_string(err)
+    assert.matches("stream_rules%[1%] must be a mapping", err)
   end)
 end)
 

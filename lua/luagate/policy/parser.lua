@@ -76,6 +76,37 @@ local function normalise_rule(rule, idx)
   end
 end
 
+--- Parse and shallow-copy a rule list, guarding against malformed entries.
+-- @param raw_rules table
+-- @param field_name string
+-- @return table|nil, string|nil
+local function parse_rule_list(raw_rules, field_name)
+  if raw_rules == nil then
+    return {}, nil
+  end
+
+  if type(raw_rules) ~= "table" then
+    return nil, field_name .. " must be a list (got " .. type(raw_rules) .. ")"
+  end
+
+  local rules = {}
+  for i, rule in ipairs(raw_rules) do
+    if type(rule) ~= "table" then
+      return nil, field_name .. "[" .. i .. "] must be a mapping (got " .. type(rule) .. ")"
+    end
+
+    -- Shallow-copy so we do not mutate the raw parsed table in place.
+    local r = {}
+    for k, v in pairs(rule) do
+      r[k] = v
+    end
+    normalise_rule(r, i)
+    rules[i] = r
+  end
+
+  return rules, nil
+end
+
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
@@ -88,25 +119,7 @@ end
 -- @return table|nil   List of normalised HTTP rule tables, or nil on error
 -- @return string|nil  Error description, or nil on success
 function _M.parse_http_rules(raw_rules)
-  if raw_rules == nil then
-    return {}, nil
-  end
-
-  if type(raw_rules) ~= "table" then
-    return nil, "rules must be a list (got " .. type(raw_rules) .. ")"
-  end
-
-  local rules = {}
-  for i, rule in ipairs(raw_rules) do
-    -- Shallow-copy so we do not mutate the raw parsed table in place.
-    local r = {}
-    for k, v in pairs(rule) do
-      r[k] = v
-    end
-    normalise_rule(r, i)
-    rules[i] = r
-  end
-  return rules, nil
+  return parse_rule_list(raw_rules, "rules")
 end
 
 --- Parse a list of Stream rules from the top-level "stream_rules" key.
@@ -117,24 +130,7 @@ end
 -- @return table|nil   List of normalised Stream rule tables, or nil on error
 -- @return string|nil  Error description, or nil on success
 function _M.parse_stream_rules(raw_rules)
-  if raw_rules == nil then
-    return {}, nil
-  end
-
-  if type(raw_rules) ~= "table" then
-    return nil, "stream_rules must be a list (got " .. type(raw_rules) .. ")"
-  end
-
-  local rules = {}
-  for i, rule in ipairs(raw_rules) do
-    local r = {}
-    for k, v in pairs(rule) do
-      r[k] = v
-    end
-    normalise_rule(r, i)
-    rules[i] = r
-  end
-  return rules, nil
+  return parse_rule_list(raw_rules, "stream_rules")
 end
 
 --- Parse a YAML string into the internal policy representation.

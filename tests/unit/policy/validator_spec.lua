@@ -412,6 +412,19 @@ describe("validator.validate — HTTP rules", function()
     assert.is_string(err)
     assert.matches("rules", err)
   end)
+
+  it("rejects policy.rules when it is a map-shaped table", function()
+    local p = minimal_policy()
+    p.rules = {
+      id = "not-a-sequence",
+      priority = 10,
+      action = "allow",
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("policy%.rules must be a list", err)
+  end)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -799,6 +812,19 @@ describe("validator.validate — Stream rules", function()
     assert.is_nil(_)
     assert.is_string(err)
     assert.matches("stream_rules", err)
+  end)
+
+  it("rejects policy.stream_rules when it is a map-shaped table", function()
+    local p = minimal_policy()
+    p.stream_rules = {
+      id = "not-a-sequence",
+      priority = 10,
+      action = "deny",
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("policy%.stream_rules must be a list", err)
   end)
 
   it("accepts Stream deny rule without upstream (upstream not required for deny)", function()
