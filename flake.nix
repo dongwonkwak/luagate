@@ -48,6 +48,7 @@
             # ── Git hooks ─────────────────────────────────────────────────
             pre-commit
             shellcheck
+            python3Packages.detect-secrets
 
             # ── Docs ─────────────────────────────────────────────────────
             luajitPackages.ldoc

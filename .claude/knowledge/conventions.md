@@ -81,7 +81,8 @@ docs(spec): add stream preread invariant [DON-90]
 | `hotfix/<description>` | 긴급 수정 |
 
 - PR: Epic 브랜치 → main
-- 이슈 브랜치: Linear 자동 생성 패턴(`gitBranchName`) 사용
+- 이슈 브랜치: Linear 자동 생성 패턴(`gitBranchName`) 사용. **한글 포함 시 제거 후 연속 하이픈 정리**
+  - 예: `dongwonkwak/don-106-git-hooks-설정-pre-commit` → `dongwonkwak/don-106-git-hooks-pre-commit`
 - merge strategy: squash merge (epic → main), merge commit (issue → epic)
 
 ## 파일 경로 포인터 컨벤션

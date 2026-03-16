@@ -113,3 +113,7 @@ COMPLETED_REVIEW: DON-133-code (2026-03-15)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-15 | DON-133 | Docker 기반 Test::Nginx 테스트 환경 구축 | `Dockerfile.test`, `docker-compose.test.yml`, `.github/workflows/integration-test.yml` | busted 2.3.0 포함, non-root 실행, CI permissions:read. 미반영: 인라인 테스트 구조 + admin auth 계약 충돌 별도 이슈 예정 |
+
+| 2026-03-16 | DON-106 | Git hooks 설정 (detect-secrets 보완) | `.pre-commit-config.yaml`, `.secrets.baseline`, `scripts/detect-secrets-hook-wrapper.sh`, `scripts/shellcheck-wrapper.sh`, `flake.nix` | detect-secrets hook 추가, CI fail-hard, --baseline 인자 수정. Codex 리뷰 반영 완료 |
+
+COMPLETED_REVIEW: DON-106-code (2026-03-16)
