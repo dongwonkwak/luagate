@@ -87,7 +87,7 @@ repos:
       - id: test-unit
         name: Unit tests (busted)
         language: system
-        entry: make test-unit
+        entry: scripts/test-unit-wrapper.sh
         stages: [pre-push]
         pass_filenames: false
 
@@ -101,6 +101,6 @@ repos:
       - id: luacheck-full
         name: luacheck (full project lint)
         language: system
-        entry: luacheck lua/ tests/
+        entry: scripts/luacheck-full-wrapper.sh
         stages: [pre-push]
         pass_filenames: false
