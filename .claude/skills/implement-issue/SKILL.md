@@ -44,11 +44,14 @@ get_issue(DON-XXX) → 상세 조회
 ### 3.5. 브랜치 생성 (필수 — 첫 파일 수정 전)
 
 ```bash
-git checkout -b <Linear gitBranchName>
 # gitBranchName은 get_issue 응답의 gitBranchName 필드 사용
+# 한글이 포함된 경우 제거 후 연속 하이픈(--)을 단일 하이픈(-)으로 정리
+# 예: dongwonkwak/don-106-git-hooks-설정-pre-commit
+#   → dongwonkwak/don-106-git-hooks-pre-commit
+git checkout -b <sanitized-branch-name>
 ```
 
-> **불변식**: 파일 수정 전 반드시 브랜치 생성. main에서 직접 수정 금지.
+> **불변식**: 파일 수정 전 반드시 브랜치 생성. main에서 직접 수정 금지. 브랜치명은 ASCII 전용 (한글 포함 금지).
 
 ### 4. 에이전트 순차 호출
 
