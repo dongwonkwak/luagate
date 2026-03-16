@@ -185,6 +185,8 @@ luagate/
 | [ADR-002](docs/design/adr/ADR-002-policy-evaluation-conflict-detection.md) | 정책 평가/충돌 탐지 |
 | [ADR-003](docs/design/adr/ADR-003-policy-storage-hot-reload.md) | 정책 저장/Hot Reload |
 | [ADR-004](docs/design/adr/ADR-004-log-metrics-admin-security.md) | 로그/메트릭/Admin/보안 |
+| [ADR-006](docs/design/adr/ADR-006-metrics-cardinality-export-model.md) | 메트릭 Cardinality 제어 + Export 모델 |
+| [ADR-007](docs/design/adr/ADR-007-log-redaction-and-retention.md) | 로그 Redaction 정책 + 보존/파기 기간 |
 
 ### 개발 가이드
 
