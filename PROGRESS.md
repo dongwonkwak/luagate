@@ -125,3 +125,13 @@ COMPLETED_REVIEW: DON-134-code (2026-03-16)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-16 | DON-134 | admin auth 테스트를 admin-auth-contract.md 계약에 맞게 수정 | `tests/integration/http/test_nginx_basic.t`, `conf/nginx.conf`, `Makefile`, `docs/spec/admin-api.md` | TEST 25 신규 추가, constant-time compare 구현, WWW-Authenticate 제거. 보안 리뷰 PASS |
+
+## Phase 1-Core: YAML policy parser + schema validator (DON-98)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-16 | DON-98 | YAML policy parser + schema validator | `lua/luagate/policy/parser.lua`, `lua/luagate/policy/validator.lua`, `tests/unit/policy/parser_spec.lua`, `tests/unit/policy/validator_spec.lua` | 95개 busted 테스트 통과. Codex 리뷰 대기 |
+| 2026-03-16 | DON-98 | Codex 리뷰 피드백 반영 (3건) | `lua/luagate/policy/parser.lua`, `lua/luagate/policy/validator.lua`, `tests/unit/policy/parser_spec.lua`, `tests/unit/policy/validator_spec.lua` | 비리스트 입력 guard, upstream host:port 형식 검증, CIDR/port-range 형식 검증 추가. 115개 busted 테스트 통과 |
+| 2026-03-16 | DON-98 | 보안 리뷰 수정 (M-1, R-2, R-3) | `lua/luagate/policy/validator.lua`, `tests/unit/policy/validator_spec.lua` | CIDR octet/prefix 범위 검증, port 1-65535 범위 검증. 132개 busted 테스트 통과. 보안 리뷰 PASS |
+
+COMPLETED_REVIEW: DON-98-code (2026-03-16)
