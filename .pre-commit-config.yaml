@@ -45,7 +45,7 @@ repos:
       - id: shellcheck
         name: shellcheck (shell linter)
         language: system
-        entry: shellcheck
+        entry: scripts/shellcheck-wrapper.sh
         types: [shell]
         pass_filenames: true
 
@@ -55,6 +55,19 @@ repos:
         language: system
         entry: markdownlint --config .markdownlint.yaml
         types: [markdown]
+        pass_filenames: true
+
+  # ── Secrets: detect-secrets ────────────────────────────────────────────────
+      - id: detect-secrets
+        name: detect-secrets (secret detection)
+        language: system
+        entry: scripts/detect-secrets-hook-wrapper.sh
+        exclude: >-
+          (?x)^(
+            \.pre-commit-config\.yaml|
+            tests/.*|
+            docs/.*\.md
+          )$
         pass_filenames: true
 
 # ── commit-msg hook ────────────────────────────────────────────────────────
