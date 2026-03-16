@@ -250,6 +250,47 @@ describe("validator.validate — HTTP rules", function()
     assert.is_nil(err)
   end)
 
+  it("accepts HTTP rule with src_ip_cidr 0.0.0.0/0 (all-zeros, prefix 0)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "0.0.0.0/0" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("accepts HTTP rule with src_ip_cidr 255.255.255.255/32 (max octet, max prefix)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "255.255.255.255/32" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects HTTP rule with src_ip_cidr octet out of range (999.0.0.0/24)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "999.0.0.0/24" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects HTTP rule with src_ip_cidr prefix out of range (1.2.3.4/33)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "1.2.3.4/33" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects HTTP rule with src_ip_cidr octet 256 (256.1.1.1/24)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { src_ip_cidr = "256.1.1.1/24" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
   it("accepts HTTP rule with method as list", function()
     local p = minimal_policy()
     p.rules = { http_rule({ scope = { method = { "GET", "POST" } } }) }
@@ -535,6 +576,65 @@ describe("validator.validate — Stream rules", function()
     assert.is_nil(err)
   end)
 
+  -- R-2: dst_port range lo/hi must be in 1-65535
+  it("rejects Stream rule with dst_port range lo = 0 (below 1)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = "0-1024" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("dst_port", err)
+  end)
+
+  it("rejects Stream rule with dst_port range hi = 65536 (above 65535)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = "1024-65536" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("dst_port", err)
+  end)
+
+  it("accepts Stream rule with dst_port range 1-65535 (boundary)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = "1-65535" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  -- R-3: integer dst_port must be in 1-65535
+  it("rejects Stream rule with integer dst_port = 0 (below 1)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = 0 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("dst_port", err)
+  end)
+
+  it("rejects Stream rule with integer dst_port = 65536 (above 65535)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = 65536 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("dst_port", err)
+  end)
+
+  it("accepts Stream rule with integer dst_port = 1 (boundary)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = 1 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("accepts Stream rule with integer dst_port = 65535 (boundary)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { dst_port = 65535 } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
   it("rejects Stream rule with malformed src_ip_cidr (no prefix)", function()
     local p = minimal_policy()
     p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "10.0.0.1" } }) }
@@ -558,6 +658,47 @@ describe("validator.validate — Stream rules", function()
     p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "10.0.0.0/8" } }) }
     local _, err = validator.validate(p)
     assert.is_nil(err)
+  end)
+
+  it("accepts Stream rule with src_ip_cidr 0.0.0.0/0", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "0.0.0.0/0" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("accepts Stream rule with src_ip_cidr 255.255.255.255/32", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "255.255.255.255/32" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects Stream rule with src_ip_cidr octet out of range (999.0.0.0/24)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "999.0.0.0/24" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects Stream rule with src_ip_cidr prefix out of range (1.2.3.4/33)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "1.2.3.4/33" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
+  end)
+
+  it("rejects Stream rule with src_ip_cidr octet 256 (256.1.1.1/24)", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ scope = { src_ip_cidr = "256.1.1.1/24" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("src_ip_cidr", err)
   end)
 
   it("accepts Stream rule with valid detected_protocol", function()

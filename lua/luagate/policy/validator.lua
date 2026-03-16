@@ -29,6 +29,18 @@ local function is_integer(value)
   return type(value) == "number" and value == math.floor(value)
 end
 
+--- Validate an IPv4 CIDR string "a.b.c.d/prefix".
+-- Returns true if valid, false otherwise.
+-- Rules: each octet 0-255, prefix 0-32.
+local function validate_cidr(cidr)
+  local a, b, c, d, prefix = cidr:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)/(%d+)$")
+  if not a then
+    return false
+  end
+  a, b, c, d, prefix = tonumber(a), tonumber(b), tonumber(c), tonumber(d), tonumber(prefix)
+  return a <= 255 and b <= 255 and c <= 255 and d <= 255 and prefix <= 32
+end
+
 --- Validate the `scope` table for an HTTP rule.
 -- All scope keys are optional (omitted = wildcard).
 -- Returns nil on success, error string on failure.
@@ -64,12 +76,13 @@ local function validate_http_scope(scope, rule_id)
     end
   end
 
-  -- src_ip_cidr: string, must match IPv4 CIDR format "d.d.d.d/prefix"
+  -- src_ip_cidr: string, must be a valid IPv4 CIDR "a.b.c.d/prefix"
+  -- Octets: 0-255, prefix: 0-32
   if scope.src_ip_cidr ~= nil then
     if type(scope.src_ip_cidr) ~= "string" then
       return "rule '" .. rule_id .. "': scope.src_ip_cidr must be a string"
     end
-    if not string.match(scope.src_ip_cidr, "^%d+%.%d+%.%d+%.%d+/%d+$") then
+    if not validate_cidr(scope.src_ip_cidr) then
       return "rule '"
         .. rule_id
         .. "': scope.src_ip_cidr must be a valid IPv4 CIDR (e.g. '1.2.3.0/24'), got: '"
@@ -115,12 +128,13 @@ local function validate_stream_scope(scope, rule_id)
     return "rule '" .. rule_id .. "': scope must be a map"
   end
 
-  -- src_ip_cidr: string, must match IPv4 CIDR format "d.d.d.d/prefix"
+  -- src_ip_cidr: string, must be a valid IPv4 CIDR "a.b.c.d/prefix"
+  -- Octets: 0-255, prefix: 0-32
   if scope.src_ip_cidr ~= nil then
     if type(scope.src_ip_cidr) ~= "string" then
       return "rule '" .. rule_id .. "': scope.src_ip_cidr must be a string"
     end
-    if not string.match(scope.src_ip_cidr, "^%d+%.%d+%.%d+%.%d+/%d+$") then
+    if not validate_cidr(scope.src_ip_cidr) then
       return "rule '"
         .. rule_id
         .. "': scope.src_ip_cidr must be a valid IPv4 CIDR (e.g. '1.2.3.0/24'), got: '"
@@ -129,12 +143,16 @@ local function validate_stream_scope(scope, rule_id)
     end
   end
 
-  -- dst_port: string ("lo-hi" range) or integer (exact)
+  -- dst_port: string ("lo-hi" range) or integer (exact), valid port range 1-65535
   if scope.dst_port ~= nil then
     local dt = type(scope.dst_port)
     if dt == "number" then
       if not is_integer(scope.dst_port) then
         return "rule '" .. rule_id .. "': scope.dst_port must be an integer"
+      end
+      -- R-3: integer port must be in 1-65535
+      if scope.dst_port < 1 or scope.dst_port > 65535 then
+        return "rule '" .. rule_id .. "': scope.dst_port must be in range 1-65535, got: " .. tostring(scope.dst_port)
       end
     elseif dt == "string" then
       -- Must match "lo-hi" range format with lo <= hi
@@ -149,6 +167,14 @@ local function validate_stream_scope(scope, rule_id)
       local lo, hi = tonumber(lo_str), tonumber(hi_str)
       if lo > hi then
         return "rule '" .. rule_id .. "': scope.dst_port range lo must be <= hi, got: '" .. scope.dst_port .. "'"
+      end
+      -- R-2: range lo/hi must be in 1-65535
+      if lo < 1 or hi > 65535 then
+        return "rule '"
+          .. rule_id
+          .. "': scope.dst_port range values must be in 1-65535, got: '"
+          .. scope.dst_port
+          .. "'"
       end
     else
       return "rule '" .. rule_id .. "': scope.dst_port must be a string or integer"
