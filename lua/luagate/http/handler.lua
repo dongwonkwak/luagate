@@ -83,7 +83,7 @@ end
 local function do_deny(deny_reason, request_id)
   local reason = deny_reason or "policy_deny"
   local rid = request_id or ""
-  local client_ip = ngx.var.remote_addr or ""
+  local client_ip = ngx.var.luagate_src_ip or ngx.var.remote_addr or ""
 
   -- H-1: external clients receive a generic reason token only (OWASP A05)
   local external_reason = is_internal_ip(client_ip) and reason or "policy_deny"
@@ -272,7 +272,7 @@ function _M.access()
     path = ctx.path_normalized,
     host = ngx.var.host,
     method = ngx.var.request_method,
-    src_ip = ngx.var.remote_addr,
+    src_ip = ngx.var.luagate_src_ip or ngx.var.remote_addr,
     query_param = ngx.req.get_uri_args(),
     header = ngx.req.get_headers(),
   }

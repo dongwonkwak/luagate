@@ -666,6 +666,20 @@ describe("handler.access — X-LuaGate-Block-Reason IP 노출 제어", function(
     assert.is_nil(ngx_mock.header["X-LuaGate-Block-Reason"])
   end)
 
+  it("remote_addr가 내부망이어도 luagate_src_ip가 외부 IP면 헤더를 전송하지 않는다", function()
+    ngx_mock = make_ngx({
+      var = {
+        remote_addr = "10.0.0.10",
+        luagate_src_ip = "203.0.113.10",
+      },
+    })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    ngx_mock.var.luagate_src_ip = "203.0.113.10"
+    handler.access()
+    assert.is_nil(ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
   it("172.32.x.x 는 외부 IP로 판정하여 헤더를 전송하지 않는다", function()
     ngx_mock = make_ngx({ var = { remote_addr = "172.32.0.1" } })
     _G.ngx = ngx_mock
@@ -718,6 +732,29 @@ describe("handler.access — H-1: JSON body reason 외부 노출 방지", functi
     assert.is_table(parsed)
     assert.are.equal("rule-secret-id", parsed.reason)
   end)
+
+  it(
+    "remote_addr가 내부망이어도 luagate_src_ip가 외부 IP면 JSON body.reason은 generic 'policy_deny'",
+    function()
+      ngx_mock = make_ngx({
+        var = {
+          remote_addr = "10.1.2.3",
+          luagate_src_ip = "198.51.100.7",
+        },
+      })
+      ngx_mock.say = function(s)
+        said_body = s
+      end
+      _G.ngx = ngx_mock
+      handler.rewrite()
+      ngx_mock.var.luagate_src_ip = "198.51.100.7"
+      handler.access()
+      local dkjson = require("dkjson")
+      local parsed = dkjson.decode(said_body)
+      assert.is_table(parsed)
+      assert.are.equal("policy_deny", parsed.reason)
+    end
+  )
 end)
 
 describe("handler.access — M-1: get_policy() 예외 fail-closed", function()
