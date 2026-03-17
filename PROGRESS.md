@@ -144,3 +144,12 @@ COMPLETED_REVIEW: DON-103-code (2026-03-16)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-16 | DON-127 | Update workflow design doc v2 after Phase 0-B completion | Linear 문서 `24e2cc7ac680` (v1 → v2) | 에이전트 frontmatter 정확화, 스킬 이름 정정(doc-sync-hook→doc-sync), ADR-005~007 반영, 구현 완료 항목 표시. ADR-005 파일 미생성 사실 명시 |
+
+## Phase 0-A: ADR-005 파일 생성 (DON-135)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-16 | DON-135 | ADR-005 파일 생성 (architect) | `docs/design/adr/ADR-005-policy-activation-concurrency.md` | 설계 리뷰 대기 중 |
+
+COMPLETED_REVIEW: DON-135-design (2026-03-16)
+COMPLETED_REVIEW: DON-135-code (2026-03-16)

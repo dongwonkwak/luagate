@@ -4,6 +4,7 @@
 >
 > - [ADR-003 정책 저장소 + Hot Reload](../design/adr/ADR-003-policy-storage-hot-reload.md)
 > - [ADR-004 로그/메트릭 + 관리면 보안](../design/adr/ADR-004-log-metrics-admin-security.md)
+> - [ADR-005 정책 활성화 모델 + 동시성 제어](../design/adr/ADR-005-policy-activation-concurrency.md)
 
 ## 1. 개요
 
@@ -84,8 +85,10 @@ Content-Type: application/json
 | `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`<source_version>` 형식 — `GET /api/v1/policies` ETag와 동일) |
 | `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거만 | 선택 (`<http_active_version>` 형식) |
 
-> **PUT /api/v1/policies**: 저장 + validate + conflict_detect + compile + commit을 한 번에 수행.
-> 실패 시 canonical file을 변경하지 않는다. Partial commit은 §policy-engine.md commit 단계 규칙 따름.
+> **PUT /api/v1/policies**: 저장 + validate + conflict_detect + compile + commit을 한 번에 수행한다.
+> 응답 contract는 **success-only atomicity** 기준이다: `200 OK`일 때만 `source_version == active_http_version == active_stream_version`가 성립한다.
+> 실패 응답에서는 canonical file(`conf/policies.yaml`)을 변경하지 않는다. 단, commit 단계에서 한쪽 swap 또는 file write 실패 시 이전 버전으로 **best-effort rollback**을 시도하며, rollback까지 실패하면 `500 commit_failed`와 함께 HTTP/Stream active version이 일시적으로 불일치할 수 있다 (ADR-005 §1).
+> 이 경우 운영자는 `SIGHUP` 또는 수동 복구로 일관성을 회복해야 한다.
 
 ## 5. ETag / If-Match
 
@@ -225,6 +228,7 @@ If-Match: "<source_version>"
 처리 순서: [1] If-Match 확인 → [2] parse → [3] validate → [4] conflict_detect → [5] hash(SHA256) → [6] compile → [7] audit write → [8] commit + canonical file write
 
 > **hash 단계**: [5]에서 업로드된 YAML 전체의 SHA256을 계산하여 new_version으로 사용. If-Match 불일치가 있으면 [1]에서 409 반환.
+> **commit 단계 규칙**: [8]에서는 HTTP swap → Stream swap → canonical file write 순으로 진행한다. canonical file write는 두 swap이 모두 성공한 경우에만 수행되며, 중간 실패 시 이전 버전으로 best-effort rollback 후 `500 commit_failed`를 반환한다. rollback까지 실패하면 active version 불일치가 남을 수 있다.
 > **policy-engine.md와의 관계**: 파일 기반 reload(`POST /reload`)는 policy-engine.md §4.1의 7단계를 그대로 따른다. PUT의 [1] If-Match / [7] audit / [8] commit+file-write는 API 전용 단계다.
 
 **응답 200 (성공):**
@@ -266,6 +270,24 @@ If-Match: "<source_version>"
   "details": ["If-Match version mismatch: expected a3f2c1d4, got b4e3f2a1"]
 }
 ```
+
+**응답 500 (commit 실패):**
+
+```json
+{
+  "error": "commit_failed",
+  "stage": "commit",
+  "details": [
+    "stream active pointer swap failed",
+    "rollback of http active pointer also failed; active versions may be inconsistent"
+  ],
+  "current_http_version": "b4e3f2a1...",
+  "current_stream_version": "a3f2c1d4..."
+}
+```
+
+> `current_http_version` / `current_stream_version`은 실패 처리 직후 관측된 값이다. rollback이 모두 성공한 경우 두 값은 이전 버전으로 같게 유지된다.
+> 이 응답은 PUT이 `200`이 아니더라도 commit 단계 side effect가 일부 남을 수 있음을 의미한다. 단, canonical file은 변경되지 않는다.
 
 ---
 
@@ -508,5 +530,6 @@ if ($request_method = 'OPTIONS') {
 
 - [ADR-003](../design/adr/ADR-003-policy-storage-hot-reload.md) — 정책 reload 흐름
 - [ADR-004](../design/adr/ADR-004-log-metrics-admin-security.md) — 보안 설정, 감사 로그
+- [ADR-005](../design/adr/ADR-005-policy-activation-concurrency.md) — 정책 활성화 모델 + 동시성 제어
 - [spec/policy-engine.md](./policy-engine.md) — 정책 검증/평가, If-Match 대상
 - [spec/log-schema.md](./log-schema.md) — 감사 로그 스키마, 메트릭 목록
