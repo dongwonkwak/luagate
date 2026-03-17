@@ -3,8 +3,7 @@
 #
 # Priority:
 #   1. PR base branch (if a PR is open for the current branch)
-#   2. Upstream tracking branch (if configured)
-#   3. Fallback: main
+#   2. Fallback: main
 #
 # Output: changed file paths, one per line (git diff --name-only)
 
@@ -19,15 +18,7 @@ get_diff_base() {
     return
   fi
 
-  # 2. Try upstream tracking branch
-  local tracking
-  tracking=$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
-  if [ -n "$tracking" ]; then
-    echo "$tracking"
-    return
-  fi
-
-  # 3. Fallback
+  # 2. Fallback
   echo "main"
 }
 
