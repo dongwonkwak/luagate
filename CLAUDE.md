@@ -148,6 +148,10 @@ Epic 완료 후 PR 생성 절차:
 
 > **머지 전략**: epic → main은 Squash merge (단일 커밋), issue → epic은 Merge commit.
 
+PR에 `chatgpt-codex-connector` review thread 가 달린 뒤 후속 수정/답글 처리는
+`./scripts/codex-address-pr-review.sh` 를 사용한다.
+상세 절차는 `docs/workflow/codex-review.md` 참조.
+
 ## pre-commit / post-commit hook 규칙
 
 - pre-commit: `stylua --check`, `luacheck`, `clang-format --check`, `shellcheck`, `markdownlint`
