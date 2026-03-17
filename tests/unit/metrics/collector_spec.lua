@@ -389,3 +389,39 @@ describe("metrics.collector.record — incr 오류 처리 (non-fatal)", function
     assert.is_true(found_warn, "incr 실패 시 WARN 로그가 기록되어야 한다")
   end)
 end)
+
+-- ===========================================================================
+-- scanner threat 카운터 (ADR-006 §3: per-threat_type counter)
+-- ===========================================================================
+
+describe("metrics.collector.record — scanner threat 카운터", function()
+  it("ctx.threat_type 설정 시 scanner_threats 카운터 증가", function()
+    local ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    local collector = load_collector()
+
+    collector.record({ action = "deny", threat_type = "sqli" })
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:scanner_threats:total:sqli"))
+  end)
+
+  it("ctx.threat_type = nil 시 scanner_threats 카운터 미증가", function()
+    local ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    local collector = load_collector()
+
+    collector.record({ action = "allow" })
+    assert.is_nil(ngx_mock._get_counter("metrics:http:scanner_threats:total:sqli"))
+  end)
+
+  it("다양한 threat_type은 별도 카운터로 기록된다", function()
+    local ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    local collector = load_collector()
+
+    collector.record({ action = "deny", threat_type = "sqli" })
+    collector.record({ action = "deny", threat_type = "xss" })
+    collector.record({ action = "deny", threat_type = "sqli" })
+    assert.are.equal(2, ngx_mock._get_counter("metrics:http:scanner_threats:total:sqli"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:scanner_threats:total:xss"))
+  end)
+end)

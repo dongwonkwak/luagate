@@ -11,7 +11,7 @@
 --
 -- Pipeline order (http-pipeline.md §2):
 --   rewrite_by_lua  → URL normalisation + ngx.ctx init + nginx var defaults
---   access_by_lua   → policy evaluation + optional scanner (MVP stub)
+--   access_by_lua   → decoder → scanner → policy evaluation
 --   log_by_lua      → request_state finalise + metrics update
 --
 -- Implementation: lua/luagate/http/handler.lua
@@ -265,9 +265,150 @@ function _M.access()
     return
   end
 
-  -- 2. Build request context for policy evaluation (http-pipeline.md §2.3)
-  --    path_normalized from rewrite phase only; no re-normalisation here
-  --    (http-pipeline.md §2.2 invariant).
+  -- 2. Decoder + Scanner integration (DON-142, http-pipeline.md §2.3)
+  --    Order: size check → decoder normalize → scanner scan → policy evaluation
+  --    Scanner runs BEFORE policy evaluation; threat detection skips policy eval.
+
+  local path_raw = ctx.path_raw or ""
+  local query_raw = ctx.query_raw or ""
+
+  -- 2a. Size limit check: 8KB per input (security-scanner.md §2)
+  local INPUT_SIZE_LIMIT = 8192
+  if #path_raw > INPUT_SIZE_LIMIT or #query_raw > INPUT_SIZE_LIMIT then
+    ngx.log(ngx.ERR, "[luagate] input size exceeded: path=", #path_raw, " query=", #query_raw)
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "input_size_exceeded"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "input_size_exceeded"
+    do_deny("input_size_exceeded", ctx.request_id or "")
+    return
+  end
+
+  -- 2b. Decoder: normalize path + query for scanner input
+  local ok_dec, decoder = pcall(require, "luagate.decoder.ffi")
+  if not ok_dec then
+    ngx.log(ngx.ERR, "[luagate] failed to load decoder: ", tostring(decoder))
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "decoder_load_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "decoder_load_error"
+    do_deny("decoder_load_error", ctx.request_id or "")
+    return
+  end
+
+  local path_norm, path_err, path_partial = decoder.normalize_path(path_raw)
+  if path_err then
+    ngx.log(ngx.ERR, "[luagate] decoder path error: ", path_err)
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "decoder_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "decoder_error"
+    do_deny("decoder_error", ctx.request_id or "")
+    return
+  end
+  if path_partial then
+    ngx.log(ngx.WARN, "[luagate] decoder: path partial decode")
+  end
+  ctx.path_normalized = path_norm or path_raw
+  ngx.var.luagate_path_normalized = ctx.path_normalized
+
+  local query_norm, query_err, query_partial = decoder.normalize_query(query_raw)
+  if query_err then
+    ngx.log(ngx.ERR, "[luagate] decoder query error: ", query_err)
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "decoder_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "decoder_error"
+    do_deny("decoder_error", ctx.request_id or "")
+    return
+  end
+  if query_partial then
+    ngx.log(ngx.WARN, "[luagate] decoder: query partial decode")
+  end
+  ctx.query_normalized = query_norm or query_raw
+
+  -- 2c. Scanner scan (security-scanner.md §2)
+  local ok_sc, scanner = pcall(require, "luagate.scanner.ffi")
+  if not ok_sc then
+    ngx.log(ngx.ERR, "[luagate] failed to load scanner: ", tostring(scanner))
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "scanner_load_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "scanner_load_error"
+    do_deny("scanner_load_error", ctx.request_id or "")
+    return
+  end
+
+  local scan_result, scan_err = scanner.scan({
+    path_raw = path_raw,
+    path_normalized = ctx.path_normalized,
+    query_raw = query_raw,
+    query_normalized = ctx.query_normalized,
+  })
+
+  if scan_err then
+    -- scanner_internal_error / budget_exceeded → fail-closed (403)
+    ngx.log(ngx.ERR, "[luagate] scanner error: ", scan_err)
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "scanner_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "scanner_error"
+    do_deny("scanner_error", ctx.request_id or "")
+    return
+  end
+
+  if scan_result and scan_result.threat_type then
+    -- Threat detected → deny, skip policy evaluation
+    ctx.action = "deny"
+    ctx.threat_type = scan_result.threat_type
+    ctx.rule_name = scan_result.rule_name
+    ctx.threat_score = scan_result.threat_score
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "scanner: " .. scan_result.threat_type
+    ctx.request_state = "scanner_denied"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_threat_type = scan_result.threat_type
+    ngx.var.luagate_rule_name = scan_result.rule_name or "null"
+    ngx.var.luagate_threat_score = tostring(scan_result.threat_score)
+    ngx.var.luagate_deny_reason = "scanner: " .. scan_result.threat_type
+    ngx.var.luagate_request_state = "scanner_denied"
+    do_deny("scanner: " .. scan_result.threat_type, ctx.request_id or "")
+    return
+  end
+
+  -- No threat: record informational threat_score if present
+  if scan_result and scan_result.threat_score and scan_result.threat_score > 0 then
+    ctx.threat_score = scan_result.threat_score
+    ngx.var.luagate_threat_score = tostring(scan_result.threat_score)
+  end
+
+  -- 3. Build request context for policy evaluation (http-pipeline.md §2.3)
+  --    path_normalized updated by decoder above; query_normalized in ctx.
   local request_ctx = {
     path = ctx.path_normalized,
     host = ngx.var.host,
@@ -277,25 +418,21 @@ function _M.access()
     header = ngx.req.get_headers(),
   }
 
-  -- 3. Determine default action from policy global config
+  -- 4. Determine default action from policy global config
   local default_action = (policy.global and policy.global.default_action) or "deny"
 
-  -- 4. Evaluate against compiled HTTP rules (ADR-002 §3.1 first-match-wins)
+  -- 5. Evaluate against compiled HTTP rules (ADR-002 §3.1 first-match-wins)
   local result = evaluator.evaluate(policy._compiled_http or {}, request_ctx, default_action)
 
-  -- 5. Update ngx.ctx with evaluation result
+  -- 6. Update ngx.ctx with evaluation result
   ctx.action = result.action
   ctx.matched_rule_id = result.matched_rule
   ctx.decision_source = "policy_engine"
 
-  -- 6. Propagate to nginx variables (used by log_format)
+  -- 7. Propagate to nginx variables (used by log_format)
   ngx.var.luagate_action = result.action
   ngx.var.luagate_decision_source = "policy_engine"
   ngx.var.luagate_matched_rule = result.matched_rule or "null"
-
-  -- 7. Scanner stub: MVP — scanner FFI not yet integrated (future issue)
-  --    threat_type, rule_name, threat_score remain at default "null".
-  --    When scanner is integrated, it will set these vars and ctx fields.
 
   -- 8. Handle deny
   if result.action == "deny" then

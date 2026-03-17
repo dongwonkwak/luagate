@@ -86,6 +86,12 @@ function _M.record(ctx)
     safe_incr(dict, "metrics:http:upstream_errors:total")
   end
 
+  -- Scanner threat counter (ADR-006 §3: per-threat_type counter)
+  local threat_type = ctx and ctx.threat_type
+  if threat_type then
+    safe_incr(dict, "metrics:http:scanner_threats:total:" .. threat_type)
+  end
+
   -- Latency histogram bucket
   local request_time_s = tonumber(ngx.var.request_time) or 0
   local latency_ms = request_time_s * 1000
