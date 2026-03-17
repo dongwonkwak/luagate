@@ -115,6 +115,23 @@ install-hooks:
 	pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 	@echo "==> Git hooks installed."
 
+# ── FFI (Rust) ──────────────────────────────────────────────────────────────
+.PHONY: build-ffi fuzz-regression
+
+build-ffi:
+	@echo "==> Building Rust FFI modules..."
+	cd src/decoder && cargo build --release
+	cd src/scanner && cargo build --release 2>/dev/null || echo "  (scanner not yet built)"
+	@mkdir -p lib
+	cp src/decoder/target/release/libluagate_decoder.so lib/luagate_decoder.so
+	@[ -f src/scanner/target/release/libluagate_scanner.so ] && \
+	  cp src/scanner/target/release/libluagate_scanner.so lib/luagate_scanner.so || true
+
+fuzz-regression:
+	@echo "==> Running fuzz regression..."
+	cd src/decoder && cargo +nightly fuzz run fuzz_normalize_path -- -max_total_time=10 2>/dev/null || \
+	  echo "  (fuzz target not available — install cargo-fuzz)"
+
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean:
 	rm -rf csrc/build

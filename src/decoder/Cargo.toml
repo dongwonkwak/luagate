@@ -1,0 +1,18 @@
+[package]
+name = "luagate-decoder"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "luagate_decoder"
+crate-type = ["cdylib"]
+
+[dependencies]
+percent-encoding = "2.3"
+unicode-normalization = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
