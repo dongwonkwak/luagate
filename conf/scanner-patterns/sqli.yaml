@@ -1,0 +1,18 @@
+# SQL Injection patterns (OWASP CRS-inspired)
+threat_type: "sqli"
+patterns:
+  - name: "sqli_union_select"
+    pattern: "(?i)(union\\s+(all\\s+)?select)"
+    score: 0.9
+  - name: "sqli_or_always_true"
+    pattern: "(?i)(or\\s+1\\s*=\\s*1|and\\s+1\\s*=\\s*1)"
+    score: 0.8
+  - name: "sqli_drop_table"
+    pattern: "(?i)(;\\s*(drop|delete|insert|update)\\s+)"
+    score: 0.95
+  - name: "sqli_exec"
+    pattern: "(?i)(exec\\s*\\(|execute\\s*\\()"
+    score: 0.9
+  - name: "sqli_schema_leak"
+    pattern: "(?i)(information_schema|@@version|@@datadir)"
+    score: 0.85

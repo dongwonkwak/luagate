@@ -1,0 +1,6 @@
+# Automated Security Scanner / Reconnaissance Tool Detection
+threat_type: "scanner"
+patterns:
+  - name: "scanner_tool"
+    pattern: "(?i)(sqlmap|nikto|nessus|openvas|masscan|nmap|dirbuster|gobuster|wfuzz|hydra)"
+    score: 0.9
