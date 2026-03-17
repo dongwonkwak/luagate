@@ -67,11 +67,17 @@ end
 
 ```lua
 -- lua/luagate/admin/auth.lua
+-- NOTE: 길이 불일치 시 조기 반환 금지 — 타이밍 유출 위험.
+-- max(#a, #b)까지 반복하고, 길이 XOR을 누적값 초기값으로 사용한다.
 local function constant_time_compare(a, b)
-    if #a ~= #b then return false end
-    local result = 0
-    for i = 1, #a do
-        result = bit.bor(result, bit.bxor(a:byte(i), b:byte(i)))
+    local len_a = #a
+    local len_b = #b
+    local max_len = len_a > len_b and len_a or len_b
+    local result = bit.bxor(len_a, len_b) -- non-zero if lengths differ
+    for i = 1, max_len do
+        local byte_a = (i <= len_a) and a:byte(i) or 0
+        local byte_b = (i <= len_b) and b:byte(i) or 0
+        result = bit.bor(result, bit.bxor(byte_a, byte_b))
     end
     return result == 0
 end
@@ -100,6 +106,7 @@ end
 ## OWASP 패턴 작성 기준
 
 ### 스캐너 패턴 파일 위치
+
 ```
 conf/scanner-patterns/
 ├── sqli.yaml          # SQL Injection (OWASP CRS 기반)
@@ -110,6 +117,7 @@ conf/scanner-patterns/
 ```
 
 ### 패턴 작성 원칙
+
 1. **False Positive 최소화**: 정상 트래픽 차단 없이 OWASP 위협만 탐지
 2. **멀티레이어 디코딩 후 검사**: URL 디코더(rewrite 단계) 완료 후 path_normalized 기준
 3. **raw + normalized 이중 검사**: 디코더가 놓친 raw 패턴도 스캐너가 재검사
@@ -123,7 +131,7 @@ conf/scanner-patterns/
 | `sqli` | OWASP CRS | `UNION SELECT`, `OR 1=1`, `; DROP TABLE`, `xp_cmdshell` |
 | `xss` | OWASP CRS | `<script>`, `javascript:`, `on*=`, `document.cookie` |
 | `path-traversal` | custom | `../`, `/etc/passwd`, `%2e%2e%2f`, `..%c0%af` |
-| `cmd-injection` | custom | 셸 메타문자: `;`, `|`, `&&`, `$(`, `` ` `` |
+| `cmd-injection` | custom | 셸 메타문자: `;`, `\|`, `&&`, `$(`, `` ` `` |
 | `ssrf` | custom | 내부 IP 패턴: `169.254.`, `10.`, `127.` |
 | `log4shell` | CVE-2021-44228 | `${jndi:`, `${lower:j}` |
 
