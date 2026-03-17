@@ -70,6 +70,74 @@ COMPLETED_REVIEW: DON-97-code (2026-03-14)
 
 ---
 
+## codex-address-pr-review.sh
+
+PR에 `chatgpt-codex-connector` 가 남긴 unresolved review thread 를 읽어,
+Codex CLI로 항목별 수정/검증을 수행한 뒤 GitHub thread 에 답글을 남기는 스크립트.
+
+### 사용법
+
+```bash
+# 현재 브랜치의 연결 PR을 자동 탐지해 처리
+./scripts/codex-address-pr-review.sh
+
+# 이전 실행 상태를 읽어 미완료 항목만 재개
+./scripts/codex-address-pr-review.sh --resume
+
+# 특정 thread 하나만 처리
+./scripts/codex-address-pr-review.sh --thread-url https://github.com/<owner>/<repo>/pull/<n>#discussion_r<id>
+
+# 실제 수정 없이 대상 thread만 확인
+./scripts/codex-address-pr-review.sh --dry-run
+```
+
+### 동작 요약
+
+1. `gh pr view` 로 현재 브랜치의 연결 PR 자동 탐지
+2. `chatgpt-codex-connector` 작성 + unresolved 상태인 review thread 만 수집
+3. 항목별로 `codex exec` 실행
+4. 수정 사항이 있으면 항목별 커밋 생성
+5. `git push origin HEAD`
+6. 해당 review thread 에 `원인 / 수정 / 검증` 형식 답글 게시
+
+### 옵션
+
+| 옵션 | 설명 |
+|------|------|
+| `--resume` | `.claude/reviews/pr-<number>-codex-followup.md` 상태 파일을 읽어 완료된 항목은 건너뜀 |
+| `--thread-url <url>` | 특정 review thread 하나만 처리 |
+| `--pr <number>` | 현재 브랜치 PR 자동 탐지 실패 시 수동 지정 |
+| `--url <pr-url>` | 현재 브랜치 PR 자동 탐지 실패 시 수동 지정 |
+| `--dry-run` | PR/thread 조회만 수행, 수정/커밋/답글 없음 |
+| `--no-push` | 로컬 커밋까지만 수행하고 push/reply 생략 |
+
+### 전제 조건
+
+- 작업 트리가 깨끗해야 한다. 스크립트가 항목별 커밋을 만들기 때문이다.
+- `gh`, `jq`, `git`, `codex` CLI 가 PATH 에 있어야 한다.
+- `gh auth login` 이 완료되어 있어야 한다.
+- 현재 체크아웃한 브랜치가 PR head 브랜치와 같아야 한다.
+
+### 상태 파일
+
+실행 상태는 아래 파일에 기록된다:
+
+```text
+.claude/reviews/pr-<number>-codex-followup.md
+```
+
+- 항목별 진행 상태, commit SHA, reply 게시 여부를 append 형식으로 기록
+- 중단 후 `--resume` 으로 재개 가능
+
+### 주의 사항
+
+- 이 스크립트는 기존 `codex-review.sh` 와 목적이 다르다.
+  - `codex-review.sh`: PR 전 내부 리뷰 프롬프트 실행
+  - `codex-address-pr-review.sh`: PR 후 GitHub review thread 후속 수정/답글
+- `--no-push` 는 로컬 커밋은 만들 수 있지만 원격 push 와 GitHub reply 는 생략한다.
+
+---
+
 ## 향후 추가 예정 스크립트
 
 | 스크립트 | 설명 |

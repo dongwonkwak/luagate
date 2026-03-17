@@ -9,6 +9,9 @@ Claude Code + Codex CLI를 사용한 코드/설계 리뷰 워크플로우 개요
 LuaGate는 중요한 이슈 구현 완료 후, Codex CLI를 통해 독립적인 리뷰를 수행한다.
 Claude Code가 리뷰 프롬프트 파일을 생성하고, 사람이 Codex를 실행하며, Claude Code가 피드백을 반영한다.
 
+또한 PR 생성 후 GitHub 의 `chatgpt-codex-connector` review thread 에 대응하는
+후속 처리 스크립트도 별도로 운영한다.
+
 ---
 
 ## 역할 분담
@@ -43,7 +46,9 @@ scripts/
 
 ## 전체 흐름
 
-### 1회 리뷰 (최초)
+### A. PR 전 내부 리뷰 (기존)
+
+#### 1회 리뷰 (최초)
 
 ```
 1. 구현 완료
@@ -71,7 +76,7 @@ scripts/
    └─ make test
 ```
 
-### 재리뷰
+#### 재리뷰
 
 ```
 1. 수정 완료 후 Claude Code가 result.md의 [x] 체크 업데이트
@@ -106,6 +111,32 @@ scripts/
 ./scripts/codex-review.sh DON-97 code
 ./scripts/codex-review.sh DON-97 design
 ```
+
+### B. PR 후 GitHub Codex 리뷰 대응
+
+PR을 올린 뒤 `@codex review` 또는 자동 트리거로 `chatgpt-codex-connector` 가
+review thread 를 남긴 경우, 아래 스크립트로 후속 수정/답글을 진행한다.
+
+```bash
+# 현재 브랜치의 연결 PR 자동 탐지
+./scripts/codex-address-pr-review.sh
+
+# 중단 후 재개
+./scripts/codex-address-pr-review.sh --resume
+```
+
+흐름은 다음과 같다:
+
+1. 스크립트가 현재 브랜치의 PR을 자동 탐지
+2. `chatgpt-codex-connector` 의 unresolved review thread 만 수집
+3. 각 항목마다 `codex exec` 로 수정/검증 수행
+4. 수정 사항이 있으면 항목별 커밋 + `git push origin HEAD`
+5. 해당 thread 에 `원인 / 수정 / 검증` 형식 답글 게시
+6. 상태는 `.claude/reviews/pr-<number>-codex-followup.md` 에 기록
+
+> 이 플로우는 기존 `review.md → result.md` 기반 내부 리뷰와 별개다.
+> 즉, PR 전 리뷰에는 `codex-review.sh`, PR 후 GitHub thread 대응에는
+> `codex-address-pr-review.sh` 를 사용한다.
 
 ---
 
