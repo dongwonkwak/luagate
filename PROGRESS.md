@@ -191,3 +191,11 @@ COMPLETED_REVIEW: DON-139-code (2026-03-17)
 | 2026-03-17 | DON-141 | luagate_scanner.so Rust FFI + Lua binding | `src/scanner/Cargo.toml`, `src/scanner/src/lib.rs`, `conf/scanner-patterns/*.yaml` (8개), `lua/luagate/scanner/ffi.lua`, `tests/unit/scanner/ffi_spec.lua` | Rust 11 tests + Lua 22 tests (총 419 busted tests 통과). caller-allocated buffer, 5ms budget, 8KB limit, 8개 threat_type, panic=abort |
 
 COMPLETED_REVIEW: DON-141-code (2026-03-17)
+
+COMPLETED_REVIEW: DON-153-code (2026-03-17)
+
+## Infra: Codex review 스크립트 worktree 호환성 (DON-153)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-17 | DON-153 | codex review 스크립트 git worktree 호환성 확보 | `scripts/codex-review.sh`, `scripts/codex-address-pr-review.sh`, `docs/workflow/codex-review.md`, `scripts/README.md` | MAIN_ROOT/WORKTREE_ROOT 분리, worktree 무인자 실행 차단, 문서 반영. Codex 리뷰 3건 반영 |
