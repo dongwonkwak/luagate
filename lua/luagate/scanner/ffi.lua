@@ -33,7 +33,14 @@ int luagate_scanner_init(const char *patterns_path, size_t patterns_path_len);
 
 -- Load the shared library.  ffi.load resolves via LD_LIBRARY_PATH / RPATH.
 -- This module-level load happens once per worker (LuaJIT module cache).
-local lib = ffi.load("luagate_scanner")
+-- package.loaded caching: if a prior require already loaded the lib (e.g. in
+-- init_by_lua), reuse it instead of calling ffi.load again.  This also
+-- allows test stubs to be injected via package.loaded["_luagate_scanner_lib"].
+local lib = package.loaded["_luagate_scanner_lib"]
+if not lib then
+  lib = ffi.load("luagate_scanner")
+  package.loaded["_luagate_scanner_lib"] = lib
+end
 
 -- Caller-allocated output buffer capacities (bytes).
 -- Must be >= the longest possible threat_type / rule_name string in lib.rs.

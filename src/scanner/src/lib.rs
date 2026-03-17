@@ -187,30 +187,44 @@ pub extern "C" fn luagate_scan_http(
         *score_out = 0.0_f64;
     }
 
-    // Helper closure: convert a C string pointer+length into a &str, applying
-    // the 8 KB size limit.  Returns LUAGATE_INTERNAL_ERROR on violation.
-    macro_rules! to_str {
-        ($ptr:expr, $len:expr) => {{
-            if $ptr.is_null() || $len == 0 {
-                ""
-            } else {
-                if $len > MAX_FIELD_LEN {
-                    return LUAGATE_INTERNAL_ERROR;
-                }
-                let bytes = unsafe { std::slice::from_raw_parts($ptr as *const u8, $len) };
-                match std::str::from_utf8(bytes) {
-                    Ok(s) => s,
-                    // Non-UTF8 input: treat as empty (cannot match text patterns).
-                    Err(_) => "",
-                }
+    // Helper function: convert a C string pointer+length into a String,
+    // applying the 8 KB size limit.  Returns None on size violation.
+    // Uses from_utf8_lossy for non-UTF8 input so invalid bytes do not allow
+    // scan bypass (decode_partial contract from security-scanner.md).
+    fn to_str_lossy(ptr: *const i8, len: usize) -> Option<(String, bool)> {
+        if ptr.is_null() || len == 0 {
+            return Some((String::new(), false));
+        }
+        if len > MAX_FIELD_LEN {
+            return None; // size violation → INTERNAL_ERROR
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
+        match std::str::from_utf8(bytes) {
+            Ok(s) => Some((s.to_string(), false)),
+            Err(_) => {
+                // Invalid UTF-8 — lossy conversion; scan continues with
+                // replacement characters so attack bytes are not silently skipped.
+                eprintln!(
+                    "[luagate_scanner] WARNING: invalid UTF-8 input, using lossy conversion"
+                );
+                Some((String::from_utf8_lossy(bytes).into_owned(), true))
             }
-        }};
+        }
     }
 
-    let s_path_raw = to_str!(path_raw, path_raw_len);
-    let s_path_norm = to_str!(path_normalized, path_normalized_len);
-    let s_query_raw = to_str!(query_raw, query_raw_len);
-    let s_query_norm = to_str!(query_normalized, query_normalized_len);
+    macro_rules! field_str {
+        ($ptr:expr, $len:expr) => {
+            match to_str_lossy($ptr, $len) {
+                Some((s, _had_lossy)) => s,
+                None => return LUAGATE_INTERNAL_ERROR,
+            }
+        };
+    }
+
+    let s_path_raw = field_str!(path_raw, path_raw_len);
+    let s_path_norm = field_str!(path_normalized, path_normalized_len);
+    let s_query_raw = field_str!(query_raw, query_raw_len);
+    let s_query_norm = field_str!(query_normalized, query_normalized_len);
 
     // MVP: body scanning is skipped when body_len == 0.
     let _ = (body, body_len);
@@ -223,24 +237,16 @@ pub extern "C" fn luagate_scan_http(
 
     let scanner = match guard.as_ref() {
         Some(s) => s,
-        // Scanner not initialised — auto-init with defaults so callers that
-        // skip luagate_scanner_init still get protection.
-        None => {
-            drop(guard);
-            // Re-initialise with defaults.
-            if luagate_scanner_init(std::ptr::null(), 0) != LUAGATE_OK {
-                return LUAGATE_INTERNAL_ERROR;
-            }
-            // The lock is now held by the init call; re-acquire.
-            // We cannot re-enter while we hold the mutex, so we return a
-            // transient error.  The next request will succeed.
-            return LUAGATE_INTERNAL_ERROR;
-        }
+        // Scanner not initialised — fail-closed per ADR-001.
+        // Startup-fatal: init_by_lua must call luagate_scanner_init before any
+        // request is processed.  Auto-init is removed to prevent silent
+        // recovery from misconfiguration.
+        None => return LUAGATE_INTERNAL_ERROR,
     };
 
     // Fields to scan in evaluation order (spec §4.2):
     //   path_raw, path_normalized, query_raw, query_normalized
-    let fields = [s_path_raw, s_path_norm, s_query_raw, s_query_norm];
+    let fields = [&s_path_raw, &s_path_norm, &s_query_raw, &s_query_norm];
 
     for pattern in &scanner.patterns {
         // Budget check per pattern.
@@ -622,5 +628,103 @@ mod tests {
         let path = "/tmp/fake_patterns";
         let rc = luagate_scanner_init(path.as_ptr() as *const i8, path.len());
         assert_eq!(rc, LUAGATE_OK);
+    }
+
+    #[test]
+    fn test_non_utf8_input_uses_lossy_conversion_and_scans() {
+        // Ensure scanner is initialised.
+        {
+            let mut guard = SCANNER.lock().unwrap();
+            if guard.is_none() {
+                *guard = Some(build_default_scanner());
+            }
+        }
+
+        // Craft a query that contains invalid UTF-8 bytes mixed with a SQLi
+        // pattern.  The invalid byte (0xff) must not suppress pattern matching.
+        // "id=1 UNION SELECT" with a 0xff byte prepended.
+        let mut query_bytes = vec![0xffu8];
+        query_bytes.extend_from_slice(b"id=1 UNION SELECT * FROM users");
+
+        let mut threat_buf = vec![0i8; 64];
+        let mut rule_buf = vec![0i8; 128];
+        let mut threat_len: usize = 0;
+        let mut rule_len: usize = 0;
+        let mut score: f64 = 0.0;
+
+        let path = "/api/users";
+        let rc = luagate_scan_http(
+            path.as_ptr() as *const i8,
+            path.len(),
+            path.as_ptr() as *const i8,
+            path.len(),
+            query_bytes.as_ptr() as *const i8,
+            query_bytes.len(),
+            query_bytes.as_ptr() as *const i8,
+            query_bytes.len(),
+            std::ptr::null(),
+            0,
+            threat_buf.as_mut_ptr(),
+            64,
+            &mut threat_len,
+            rule_buf.as_mut_ptr(),
+            128,
+            &mut rule_len,
+            &mut score,
+        );
+
+        // Must return OK and detect sqli despite the leading invalid byte.
+        assert_eq!(rc, LUAGATE_OK);
+        assert!(threat_len > 0, "threat should be detected even with invalid UTF-8 input");
+        let threat_bytes: Vec<u8> = threat_buf[..threat_len].iter().map(|&b| b as u8).collect();
+        let threat = String::from_utf8_lossy(&threat_bytes).to_string();
+        assert_eq!(threat, "sqli");
+    }
+
+    #[test]
+    fn test_uninitialized_scanner_returns_internal_error() {
+        // Temporarily replace the scanner state with None to simulate an
+        // uninitialized scanner (as if init_by_lua was never called).
+        let saved = {
+            let mut guard = SCANNER.lock().unwrap();
+            guard.take()
+        };
+
+        let path = "/api/test";
+        let query = "id=1";
+        let mut threat_buf = vec![0i8; 64];
+        let mut rule_buf = vec![0i8; 128];
+        let mut threat_len: usize = 0;
+        let mut rule_len: usize = 0;
+        let mut score: f64 = 0.0;
+
+        let rc = luagate_scan_http(
+            path.as_ptr() as *const i8,
+            path.len(),
+            path.as_ptr() as *const i8,
+            path.len(),
+            query.as_ptr() as *const i8,
+            query.len(),
+            query.as_ptr() as *const i8,
+            query.len(),
+            std::ptr::null(),
+            0,
+            threat_buf.as_mut_ptr(),
+            64,
+            &mut threat_len,
+            rule_buf.as_mut_ptr(),
+            128,
+            &mut rule_len,
+            &mut score,
+        );
+
+        // Restore scanner state so other tests are not affected.
+        {
+            let mut guard = SCANNER.lock().unwrap();
+            *guard = saved;
+        }
+
+        assert_eq!(rc, LUAGATE_INTERNAL_ERROR,
+            "uninitialized scanner must return INTERNAL_ERROR, not auto-init");
     }
 }

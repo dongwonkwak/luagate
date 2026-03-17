@@ -9,6 +9,83 @@
 --   - Correct threat_type / rule_name / threat_score for known attack inputs.
 --   - Error propagation for scanner failures (rc == -3, rc == -4).
 --   - nil / missing optional fields are handled safely.
+--
+-- The "scanner/ffi.lua binding logic" section at the bottom injects a LuaJIT
+-- ffi stub via package.preload["ffi"] and directly exercises the error-code
+-- handling paths inside lua/luagate/scanner/ffi.lua.
+
+-- ── ffi stub for binding logic tests ─────────────────────────────────────────
+-- Installed before any require("luagate.scanner.ffi") so the real module's
+-- `local ffi = require("ffi")` resolves to this stub.
+-- Matches the decoder/ffi_spec.lua pattern.
+
+local _mock_lib = {} -- replaced per-test via package.loaded["_luagate_scanner_lib"]
+
+local _ffi_stub = {
+  cdef = function() end,
+
+  -- ffi.new: return lightweight table stubs for cdata types.
+  new = function(ct, n)
+    if ct == "size_t[1]" then
+      local t = {}
+      setmetatable(t, {
+        __index = function(_, k)
+          if k == 0 then
+            return rawget(t, "_v") or 0
+          end
+        end,
+        __newindex = function(_, k, v)
+          if k == 0 then
+            rawset(t, "_v", v)
+          end
+        end,
+      })
+      t[0] = 0
+      return t
+    end
+    if ct == "double[1]" then
+      local t = {}
+      setmetatable(t, {
+        __index = function(_, k)
+          if k == 0 then
+            return rawget(t, "_v") or 0.0
+          end
+        end,
+        __newindex = function(_, k, v)
+          if k == 0 then
+            rawset(t, "_v", v)
+          end
+        end,
+      })
+      t[0] = 0.0
+      return t
+    end
+    -- char[?] buffer stub
+    return { _type = "char_buf", _cap = n or 0, _data = nil }
+  end,
+
+  -- ffi.string: returns stored _data from the char_buf stub.
+  string = function(buf, _len)
+    if type(buf) == "table" and buf._data then
+      return buf._data
+    end
+    return ""
+  end,
+
+  -- ffi.load: return the current _mock_lib, which tests replace per-case.
+  load = function(_name)
+    return _mock_lib
+  end,
+}
+
+-- Install the ffi stub so require("ffi") returns it throughout this file.
+package.preload["ffi"] = function()
+  return _ffi_stub
+end
+
+-- Ensure clean state before the scanner ffi module is first loaded.
+package.loaded["luagate.scanner.ffi"] = nil
+package.loaded["_luagate_scanner_lib"] = nil
 
 describe("scanner/ffi", function()
   local scanner_mock
@@ -463,6 +540,141 @@ describe("scanner/ffi", function()
         query_normalized = "format=json",
       })
       assert.equals(0.0, result.threat_score)
+    end)
+  end)
+
+  -- -----------------------------------------------------------------------
+  -- scanner/ffi.lua binding logic (stub lib injection via package.loaded)
+  -- Directly exercises the Lua-side error-code handling in ffi.lua by
+  -- injecting a stub into package.loaded["_luagate_scanner_lib"].
+  -- The ffi stub installed at the top of this file replaces require("ffi")
+  -- so luagate_scanner.so is never loaded.
+  -- -----------------------------------------------------------------------
+
+  describe("scanner/ffi.lua binding logic", function()
+    -- Build a stub library table whose luagate_scan_http returns a fixed rc.
+    local function make_scan_stub(rc_value)
+      return {
+        luagate_scan_http = function(
+          _pr,
+          _prl,
+          _pn,
+          _pnl,
+          _qr,
+          _qrl,
+          _qn,
+          _qnl,
+          _b,
+          _bl,
+          _tt_out,
+          _tt_cap,
+          tt_len_ptr,
+          _rn_out,
+          _rn_cap,
+          rn_len_ptr,
+          score_ptr
+        )
+          tt_len_ptr[0] = 0
+          rn_len_ptr[0] = 0
+          score_ptr[0] = 0.0
+          return rc_value
+        end,
+        luagate_scanner_init = function(_path, _len)
+          return rc_value
+        end,
+      }
+    end
+
+    -- Force-reload ffi.lua with a specific stub lib.
+    local function reload_with(stub_lib)
+      package.loaded["_luagate_scanner_lib"] = stub_lib
+      package.loaded["luagate.scanner.ffi"] = nil
+      return require("luagate.scanner.ffi")
+    end
+
+    after_each(function()
+      package.loaded["_luagate_scanner_lib"] = nil
+      package.loaded["luagate.scanner.ffi"] = nil
+    end)
+
+    it("rc=0, threat_type_len=0 → no threat, result.threat_type is nil", function()
+      local m = reload_with(make_scan_stub(0))
+      local result, err = m.scan({
+        path_raw = "/ok",
+        path_normalized = "/ok",
+        query_raw = "",
+        query_normalized = "",
+      })
+      assert.is_nil(err)
+      assert.is_not_nil(result)
+      assert.is_nil(result.threat_type)
+      assert.is_nil(result.rule_name)
+      assert.equals(0.0, result.threat_score)
+    end)
+
+    it("BUDGET_EXCEEDED(-3) → nil result, error 'scanner_fail:-3'", function()
+      local m = reload_with(make_scan_stub(-3))
+      local result, err = m.scan({
+        path_raw = "/ok",
+        path_normalized = "/ok",
+        query_raw = "",
+        query_normalized = "",
+      })
+      assert.is_nil(result)
+      assert.is_not_nil(err)
+      assert.truthy(err:find("scanner_fail"))
+      assert.truthy(err:find("-3"))
+    end)
+
+    it("BUFFER_TOO_SMALL(-2) → nil result, error 'scanner_fail:-2'", function()
+      local m = reload_with(make_scan_stub(-2))
+      local result, err = m.scan({
+        path_raw = "/ok",
+        path_normalized = "/ok",
+        query_raw = "",
+        query_normalized = "",
+      })
+      assert.is_nil(result)
+      assert.is_not_nil(err)
+      assert.truthy(err:find("scanner_fail"))
+      assert.truthy(err:find("-2"))
+    end)
+
+    it("INTERNAL_ERROR(-4) → nil result, error 'scanner_fail:-4'", function()
+      local m = reload_with(make_scan_stub(-4))
+      local result, err = m.scan({
+        path_raw = "/ok",
+        path_normalized = "/ok",
+        query_raw = "",
+        query_normalized = "",
+      })
+      assert.is_nil(result)
+      assert.is_not_nil(err)
+      assert.truthy(err:find("scanner_fail"))
+      assert.truthy(err:find("-4"))
+    end)
+
+    it("init() rc=0 → true, nil", function()
+      local m = reload_with(make_scan_stub(0))
+      local ok, err = m.init(nil)
+      assert.is_true(ok)
+      assert.is_nil(err)
+    end)
+
+    it("init() rc=-4 → false, error contains 'scanner_init_failed'", function()
+      local m = reload_with(make_scan_stub(-4))
+      local ok, err = m.init(nil)
+      assert.is_false(ok)
+      assert.is_not_nil(err)
+      assert.truthy(err:find("scanner_init_failed"))
+    end)
+
+    it("package.loaded caching: second require returns same module table", function()
+      package.loaded["_luagate_scanner_lib"] = make_scan_stub(0)
+      package.loaded["luagate.scanner.ffi"] = nil
+      local m1 = require("luagate.scanner.ffi")
+      local m2 = require("luagate.scanner.ffi")
+      assert.equals(m1, m2)
     end)
   end)
 end)
