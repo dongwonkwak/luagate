@@ -17,15 +17,49 @@
 -- Implementation: lua/luagate/http/handler.lua
 -- Tests: tests/unit/http/handler_spec.lua
 
+local cjson = require("cjson.safe")
+
 local _M = {}
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
+--- Return true if the IP is a private/loopback address (RFC 1918 + loopback).
+-- Used to gate X-LuaGate-Block-Reason header: internal clients only.
+--
+-- @param ip  string  e.g. "10.1.2.3"
+-- @return boolean
+local function is_internal_ip(ip)
+  if not ip then
+    return false
+  end
+  -- 127.x.x.x (loopback)
+  if ip:match("^127%.") then
+    return true
+  end
+  -- 10.x.x.x
+  if ip:match("^10%.") then
+    return true
+  end
+  -- 172.16.x.x – 172.31.x.x
+  local b = ip:match("^172%.(%d+)%.")
+  if b then
+    local n = tonumber(b)
+    if n and n >= 16 and n <= 31 then
+      return true
+    end
+  end
+  -- 192.168.x.x
+  if ip:match("^192%.168%.") then
+    return true
+  end
+  return false
+end
+
 --- Build a 403 JSON deny response and exit.
--- Sets ngx.status, Content-Type, X-Request-ID, X-LuaGate-Block-Reason,
--- Cache-Control headers, writes body, and calls ngx.exit(403).
+-- Sets ngx.status, Content-Type, X-Request-ID, X-LuaGate-Block-Reason
+-- (internal IPs only), Cache-Control headers, writes body, and calls ngx.exit(403).
 --
 -- @param deny_reason  string   Short reason token (policy rule id or "no_policy")
 -- @param request_id   string   Request UUID from ngx.ctx or nginx var
@@ -33,15 +67,27 @@ local function do_deny(deny_reason, request_id)
   local reason = deny_reason or "policy_deny"
   local rid = request_id or ""
 
+  -- JSON 인젝션 방지: cjson.encode로 안전하게 직렬화 (http-pipeline.md §6)
+  local ok, body = pcall(cjson.encode, {
+    error = "Forbidden",
+    request_id = rid,
+    reason = reason,
+  })
+  if not ok then
+    body = '{"error":"Forbidden"}'
+  end
+
   ngx.status = 403
   ngx.header["Content-Type"] = "application/json"
   ngx.header["X-Request-ID"] = rid
-  -- X-LuaGate-Block-Reason: internal network response header (DON-140 AC)
-  ngx.header["X-LuaGate-Block-Reason"] = reason
+  -- X-LuaGate-Block-Reason: 내부망 클라이언트에만 전송 (외부 노출 금지)
+  local client_ip = ngx.var.remote_addr or ""
+  if is_internal_ip(client_ip) then
+    ngx.header["X-LuaGate-Block-Reason"] = reason
+  end
   ngx.header["Cache-Control"] = "no-store"
 
-  -- http-pipeline.md §6: JSON error body
-  ngx.say('{"error":"Forbidden","request_id":"' .. rid .. '","reason":"' .. reason .. '"}')
+  ngx.say(body)
   ngx.exit(403)
 end
 
@@ -144,7 +190,10 @@ function _M.access()
   local ctx = ngx.ctx.luagate
   if not ctx then
     -- rewrite phase did not run (should not happen in normal flow)
-    -- fail-closed
+    -- fail-closed: update nginx vars before deny so log records accurate state
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "policy_engine"
+    ngx.var.luagate_request_state = "policy_denied"
     do_deny("no_context", ngx.var.luagate_request_id or "")
     return
   end
@@ -153,9 +202,13 @@ function _M.access()
   local ok_ev, evaluator = pcall(require, "luagate.policy.evaluator")
   if not ok_ev then
     ngx.log(ngx.ERR, "[luagate] failed to load evaluator: ", tostring(evaluator))
+    ctx.action = "deny"
+    ctx.request_state = "policy_denied"
     ctx.decision_source = "policy_engine"
     ctx.deny_reason = "evaluator_load_error"
+    ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "policy_engine"
+    ngx.var.luagate_request_state = "policy_denied"
     ngx.var.luagate_deny_reason = "evaluator_load_error"
     do_deny("evaluator_load_error", ctx.request_id or "")
     return
@@ -165,9 +218,13 @@ function _M.access()
   if not policy then
     -- fail-closed: no active policy → deny all (http-pipeline.md §10)
     ngx.log(ngx.WARN, "[luagate] no active policy, fail-closed deny")
+    ctx.action = "deny"
+    ctx.request_state = "policy_denied"
     ctx.decision_source = "policy_engine"
     ctx.deny_reason = "no_policy"
+    ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "policy_engine"
+    ngx.var.luagate_request_state = "policy_denied"
     ngx.var.luagate_deny_reason = "no_policy"
     do_deny("no_policy", ctx.request_id or "")
     return

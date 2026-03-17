@@ -557,6 +557,164 @@ describe("handler.access — ctx 없음 (rewrite 미실행) → fail-closed", fu
     handler.access()
     assert.are.equal("no_context", ngx_mock.header["X-LuaGate-Block-Reason"])
   end)
+
+  it("ctx 없으면 luagate_action = 'deny' 설정 (로그 정확성)", function()
+    handler.access()
+    assert.are.equal("deny", ngx_mock.var.luagate_action)
+  end)
+
+  it("ctx 없으면 luagate_request_state = 'policy_denied' 설정 (로그 정확성)", function()
+    handler.access()
+    assert.are.equal("policy_denied", ngx_mock.var.luagate_request_state)
+  end)
+end)
+
+describe("handler.access — fail-closed: nginx var 업데이트 검증", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    handler.rewrite()
+  end)
+
+  it("get_policy() nil → luagate_action = 'deny' 설정", function()
+    _evaluator_stub.get_policy_result = nil
+    handler.access()
+    assert.are.equal("deny", ngx_mock.var.luagate_action)
+  end)
+
+  it("get_policy() nil → luagate_request_state = 'policy_denied' 설정", function()
+    _evaluator_stub.get_policy_result = nil
+    handler.access()
+    assert.are.equal("policy_denied", ngx_mock.var.luagate_request_state)
+  end)
+
+  it("get_policy() nil → ctx.action = 'deny' 설정", function()
+    _evaluator_stub.get_policy_result = nil
+    handler.access()
+    assert.are.equal("deny", ngx_mock.ctx.luagate.action)
+  end)
+
+  it("get_policy() nil → ctx.request_state = 'policy_denied' 설정", function()
+    _evaluator_stub.get_policy_result = nil
+    handler.access()
+    assert.are.equal("policy_denied", ngx_mock.ctx.luagate.request_state)
+  end)
+end)
+
+describe("handler.access — X-LuaGate-Block-Reason IP 노출 제어", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+    _evaluator_stub.evaluate_result = { action = "deny", matched_rule = "rule-block", decision_source = "rule" }
+  end)
+
+  it("내부 IP(10.x) 클라이언트에는 X-LuaGate-Block-Reason 헤더를 전송한다", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "10.1.2.3" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.are.equal("rule-block", ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("내부 IP(192.168.x.x) 클라이언트에는 X-LuaGate-Block-Reason 헤더를 전송한다", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "192.168.1.100" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.are.equal("rule-block", ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("내부 IP(172.16.x.x) 클라이언트에는 X-LuaGate-Block-Reason 헤더를 전송한다", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "172.16.0.1" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.are.equal("rule-block", ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("루프백(127.x.x.x) 클라이언트에는 X-LuaGate-Block-Reason 헤더를 전송한다", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "127.0.0.1" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.are.equal("rule-block", ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("외부 IP(203.0.113.1) 클라이언트에는 X-LuaGate-Block-Reason 헤더를 전송하지 않는다", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "203.0.113.1" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.is_nil(ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("외부 IP(8.8.8.8) 클라이언트에는 X-LuaGate-Block-Reason 헤더를 전송하지 않는다", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "8.8.8.8" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.is_nil(ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("172.32.x.x 는 외부 IP로 판정하여 헤더를 전송하지 않는다", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "172.32.0.1" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.is_nil(ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+end)
+
+describe("handler.access — JSON 인젝션 방지", function()
+  local ngx_mock
+  local said_body
+
+  before_each(function()
+    reset_stubs()
+    _evaluator_stub.get_policy_result = nil
+    ngx_mock = make_ngx()
+    said_body = nil
+    ngx_mock.say = function(s)
+      said_body = s
+    end
+    _G.ngx = ngx_mock
+    handler.rewrite()
+  end)
+
+  it("request_id에 따옴표가 포함되어도 JSON 바디가 파싱 가능하다", function()
+    ngx_mock.var.luagate_request_id = 'id-with-"quotes"'
+    ngx_mock.ctx.luagate = nil
+    ngx_mock.ctx = {}
+    handler.access()
+    -- said_body는 유효한 JSON이어야 한다
+    local dkjson = require("dkjson")
+    local parsed, _, err = dkjson.decode(said_body)
+    assert.is_nil(err, "JSON parse error: " .. tostring(err))
+    assert.is_table(parsed)
+  end)
+
+  it("request_id에 닫는 중괄호가 포함되어도 JSON 구조가 유지된다", function()
+    -- deny 경로를 통해 cjson.encode 사용 여부를 검증
+    ngx_mock.var.luagate_request_id = "id}malicious"
+    ngx_mock.ctx.luagate = nil
+    ngx_mock.ctx = {}
+    handler.access()
+    local dkjson = require("dkjson")
+    local parsed, _, err = dkjson.decode(said_body)
+    assert.is_nil(err, "JSON parse error: " .. tostring(err))
+    assert.is_table(parsed)
+    assert.are.equal("Forbidden", parsed.error)
+  end)
 end)
 
 -- ===========================================================================
