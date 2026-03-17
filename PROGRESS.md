@@ -183,3 +183,11 @@ COMPLETED_REVIEW: DON-140-code (2026-03-17)
 | 2026-03-17 | DON-139 | luagate_decoder.so Rust FFI + Lua 바인딩 | `src/decoder/Cargo.toml`, `src/decoder/src/lib.rs`, `lua/luagate/decoder/ffi.lua`, `tests/unit/decoder/ffi_spec.lua`, `Makefile` (build-ffi 타겟), `lib/.gitkeep` | 15 Rust + 18 Lua 단위 테스트. caller-allocated buffer, pcall 래핑, 1회 재시도 패턴. |
 
 COMPLETED_REVIEW: DON-139-code (2026-03-17)
+
+## Phase 1-Security: luagate_scanner.so Rust FFI + Lua 바인딩 (DON-141)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-17 | DON-141 | luagate_scanner.so Rust FFI + Lua binding | `src/scanner/Cargo.toml`, `src/scanner/src/lib.rs`, `conf/scanner-patterns/*.yaml` (8개), `lua/luagate/scanner/ffi.lua`, `tests/unit/scanner/ffi_spec.lua` | Rust 11 tests + Lua 22 tests (총 419 busted tests 통과). caller-allocated buffer, 5ms budget, 8KB limit, 8개 threat_type, panic=abort |
+
+COMPLETED_REVIEW: DON-141-code (2026-03-17)

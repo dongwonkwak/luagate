@@ -1,0 +1,9 @@
+# Server-Side Request Forgery (SSRF) patterns (OWASP CRS-inspired)
+threat_type: "ssrf"
+patterns:
+  - name: "ssrf_internal_host"
+    pattern: "(?i)(https?://(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|169\\.254\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.|192\\.168\\.))"
+    score: 0.9
+  - name: "ssrf_dangerous_scheme"
+    pattern: "(?i)(file://|gopher://|dict://)"
+    score: 0.9

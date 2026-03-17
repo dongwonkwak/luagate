@@ -9,6 +9,10 @@ src/*/Cargo.lock
 *.a
 *.out
 
+# Rust build artifacts
+src/*/target/
+src/*/Cargo.lock
+
 # Lua
 luacov.stats.out
 luacov.report.out

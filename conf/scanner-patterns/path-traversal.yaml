@@ -1,0 +1,15 @@
+# Path Traversal patterns (OWASP CRS-inspired)
+threat_type: "path_traversal"
+patterns:
+  - name: "path_traversal_dotdot"
+    pattern: "(\\.\\.[\\\\\\x2f])"
+    score: 0.9
+  - name: "path_traversal_encoded"
+    pattern: "(?i)(%2e%2e[%2f%5c])"
+    score: 0.9
+  - name: "path_traversal_unix"
+    pattern: "(?i)(/etc/passwd|/etc/shadow|/proc/self)"
+    score: 0.95
+  - name: "path_traversal_windows"
+    pattern: "(?i)(c:\\\\windows\\\\)"
+    score: 0.9
