@@ -82,6 +82,9 @@ local function make_ngx(overrides)
       get_headers = function()
         return {}
       end,
+      get_method = function()
+        return "GET"
+      end,
     },
   }
 
@@ -171,13 +174,14 @@ describe("auth.init", function()
     auth = load_auth()
   end)
 
-  it("환경변수 미설정 시 false 반환 + EMERG 로그", function()
+  it("환경변수 미설정 시 error() 발생 (startup-fatal) + EMERG 로그", function()
     _env_override = {} -- LUAGATE_ADMIN_TOKEN 없음
     auth = load_auth()
 
-    local ok = auth.init()
+    assert.has_error(function()
+      auth.init()
+    end, "[luagate] LUAGATE_ADMIN_TOKEN not set; refusing to start (fail-closed)")
 
-    assert.is_false(ok)
     local logged = _G.ngx._get_logged()
     local found_emerg = false
     for _, entry in ipairs(logged) do
@@ -189,13 +193,14 @@ describe("auth.init", function()
     assert.is_true(found_emerg, "EMERG 로그에 'LUAGATE_ADMIN_TOKEN not set' 메시지가 포함되어야 한다")
   end)
 
-  it("빈 문자열 토큰 시 false 반환 + EMERG 로그", function()
+  it("빈 문자열 토큰 시 error() 발생 (startup-fatal) + EMERG 로그", function()
     _env_override = { LUAGATE_ADMIN_TOKEN = "" }
     auth = load_auth()
 
-    local ok = auth.init()
+    assert.has_error(function()
+      auth.init()
+    end)
 
-    assert.is_false(ok)
     local logged = _G.ngx._get_logged()
     local found_emerg = false
     for _, entry in ipairs(logged) do
@@ -207,13 +212,14 @@ describe("auth.init", function()
     assert.is_true(found_emerg)
   end)
 
-  it("토큰 32바이트 미만 시 false 반환 + EMERG 로그", function()
+  it("토큰 32바이트 미만 시 error() 발생 (startup-fatal) + EMERG 로그", function()
     _env_override = { LUAGATE_ADMIN_TOKEN = "short-token-only-20chars" } -- 24 bytes
     auth = load_auth()
 
-    local ok = auth.init()
+    assert.has_error(function()
+      auth.init()
+    end)
 
-    assert.is_false(ok)
     local logged = _G.ngx._get_logged()
     local found_too_short = false
     for _, entry in ipairs(logged) do
@@ -280,9 +286,11 @@ describe("auth.verify", function()
     _G.ngx._reset_tracking()
   end)
 
-  -- /health 경로 면제
-  it("/health 경로 요청 시 인증 없이 true 반환", function()
-    _G.ngx.var.uri = "/health"
+  -- OPTIONS preflight 면제 (CORS)
+  it("OPTIONS 메서드 요청 시 인증 없이 true 반환 (CORS preflight)", function()
+    _G.ngx.req.get_method = function()
+      return "OPTIONS"
+    end
 
     local ok = auth.verify()
 
@@ -290,8 +298,24 @@ describe("auth.verify", function()
     assert.is_nil(_G.ngx._get_exited(), "ngx.exit가 호출되지 않아야 한다")
   end)
 
-  it("/health 경로에서는 Authorization 헤더가 없어도 통과", function()
+  -- GET /health 경로 면제
+  it("GET /health 경로 요청 시 인증 없이 true 반환", function()
     _G.ngx.var.uri = "/health"
+    _G.ngx.req.get_method = function()
+      return "GET"
+    end
+
+    local ok = auth.verify()
+
+    assert.is_true(ok)
+    assert.is_nil(_G.ngx._get_exited(), "ngx.exit가 호출되지 않아야 한다")
+  end)
+
+  it("GET /health 경로에서는 Authorization 헤더가 없어도 통과", function()
+    _G.ngx.var.uri = "/health"
+    _G.ngx.req.get_method = function()
+      return "GET"
+    end
     _G.ngx.req.get_headers = function()
       return {}
     end
@@ -299,6 +323,20 @@ describe("auth.verify", function()
     local ok = auth.verify()
 
     assert.is_true(ok)
+  end)
+
+  it("POST /health 경로는 인증 면제 대상이 아니다 (GET만 면제)", function()
+    _G.ngx.var.uri = "/health"
+    _G.ngx.req.get_method = function()
+      return "POST"
+    end
+    _G.ngx.req.get_headers = function()
+      return {}
+    end
+
+    auth.verify()
+
+    assert.are.equal(401, _G.ngx.status)
   end)
 
   -- Authorization 헤더 누락

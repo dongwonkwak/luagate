@@ -8,7 +8,8 @@
 --   - fail-closed: missing/invalid token -> 401 deny.
 --   - Minimum 32 bytes entropy enforced at init() (startup-fatal).
 --   - constant-time compare: bit.bor + bit.bxor, never == on secrets.
---   - /health endpoint exempted from authentication.
+--   - GET /health endpoint exempted from authentication.
+--   - OPTIONS preflight exempted from authentication (CORS).
 --
 -- Implementation: lua/luagate/admin/auth.lua
 -- Tests: tests/unit/admin/auth_spec.lua
@@ -61,21 +62,26 @@ local function constant_time_compare(a, b)
   return result == 0
 end
 
---- Send a 401 Unauthorized response and write an audit log entry.
+--- Send a 401 Unauthorized response and write a structured audit log entry.
 -- The token value is NEVER included in the log or response body (ADR-004 ss6.2).
+-- Audit output uses the "[luagate:audit]" prefix so that nginx error_log can be
+-- split into a dedicated audit.log stream via log routing (ADR-004 ss6.3).
 --
 -- @param reason string  Short reason token for audit log (e.g. "missing_token")
 local function _reject(reason)
-  -- Audit log: timestamp, event=auth_failure, actor_ip, path, reason (ADR-004 ss6.3)
+  -- Structured audit log: ADR-004 ss6.3 / log-schema.md ss5 auth_failure schema
   local actor_ip = ngx.var.remote_addr or "unknown"
   local path = ngx.var.uri or "unknown"
-  ngx.log(ngx.WARN, "[luagate:audit] ", cjson.encode({
+  local audit_record = cjson.encode({
     timestamp = ngx.utctime(),
     event = "auth_failure",
     actor_ip = actor_ip,
     path = path,
     reason = reason,
-  }) or '{"event":"auth_failure","reason":"' .. reason .. '"}')
+  })
+  -- ERR level ensures capture in default error_log; "[luagate:audit]" prefix
+  -- enables log routing to dedicated audit.log (grep/fluentd filter).
+  ngx.log(ngx.ERR, "[luagate:audit] ", audit_record or '{"event":"auth_failure","reason":"' .. reason .. '"}')
 
   ngx.status = 401
   ngx.header["Content-Type"] = "application/json"
@@ -97,20 +103,19 @@ function _M.init()
   local token = os.getenv("LUAGATE_ADMIN_TOKEN")
 
   if not token or token == "" then
-    ngx.log(ngx.EMERG, "[luagate] LUAGATE_ADMIN_TOKEN not set; refusing to start (fail-closed)")
-    return false
+    local msg = "[luagate] LUAGATE_ADMIN_TOKEN not set; refusing to start (fail-closed)"
+    ngx.log(ngx.EMERG, msg)
+    error(msg)
   end
 
   if #token < MIN_TOKEN_LENGTH then
-    ngx.log(
-      ngx.EMERG,
-      "[luagate] LUAGATE_ADMIN_TOKEN too short: ",
+    local msg = string.format(
+      "[luagate] LUAGATE_ADMIN_TOKEN too short: %d bytes (minimum %d); refusing to start",
       #token,
-      " bytes (minimum ",
-      MIN_TOKEN_LENGTH,
-      "); refusing to start"
+      MIN_TOKEN_LENGTH
     )
-    return false
+    ngx.log(ngx.EMERG, msg)
+    error(msg)
   end
 
   _admin_token = token
@@ -123,16 +128,22 @@ end
 -- Called from access_by_lua in the admin server block.
 --
 -- Flow:
---   1. /health path -> early return true (no auth required, admin-api.md ss6.1)
+--   0. OPTIONS preflight -> early return true (CORS, admin-auth-contract)
+--   1. GET /health path -> early return true (no auth required, admin-api.md ss6.1)
 --   2. Parse Authorization header -> missing/malformed -> 401
 --   3. Constant-time compare -> mismatch -> 401
 --   4. Match -> return true
 --
 -- @return boolean  true if authenticated (on failure, _reject() calls ngx.exit)
 function _M.verify()
-  -- 1. Health check exemption (admin-api.md ss6.1)
+  -- 0. OPTIONS preflight: bypass auth (CORS, admin-auth-contract.md)
+  if ngx.req.get_method() == "OPTIONS" then
+    return true
+  end
+
+  -- 1. Health check exemption: GET /health only (admin-api.md ss6.1)
   local uri = ngx.var.uri
-  if uri == HEALTH_PATH then
+  if uri == HEALTH_PATH and ngx.req.get_method() == "GET" then
     return true
   end
 
