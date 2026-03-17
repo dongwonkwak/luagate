@@ -159,11 +159,3 @@ COMPLETED_REVIEW: DON-135-code (2026-03-16)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-17 | DON-104 | Claude Code skill: knowledge-based codex review context on PR creation | `.claude/skills/pr-review-context/SKILL.md`, `CLAUDE.md` (PR 워크플로우 + skills 테이블) | 16개 파일 패턴 매핑, 출력 예시 포함 |
-
-COMPLETED_REVIEW: DON-136-code (2026-03-17)
-
-## Phase 1-Core: policy/evaluator.lua + conflict.lua (DON-136)
-
-| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
-|------|------|------|--------|------|
-| 2026-03-17 | DON-136 | policy/evaluator.lua + conflict.lua — 정책 평가 엔진 + 충돌 감지 | `lua/luagate/policy/evaluator.lua`, `lua/luagate/policy/conflict.lua`, `tests/unit/policy/evaluator_spec.lua`, `tests/unit/policy/conflict_spec.lua` | 105 busted 테스트. 복합 캐시 키, overlap conflict, detect_and_fail(), CIDR prefix 검증 포함 |
