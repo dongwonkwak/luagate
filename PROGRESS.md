@@ -215,3 +215,11 @@ COMPLETED_REVIEW: DON-153-code (2026-03-17)
 COMPLETED_REVIEW: DON-142-code (2026-03-17)
 
 COMPLETED_REVIEW: DON-142-code (2026-03-17)
+
+COMPLETED_REVIEW: DON-145-code (2026-03-17)
+
+## Phase 1-Admin: Admin API Bearer token 인증 모듈 (DON-145)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-17 | DON-145 | lua/luagate/admin/auth.lua — Bearer token 인증 모듈 | `lua/luagate/admin/auth.lua`, `tests/unit/admin/auth_spec.lua`, `.claude/knowledge/security-patterns.md` | 497 tests 통과. Codex 4건 반영 (startup-fatal error(), OPTIONS preflight, audit ERR 레벨, TEST 25 wiring → DON-146 범위). 보안 리뷰 PASS |
