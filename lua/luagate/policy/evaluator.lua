@@ -423,19 +423,23 @@ function _M.get_policy()
     return _cached_policy
   end
 
-  local current_version = dict:get("http:active_version")
+  local http_ver = dict:get("http:active_version")
+  local stream_ver = dict:get("stream:active_version")
+  local current_version = (http_ver or "") .. "|" .. (stream_ver or "")
 
   if _cached_version == current_version and _cached_policy ~= nil then
     -- Version unchanged → return cached policy (no shared-dict I/O)
     return _cached_policy
   end
 
-  if not current_version then
+  if not http_ver and not stream_ver then
     -- No active version yet (cold start or no policy loaded)
     return _cached_policy
   end
 
-  local blob_key = "policy:" .. current_version .. ":blob"
+  -- Use the HTTP version for the blob key (primary policy source).
+  -- Stream rules are stored in the same blob under the same version.
+  local blob_key = "policy:" .. (http_ver or stream_ver) .. ":blob"
   local policy_json = dict:get(blob_key)
   if not policy_json then
     ngx.log(ngx.ERR, "[luagate] policy blob not found for version: ", current_version)

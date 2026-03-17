@@ -4,8 +4,11 @@
 -- Design rules:
 --   - Operates on enabled=true rules only (spec §5, ADR-002 §3.2).
 --   - Returns conflict/shadow lists; does NOT abort loading (WARN only).
---   - detect() is the single public entry point — returns both conflict and
---     shadowed rule lists.
+--   - detect() is the main public entry point — returns both conflict and
+--     shadowed rule lists.  Each conflict entry carries an overlap_type field:
+--     "exact" (scopes are equal) or "overlap" (one scope contains the other).
+--   - detect_and_fail() is the fail-closed variant: raises error() when any
+--     conflicts are found.  Shadowed rules do NOT cause an error.
 --   - Scope comparison is best-effort: ambiguous containment → false.
 --   - No blocking I/O, no ngx.shared access.
 --   - ngx.log(ngx.WARN) is called for each detected pair/rule.
@@ -466,6 +469,12 @@ end
 --
 -- Conflict (ADR-002 §3.2):
 --   Two rules with identical scope, identical priority, but opposite actions.
+--   (exact conflict)
+--
+--   Also detects overlap conflicts: same priority, scope A contains scope B
+--   or vice-versa (or both contain each other), with opposite actions.
+--   These are recorded with overlap_type = "overlap" to distinguish from
+--   exact scope matches (overlap_type = "exact").
 --
 -- Shadowed (ADR-002 §3.2):
 --   A rule with higher priority (lower number) and broader scope fully
@@ -475,12 +484,13 @@ end
 --
 -- @param rules table  List of normalised rule tables (enabled=true only).
 --                     The list need not be pre-sorted.
--- @return table  conflicts  List of { rule_a=id, rule_b=id } pairs
+-- @return table  conflicts  List of { rule_a=id, rule_b=id, overlap_type=string } pairs
 -- @return table  shadowed   List of rule id strings
 function _M.detect(rules)
   local conflicts = {}
   local shadowed = {}
   local seen_shadowed = {} -- deduplicate shadowed list
+  local seen_conflict = {} -- deduplicate conflict pairs
 
   local n = #rules
   for i = 1, n do
@@ -489,13 +499,32 @@ function _M.detect(rules)
       local rule_b = rules[j]
 
       -- ---------------------------------------------------------------
-      -- Conflict: same priority + equal scope + opposite action
+      -- Conflict: same priority + opposite action
       -- ---------------------------------------------------------------
-      if rule_a.priority == rule_b.priority then
+      if rule_a.priority == rule_b.priority and rule_a.action ~= rule_b.action then
+        local pair_key = rule_a.id .. "|" .. rule_b.id
+
         if scopes_equal(rule_a.scope, rule_b.scope) then
-          if rule_a.action ~= rule_b.action then
-            conflicts[#conflicts + 1] = { rule_a = rule_a.id, rule_b = rule_b.id }
-            warn("conflict: " .. rule_a.id .. " vs " .. rule_b.id)
+          -- Exact conflict: identical scope
+          if not seen_conflict[pair_key] then
+            seen_conflict[pair_key] = true
+            conflicts[#conflicts + 1] = {
+              rule_a = rule_a.id,
+              rule_b = rule_b.id,
+              overlap_type = "exact",
+            }
+            warn("conflict(exact): " .. rule_a.id .. " vs " .. rule_b.id)
+          end
+        elseif scope_contains(rule_a.scope, rule_b.scope) or scope_contains(rule_b.scope, rule_a.scope) then
+          -- Overlap conflict: one scope contains the other (best-effort)
+          if not seen_conflict[pair_key] then
+            seen_conflict[pair_key] = true
+            conflicts[#conflicts + 1] = {
+              rule_a = rule_a.id,
+              rule_b = rule_b.id,
+              overlap_type = "overlap",
+            }
+            warn("conflict(overlap): " .. rule_a.id .. " vs " .. rule_b.id)
           end
         end
       end
@@ -531,6 +560,26 @@ function _M.detect(rules)
     end
   end
 
+  return conflicts, shadowed
+end
+
+--- Detect conflicts and raise an error if any are found (fail-closed variant).
+-- Intended for use at policy load time when strict conflict rejection is needed.
+-- Shadowed rules are returned but do NOT cause an error.
+--
+-- @param rules table  List of normalised rule tables (enabled=true only).
+-- @return table  conflicts  (always empty — error is raised if non-empty)
+-- @return table  shadowed   List of rule id strings
+-- @raises string  Error message listing all conflicting rule pairs
+function _M.detect_and_fail(rules)
+  local conflicts, shadowed = _M.detect(rules)
+  if #conflicts > 0 then
+    local ids = {}
+    for _, c in ipairs(conflicts) do
+      ids[#ids + 1] = c.rule_a .. "<->" .. c.rule_b .. "(" .. (c.overlap_type or "?") .. ")"
+    end
+    error("[luagate] policy conflict detected: " .. table.concat(ids, ", "))
+  end
   return conflicts, shadowed
 end
 

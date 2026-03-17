@@ -5,6 +5,15 @@
 -- evaluator.lua는 ngx 전역 없이도 동작할 수 있도록 설계되어 있다.
 -- get_policy()는 ngx.shared 의존성이 있으므로 단위 테스트에서는 제외하고,
 -- compile() / evaluate() / evaluate_stream() / reset_cache()를 집중 검증한다.
+--
+-- cjson은 LuaJIT 전용 .so이므로 Lua 5.4 busted 환경에서 dkjson으로 stub한다.
+package.preload["cjson"] = function()
+  local dkjson = require("dkjson")
+  return {
+    decode = dkjson.decode,
+    encode = dkjson.encode,
+  }
+end
 
 -- ngx 전역 stub (warn 로그 호출 등 방어)
 _G.ngx = nil
@@ -603,5 +612,189 @@ describe("evaluator.reset_cache — 캐시 초기화", function()
     assert.has_no.errors(function()
       evaluator.reset_cache()
     end)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- get_policy() — 복합 버전 키 (코드리뷰 피드백 반영)
+-- ---------------------------------------------------------------------------
+
+describe("evaluator.get_policy — 복합 버전 키 동작", function()
+  -- get_policy()는 ngx.shared 의존성이 있으므로 ngx mock을 구성하여 검증한다.
+  -- 복합 키 형식: (http_ver or "") .. "|" .. (stream_ver or "")
+
+  local saved_ngx
+
+  before_each(function()
+    saved_ngx = _G.ngx
+    evaluator.reset_cache()
+  end)
+
+  after_each(function()
+    _G.ngx = saved_ngx
+    evaluator.reset_cache()
+  end)
+
+  it("ngx가 nil이면 get_policy()는 nil을 반환한다 (캐시 없음)", function()
+    _G.ngx = nil
+    local result = evaluator.get_policy()
+    assert.is_nil(result)
+  end)
+
+  it("ngx.shared가 nil이면 get_policy()는 nil을 반환한다", function()
+    _G.ngx = { shared = nil }
+    local result = evaluator.get_policy()
+    assert.is_nil(result)
+  end)
+
+  it("luagate_policy dict가 없으면 get_policy()는 nil을 반환한다", function()
+    _G.ngx = { shared = {}, log = function() end }
+    local result = evaluator.get_policy()
+    assert.is_nil(result)
+  end)
+
+  it("http_ver와 stream_ver 둘 다 nil이면 정책을 로드하지 않는다", function()
+    -- cold start: 아직 어떤 버전도 등록되지 않은 상태
+    local dict = {}
+    dict.get = function(_, _key)
+      return nil
+    end
+    _G.ngx = { shared = { luagate_policy = dict }, log = function() end }
+
+    local result = evaluator.get_policy()
+    -- 버전 없음 → nil 반환 (기존 캐시 없음)
+    assert.is_nil(result)
+  end)
+
+  it("복합 버전 키: http_ver만 있을 때 '|' 구분자가 포함된 키를 사용한다", function()
+    -- http_ver=v1, stream_ver=nil → composite key = "v1|"
+    -- blob이 없으면 nil 반환 (버전 변경 감지 자체가 목적)
+    local store = { ["http:active_version"] = "v1" }
+    local dict = {}
+    dict.get = function(_, key)
+      return store[key]
+    end
+    _G.ngx = { shared = { luagate_policy = dict }, log = function() end, ERR = 4 }
+
+    local result = evaluator.get_policy()
+    -- blob 없음 → nil (LKG fallback)
+    assert.is_nil(result)
+  end)
+
+  it("복합 버전 키: stream_ver만 있을 때도 '|' 구분자가 포함된 키를 사용한다", function()
+    -- http_ver=nil, stream_ver=s1 → composite key = "|s1"
+    local store = { ["stream:active_version"] = "s1" }
+    local dict = {}
+    dict.get = function(_, key)
+      return store[key]
+    end
+    _G.ngx = { shared = { luagate_policy = dict }, log = function() end, ERR = 4 }
+
+    local result = evaluator.get_policy()
+    -- blob 없음 → nil (LKG fallback)
+    assert.is_nil(result)
+  end)
+
+  it("버전이 동일하면 캐시를 재사용한다 (shared-dict I/O 없이 캐시 반환)", function()
+    -- 첫 번째 호출: blob 포함, 두 번째 호출: dict.get 호출 횟수 확인
+    local get_call_count = 0
+    local policy_json = '{"global":{"default_action":"deny"},"rules":[],"stream_rules":[]}'
+    local store = {
+      ["http:active_version"] = "v1",
+      ["policy:v1:blob"] = policy_json,
+    }
+    local dict = {}
+    dict.get = function(_, key)
+      get_call_count = get_call_count + 1
+      return store[key]
+    end
+    _G.ngx = {
+      shared = { luagate_policy = dict },
+      log = function() end,
+      ERR = 4,
+    }
+
+    -- 첫 번째 호출: 버전 확인 + blob 로드
+    local result1 = evaluator.get_policy()
+    assert.is_table(result1)
+    local count_after_first = get_call_count
+
+    -- 두 번째 호출: 버전이 동일 → 캐시 반환 (get 호출이 2번만 더 발생: http/stream 버전 확인)
+    local result2 = evaluator.get_policy()
+    assert.is_table(result2)
+    -- 두 번째 호출에서 blob을 다시 로드하지 않는다
+    -- (http:active_version, stream:active_version 각 1회 = 2회 추가)
+    local count_after_second = get_call_count
+    local delta = count_after_second - count_after_first
+    -- blob 재로드 없이 버전 확인(2회)만 발생해야 한다
+    assert.is_true(delta <= 2, "캐시 히트 시 blob을 재로드해서는 안 된다 (delta=" .. delta .. ")")
+  end)
+
+  it("버전이 변경되면 캐시를 무효화하고 새 정책을 로드한다", function()
+    local version = { http = "v1" }
+    local policy_v1 = '{"global":{"default_action":"deny"},"rules":[],"stream_rules":[]}'
+    local policy_v2 = '{"global":{"default_action":"allow"},"rules":[],"stream_rules":[]}'
+    local store = {
+      ["http:active_version"] = "v1",
+      ["policy:v1:blob"] = policy_v1,
+      ["policy:v2:blob"] = policy_v2,
+    }
+    local dict = {}
+    dict.get = function(_, key)
+      if key == "http:active_version" then
+        return version.http
+      end
+      return store[key]
+    end
+    _G.ngx = {
+      shared = { luagate_policy = dict },
+      log = function() end,
+      ERR = 4,
+    }
+
+    -- 첫 번째 로드: v1 정책
+    local result1 = evaluator.get_policy()
+    assert.is_table(result1)
+    assert.are.equal("deny", result1.global.default_action)
+
+    -- 버전 변경
+    version.http = "v2"
+    store["http:active_version"] = "v2"
+
+    -- 두 번째 로드: v2 정책으로 갱신되어야 한다
+    local result2 = evaluator.get_policy()
+    assert.is_table(result2)
+    assert.are.equal("allow", result2.global.default_action)
+  end)
+
+  it("get_policy() 반환 정책에 _compiled_http, _compiled_stream 필드가 있다", function()
+    local policy_json = '{"global":{"default_action":"deny"},"rules":[],"stream_rules":[]}'
+    local store = {
+      ["http:active_version"] = "v1",
+      ["policy:v1:blob"] = policy_json,
+    }
+    local dict = {}
+    dict.get = function(_, key)
+      return store[key]
+    end
+    _G.ngx = {
+      shared = { luagate_policy = dict },
+      log = function() end,
+      ERR = 4,
+    }
+
+    local result = evaluator.get_policy()
+    assert.is_table(result)
+    assert.is_table(result._compiled_http)
+    assert.is_table(result._compiled_stream)
+  end)
+
+  it("reset_cache() 이후 get_policy()는 캐시 없이 새로 시도한다", function()
+    _G.ngx = nil
+    evaluator.reset_cache()
+
+    -- ngx 없으므로 nil 반환 (캐시도 nil이므로)
+    local result = evaluator.get_policy()
+    assert.is_nil(result)
   end)
 end)

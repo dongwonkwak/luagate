@@ -355,6 +355,173 @@ describe("conflict.detect — Stream 규칙 충돌 및 shadow", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- detect() — overlap conflict 감지 (코드리뷰 피드백 반영)
+-- ---------------------------------------------------------------------------
+
+describe("conflict.detect — overlap conflict 감지", function()
+  it("/api/* allow vs /api/admin/* deny (동순위, 포함 관계) → overlap conflict 감지", function()
+    -- /api/* 가 /api/admin/* 을 포함하므로 scope_contains(a, b) = true
+    -- 동순위 + 반대 action → overlap conflict
+    local rules = {
+      rule({ id = "api-allow", priority = 10, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "api-admin-deny", priority = 10, action = "deny", scope = { path = "/api/admin/*" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    assert.are.equal(1, #conflicts)
+    assert.are.equal("api-allow", conflicts[1].rule_a)
+    assert.are.equal("api-admin-deny", conflicts[1].rule_b)
+  end)
+
+  it("overlap conflict 엔트리의 overlap_type은 'overlap'이다", function()
+    local rules = {
+      rule({ id = "broad-allow", priority = 10, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "narrow-deny", priority = 10, action = "deny", scope = { path = "/api/v1/*" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    assert.are.equal(1, #conflicts)
+    assert.are.equal("overlap", conflicts[1].overlap_type)
+  end)
+
+  it("exact conflict 엔트리의 overlap_type은 'exact'이다", function()
+    local rules = {
+      rule({ id = "r-allow", priority = 10, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "r-deny", priority = 10, action = "deny", scope = { path = "/api/*" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    assert.are.equal(1, #conflicts)
+    assert.are.equal("exact", conflicts[1].overlap_type)
+  end)
+
+  it("동순위 + 동일 action인 포함 관계는 conflict가 아니다 (action 동일)", function()
+    -- scope_contains가 성립해도 action이 같으면 충돌 아님
+    local rules = {
+      rule({ id = "api-allow", priority = 10, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "api-admin-allow", priority = 10, action = "allow", scope = { path = "/api/admin/*" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    assert.are.equal(0, #conflicts)
+  end)
+
+  it("다른 priority의 포함 관계는 conflict가 아닌 shadow 후보다", function()
+    -- priority가 다르면 conflict 조건(동순위) 불충족 → shadow로만 처리
+    local rules = {
+      rule({ id = "broad", priority = 1, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "narrow", priority = 10, action = "deny", scope = { path = "/api/v1/*" } }),
+    }
+    local conflicts, shadowed = conflict.detect(rules)
+    -- conflict는 없어야 한다
+    assert.are.equal(0, #conflicts)
+    -- shadow는 발생해야 한다
+    assert.is_true(contains(shadowed, "narrow"))
+  end)
+
+  it("역방향 포함 관계도 overlap conflict로 감지된다 (b contains a)", function()
+    -- b의 scope이 a의 scope을 포함해도 overlap conflict
+    local rules = {
+      rule({ id = "narrow-allow", priority = 10, action = "allow", scope = { path = "/api/v1/*" } }),
+      rule({ id = "broad-deny", priority = 10, action = "deny", scope = { path = "/api/*" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    assert.are.equal(1, #conflicts)
+    assert.are.equal("overlap", conflicts[1].overlap_type)
+  end)
+
+  it("catch-all scope(nil) + 동순위 + 반대 action인 비nil scope → overlap conflict 감지", function()
+    -- scope_contains(nil, non-nil) = true → overlap conflict
+    local rules = {
+      rule({ id = "catch-all-allow", priority = 5, action = "allow", scope = nil }),
+      rule({ id = "path-deny", priority = 5, action = "deny", scope = { path = "/secret" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    -- nil scope은 scopes_equal(nil, non-nil)=false, scope_contains(nil, non-nil)=true → overlap
+    assert.are.equal(1, #conflicts)
+    assert.are.equal("overlap", conflicts[1].overlap_type)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- detect_and_fail() — fail-closed 변형 (코드리뷰 피드백 반영)
+-- ---------------------------------------------------------------------------
+
+describe("conflict.detect_and_fail — fail-closed 변형", function()
+  it("conflict 없으면 정상 반환하며 error를 발생시키지 않는다", function()
+    local rules = {
+      rule({ id = "r1", priority = 10, action = "allow", scope = { path = "/health" } }),
+      rule({ id = "r2", priority = 20, action = "deny", scope = { path = "/metrics" } }),
+    }
+    assert.has_no.errors(function()
+      local conflicts, shadowed = conflict.detect_and_fail(rules)
+      assert.is_table(conflicts)
+      assert.is_table(shadowed)
+      assert.are.equal(0, #conflicts)
+    end)
+  end)
+
+  it("shadow만 있고 conflict가 없으면 error를 발생시키지 않는다", function()
+    local rules = {
+      rule({ id = "broad", priority = 1, action = "allow", scope = nil }),
+      rule({ id = "narrow", priority = 10, action = "allow", scope = { path = "/health" } }),
+    }
+    assert.has_no.errors(function()
+      local _, shadowed = conflict.detect_and_fail(rules)
+      -- shadow는 반환되지만 error는 없다
+      assert.is_true(contains(shadowed, "narrow"))
+    end)
+  end)
+
+  it("exact conflict 존재 시 error()를 발생시킨다", function()
+    local rules = {
+      rule({ id = "exact-allow", priority = 10, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "exact-deny", priority = 10, action = "deny", scope = { path = "/api/*" } }),
+    }
+    assert.has_error(function()
+      conflict.detect_and_fail(rules)
+    end)
+  end)
+
+  it("exact conflict 에러 메시지에 충돌 규칙 id가 포함된다", function()
+    local rules = {
+      rule({ id = "a-allow", priority = 10, action = "allow", scope = { path = "/test" } }),
+      rule({ id = "b-deny", priority = 10, action = "deny", scope = { path = "/test" } }),
+    }
+    local ok, err = pcall(conflict.detect_and_fail, rules)
+    assert.is_false(ok)
+    assert.is_string(err)
+    -- 에러 메시지에 rule id 포함 확인
+    assert.is_truthy(err:find("a-allow") or err:find("b-deny"))
+  end)
+
+  it("overlap conflict 존재 시 error()를 발생시킨다", function()
+    local rules = {
+      rule({ id = "api-allow", priority = 10, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "api-admin-deny", priority = 10, action = "deny", scope = { path = "/api/admin/*" } }),
+    }
+    assert.has_error(function()
+      conflict.detect_and_fail(rules)
+    end)
+  end)
+
+  it("overlap conflict 에러 메시지에 'overlap' 타입이 명시된다", function()
+    local rules = {
+      rule({ id = "broad-allow", priority = 10, action = "allow", scope = { path = "/api/*" } }),
+      rule({ id = "narrow-deny", priority = 10, action = "deny", scope = { path = "/api/v1/*" } }),
+    }
+    local ok, err = pcall(conflict.detect_and_fail, rules)
+    assert.is_false(ok)
+    assert.is_string(err)
+    assert.is_truthy(err:find("overlap"))
+  end)
+
+  it("빈 목록이면 정상 반환한다", function()
+    assert.has_no.errors(function()
+      local conflicts, shadowed = conflict.detect_and_fail({})
+      assert.are.equal(0, #conflicts)
+      assert.are.equal(0, #shadowed)
+    end)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- detect() — 반환 타입 보장
 -- ---------------------------------------------------------------------------
 
