@@ -159,3 +159,5 @@ COMPLETED_REVIEW: DON-135-code (2026-03-16)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-17 | DON-104 | Claude Code skill: knowledge-based codex review context on PR creation | `.claude/skills/pr-review-context/SKILL.md`, `CLAUDE.md` (PR 워크플로우 + skills 테이블) | 16개 파일 패턴 매핑, 출력 예시 포함 |
+
+COMPLETED_REVIEW: DON-138-code (2026-03-17)
