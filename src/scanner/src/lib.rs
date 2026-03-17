@@ -5,6 +5,7 @@ use std::time::Instant;
 
 // Return codes (ABI contract — docs/spec/c-ffi-modules.md §4)
 const LUAGATE_OK: i32 = 0;
+const LUAGATE_BUFFER_TOO_SMALL: i32 = -2;
 const LUAGATE_BUDGET_EXCEEDED: i32 = -3;
 const LUAGATE_INTERNAL_ERROR: i32 = -4;
 
@@ -114,7 +115,11 @@ pub extern "C" fn luagate_scanner_init(
         // hardcoded patterns.  A full YAML parser would read the files under
         // `path_str` and merge them.  We keep the interface correct so the
         // caller does not need to change when YAML loading is added.
-        let _ = path_str; // suppress unused warning
+        eprintln!(
+            "[luagate_scanner] WARNING: patterns_path '{}' specified but YAML loader is not yet \
+             implemented. Using built-in hardcoded patterns only.",
+            path_str
+        );
         build_default_scanner()
     } else {
         build_default_scanner()
@@ -248,28 +253,37 @@ pub extern "C" fn luagate_scan_http(
                 continue;
             }
             if pattern.pattern.is_match(field) {
-                // Write threat_type into caller buffer.
                 let tt = pattern.threat_type.as_bytes();
-                let tt_len = tt.len().min(threat_type_cap);
+                let rn = pattern.rule_name.as_bytes();
+
+                // Threat detected — reject undersized caller buffers instead of
+                // silently truncating (fail-closed: caller must not treat a
+                // partial threat_type as "no threat").
+                if threat_type_cap < tt.len() {
+                    return LUAGATE_BUFFER_TOO_SMALL;
+                }
+                if rule_name_cap < rn.len() {
+                    return LUAGATE_BUFFER_TOO_SMALL;
+                }
+
+                // Write threat_type into caller buffer.
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         tt.as_ptr() as *const i8,
                         threat_type_out,
-                        tt_len,
+                        tt.len(),
                     );
-                    *threat_type_len = tt_len;
+                    *threat_type_len = tt.len();
                 }
 
                 // Write rule_name into caller buffer.
-                let rn = pattern.rule_name.as_bytes();
-                let rn_len = rn.len().min(rule_name_cap);
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         rn.as_ptr() as *const i8,
                         rule_name_out,
-                        rn_len,
+                        rn.len(),
                     );
-                    *rule_name_len = rn_len;
+                    *rule_name_len = rn.len();
                 }
 
                 unsafe {
@@ -515,5 +529,98 @@ mod tests {
             make_scan_call("/search", "ua=sqlmap/1.0");
         assert_eq!(rc, 0);
         assert_eq!(threat, "scanner");
+    }
+
+    #[test]
+    fn test_threat_type_buffer_too_small_returns_buffer_too_small() {
+        // Ensure scanner is initialised.
+        {
+            let mut guard = SCANNER.lock().unwrap();
+            if guard.is_none() {
+                *guard = Some(build_default_scanner());
+            }
+        }
+
+        // XSS input — threat_type = "xss" (3 bytes); supply a 1-byte buffer.
+        let path = "/page";
+        let query = "q=<script>alert(1)</script>";
+        let mut threat_buf = vec![0i8; 1]; // too small for "xss" (3 bytes)
+        let mut rule_buf = vec![0i8; 128];
+        let mut threat_len: usize = 0;
+        let mut rule_len: usize = 0;
+        let mut score: f64 = 0.0;
+
+        let rc = luagate_scan_http(
+            path.as_ptr() as *const i8,
+            path.len(),
+            path.as_ptr() as *const i8,
+            path.len(),
+            query.as_ptr() as *const i8,
+            query.len(),
+            query.as_ptr() as *const i8,
+            query.len(),
+            std::ptr::null(),
+            0,
+            threat_buf.as_mut_ptr(),
+            1,
+            &mut threat_len,
+            rule_buf.as_mut_ptr(),
+            128,
+            &mut rule_len,
+            &mut score,
+        );
+        assert_eq!(rc, LUAGATE_BUFFER_TOO_SMALL);
+    }
+
+    #[test]
+    fn test_rule_name_buffer_too_small_returns_buffer_too_small() {
+        // Ensure scanner is initialised.
+        {
+            let mut guard = SCANNER.lock().unwrap();
+            if guard.is_none() {
+                *guard = Some(build_default_scanner());
+            }
+        }
+
+        // XSS input — rule_name = "xss_script_tag" (14 bytes); supply 1-byte buffer.
+        let path = "/page";
+        let query = "q=<script>alert(1)</script>";
+        let mut threat_buf = vec![0i8; 64];
+        let mut rule_buf = vec![0i8; 1]; // too small for "xss_script_tag" (14 bytes)
+        let mut threat_len: usize = 0;
+        let mut rule_len: usize = 0;
+        let mut score: f64 = 0.0;
+
+        let rc = luagate_scan_http(
+            path.as_ptr() as *const i8,
+            path.len(),
+            path.as_ptr() as *const i8,
+            path.len(),
+            query.as_ptr() as *const i8,
+            query.len(),
+            query.as_ptr() as *const i8,
+            query.len(),
+            std::ptr::null(),
+            0,
+            threat_buf.as_mut_ptr(),
+            64,
+            &mut threat_len,
+            rule_buf.as_mut_ptr(),
+            1,
+            &mut rule_len,
+            &mut score,
+        );
+        assert_eq!(rc, LUAGATE_BUFFER_TOO_SMALL);
+    }
+
+    #[test]
+    fn test_init_with_patterns_path_warns_and_succeeds() {
+        // Calling init with a non-empty path should succeed (falls back to
+        // hardcoded patterns) and emit a warning to stderr.
+        // We cannot easily capture stderr here, so we just assert the return
+        // code is LUAGATE_OK to verify no regression.
+        let path = "/tmp/fake_patterns";
+        let rc = luagate_scanner_init(path.as_ptr() as *const i8, path.len());
+        assert_eq!(rc, LUAGATE_OK);
     }
 }

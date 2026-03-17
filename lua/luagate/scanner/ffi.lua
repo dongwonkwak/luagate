@@ -99,9 +99,10 @@ function M.scan(ctx)
     return nil, "scanner_ffi_error:" .. tostring(rc)
   end
 
+  -- rc == -2: LUAGATE_BUFFER_TOO_SMALL  (threat detected but output buffer too small)
   -- rc == -3: LUAGATE_BUDGET_EXCEEDED
   -- rc == -4: LUAGATE_INTERNAL_ERROR
-  if rc == -3 or rc == -4 then
+  if rc == -2 or rc == -3 or rc == -4 then
     return nil, "scanner_fail:" .. rc
   end
 
