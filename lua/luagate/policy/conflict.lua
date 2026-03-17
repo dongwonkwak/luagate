@@ -93,6 +93,9 @@ local function parse_cidr(cidr)
   end
   local net = a * 16777216 + b * 65536 + c * 256 + d
   local prefix = tonumber(prefix_str)
+  if not prefix or prefix < 0 or prefix > 32 then
+    return nil
+  end
   return { net = net, prefix = prefix }
 end
 

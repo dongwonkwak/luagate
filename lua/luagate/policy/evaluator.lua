@@ -114,6 +114,9 @@ local function match_src_ip_cidr(cidr, req_ip)
     return false
   end
   local prefix = tonumber(prefix_str)
+  if not prefix or prefix < 0 or prefix > 32 then
+    return false
+  end
   local net_int = ip_to_uint32(net_str)
   local req_int = ip_to_uint32(req_ip)
   if not net_int or not req_int then
