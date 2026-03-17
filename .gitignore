@@ -1,6 +1,10 @@
 # Build artifacts
 csrc/build/
 *.so
+
+# Rust
+src/*/target/
+src/*/Cargo.lock
 *.o
 *.a
 *.out
