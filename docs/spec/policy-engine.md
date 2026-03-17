@@ -202,11 +202,11 @@ load_policy(filepath):
     [7] commit:
         - HTTP 서브시스템 교체
         - Stream 서브시스템 교체
-        - PUT /api/v1/policies: all-or-nothing. 한쪽 서브시스템 실패 시 전체 실패 반환 (ADR-005 §1)
+        - PUT /api/v1/policies: 성공 응답(200)일 때만 all-or-nothing 보장. 한쪽 서브시스템 또는 canonical file write 실패 시 전체 실패 반환 + 이전 버전으로 best-effort rollback 시도 (ADR-005 §1)
         - POST /api/v1/policies/reload: partial success 허용. 한 쪽 실패 시 해당 서브시스템만 LKG 유지 (ADR-003)
 ```
 
-> **Partial success 범위**: `POST /api/v1/policies/reload`의 [7] commit 단계에 한정. `PUT /api/v1/policies`는 [7]을 포함한 전 단계에서 all-or-nothing (ADR-005 §1).
+> **Partial success 범위**: `POST /api/v1/policies/reload`의 [7] commit 단계에 한정한다. `PUT /api/v1/policies`는 실패를 성공으로 승격하지 않으며, commit 단계에서도 부분 성공을 `500`으로 반환한다. 단, rollback 자체가 실패하면 active version 불일치가 잔존할 수 있다 (ADR-005 §1).
 > [3] validate / [6] compile은 **전체 또는 전무(all-or-nothing)** — 하나라도 실패 시 전체 거부.
 > **Reload 실패 시 (commit 이전)**: active pointer가 변경되지 않았으므로 **롤백 불필요**. 기존 active version의 blob/meta가 shared dict에 그대로 유지된다. 실패한 신규 버전의 blob/meta는 폐기 대상이지만, 정리 타이밍은 구현 재량이다.
 > **Reload 실패 시 (commit 단계 partial)**: 실패한 서브시스템의 active pointer는 변경되지 않으며, 해당 서브시스템은 이전 성공 버전(LKG)을 계속 사용한다.
