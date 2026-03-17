@@ -807,6 +807,47 @@ describe("evaluator.get_policy — 복합 버전 키 동작", function()
     assert.are.equal("stream-new", result2._compiled_stream[1].id)
   end)
 
+  it("stream active_version이 없으면 HTTP blob의 stream_rules 대신 stream LKG를 유지한다", function()
+    local policy_v1 = '{"global":{"default_action":"deny"},'
+      .. '"rules":[{"id":"http-v1","priority":10,"action":"allow","enabled":true}],'
+      .. '"stream_rules":[{"id":"stream-lkg","priority":10,"action":"deny","enabled":true}]}'
+    local policy_v2 = '{"global":{"default_action":"allow"},'
+      .. '"rules":[{"id":"http-v2","priority":5,"action":"deny","enabled":true}],'
+      .. '"stream_rules":[{"id":"stream-from-http-blob","priority":5,"action":"proxy","enabled":true,'
+      .. '"upstream":"backend:9443"}]}'
+    local store = {
+      ["http:active_version"] = "v1",
+      ["stream:active_version"] = "s1",
+      ["policy:v1:blob"] = policy_v1,
+      ["policy:s1:blob"] = policy_v1,
+      ["policy:v2:blob"] = policy_v2,
+    }
+    local dict = {}
+    dict.get = function(_, key)
+      return store[key]
+    end
+    _G.ngx = {
+      shared = { luagate_policy = dict },
+      log = function() end,
+      ERR = 4,
+    }
+
+    local result1 = evaluator.get_policy()
+    assert.are.equal("http-v1", result1.rules[1].id)
+    assert.are.equal("stream-lkg", result1.stream_rules[1].id)
+
+    store["http:active_version"] = "v2"
+    store["stream:active_version"] = nil
+
+    local result2 = evaluator.get_policy()
+    assert.is_table(result2)
+    assert.are.equal("allow", result2.global.default_action)
+    assert.are.equal("http-v2", result2.rules[1].id)
+    assert.are.equal("stream-lkg", result2.stream_rules[1].id)
+    assert.are.equal("http-v2", result2._compiled_http[1].id)
+    assert.are.equal("stream-lkg", result2._compiled_stream[1].id)
+  end)
+
   it("get_policy() 반환 정책에 _compiled_http, _compiled_stream 필드가 있다", function()
     local policy_json = '{"global":{"default_action":"deny"},"rules":[],"stream_rules":[]}'
     local store = {

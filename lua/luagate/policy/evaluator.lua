@@ -477,20 +477,28 @@ function _M.get_policy()
       ngx.log(ngx.ERR, "[luagate] ", policy)
       return _cached_policy -- last-known-good
     end
-  else
+  elseif stream_ver then
     stream_policy = http_policy
   end
 
   policy = http_policy or stream_policy
 
-  if http_policy and stream_policy and http_ver ~= stream_ver then
+  if http_policy and http_ver ~= stream_ver then
     -- Partial commit states can expose different active versions per subsystem.
     -- Compose the effective policy from each subsystem's active blob.
+    -- If the stream pointer is absent, preserve stream LKG or fail-closed with
+    -- an empty compiled stream ruleset instead of reusing the HTTP blob.
     local merged_policy = {}
     for k, v in pairs(http_policy) do
       merged_policy[k] = v
     end
-    merged_policy.stream_rules = stream_policy.stream_rules
+    if stream_policy then
+      merged_policy.stream_rules = stream_policy.stream_rules
+    elseif _cached_policy and _cached_policy.stream_rules then
+      merged_policy.stream_rules = _cached_policy.stream_rules
+    else
+      merged_policy.stream_rules = {}
+    end
     policy = merged_policy
   end
 
