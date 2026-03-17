@@ -21,7 +21,7 @@ DON-103(GitHub Actions 범용 체크리스트)과의 차이:
 ### 1. 변경 파일 수집
 
 ```bash
-git diff main...HEAD --name-only
+./scripts/review-changed-files.sh
 ```
 
 ### 2. 파일 경로 → 지식 매핑

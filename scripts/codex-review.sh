@@ -127,6 +127,6 @@ fi
 
 # --- PROGRESS.md 마커 정리: PENDING_REVIEW → COMPLETED_REVIEW ---
 if grep -q "^PENDING_REVIEW: ${PENDING}$" PROGRESS.md 2>/dev/null; then
-  sed -i "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" PROGRESS.md
+  sed "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" PROGRESS.md > PROGRESS.md.tmp && mv PROGRESS.md.tmp PROGRESS.md
   echo "PROGRESS.md 마커 갱신: PENDING_REVIEW → COMPLETED_REVIEW"
 fi
