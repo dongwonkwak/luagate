@@ -181,3 +181,5 @@ COMPLETED_REVIEW: DON-140-code (2026-03-17)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-17 | DON-139 | luagate_decoder.so Rust FFI + Lua 바인딩 | `src/decoder/Cargo.toml`, `src/decoder/src/lib.rs`, `lua/luagate/decoder/ffi.lua`, `tests/unit/decoder/ffi_spec.lua`, `Makefile` (build-ffi 타겟), `lib/.gitkeep` | 15 Rust + 18 Lua 단위 테스트. caller-allocated buffer, pcall 래핑, 1회 재시도 패턴. |
+
+COMPLETED_REVIEW: DON-139-code (2026-03-17)
