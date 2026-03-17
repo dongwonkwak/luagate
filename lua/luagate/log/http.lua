@@ -38,7 +38,19 @@ local SENSITIVE_QUERY_PARAMS = {
   secret = true,
 }
 
+--- Percent-decode a URL-encoded string (for key comparison only).
+-- Converts %XX sequences to the corresponding character (lower-case output).
+-- @param s string  URL-encoded string
+-- @return  string  Decoded string
+local function pct_decode(s)
+  return (s:gsub("%%(%x%x)", function(h)
+    return string.char(tonumber(h, 16))
+  end))
+end
+
 --- Redact sensitive values from a raw query string.
+-- Handles percent-encoded keys (%74oken → token) and array-style keys
+-- (token[] → base key "token") so they are not missed (M-3).
 -- Keeps parameter keys; replaces sensitive values with "***".
 -- Input/output: raw query string (e.g. "page=1&token=abc").
 -- @param qs string  Raw query string (may be empty)
@@ -50,7 +62,10 @@ local function redact_query_string(qs)
   -- Replace key=value pairs where key is sensitive
   return (
     qs:gsub("([^&=?]+)=([^&]*)", function(key, _value)
-      if SENSITIVE_QUERY_PARAMS[key:lower()] then
+      -- M-3: percent-decode + strip array suffix (e.g. "token[]" → "token")
+      local decoded = pct_decode(key):lower()
+      local base_key = decoded:match("^(%w+)%[") or decoded
+      if SENSITIVE_QUERY_PARAMS[base_key] then
         return key .. "=***"
       end
       -- Return nil to keep original match unchanged

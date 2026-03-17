@@ -239,74 +239,76 @@ end)
 -- ===========================================================================
 
 describe("metrics.collector.record — latency histogram bucket", function()
-  it("request_time='0.0001' (0.1ms) → bucket '0.1'", function()
+  it("request_time='0.0001' (0.1ms) → bucket key 'metrics:http:latency:bucket:0.1' (L-2)", function()
     local ngx_mock = make_ngx({ var = { status = "200", request_time = "0.0001" } })
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "allow" })
 
-    assert.are.equal(1, ngx_mock._get_counter("latency:bucket:0.1"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:latency:bucket:0.1"))
+    -- 이전 prefix는 사용하지 않음 (L-2 수정 확인)
+    assert.is_nil(ngx_mock._get_counter("latency:bucket:0.1"))
   end)
 
-  it("request_time='0.010' (10ms) → bucket '10'", function()
+  it("request_time='0.010' (10ms) → bucket 'metrics:http:latency:bucket:10'", function()
     local ngx_mock = make_ngx({ var = { status = "200", request_time = "0.010" } })
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "allow" })
 
-    assert.are.equal(1, ngx_mock._get_counter("latency:bucket:10"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:latency:bucket:10"))
   end)
 
-  it("request_time='2.000' (2000ms) → bucket 'inf' (모든 bucket 초과)", function()
+  it("request_time='2.000' (2000ms) → bucket 'metrics:http:latency:bucket:inf' (모든 bucket 초과)", function()
     local ngx_mock = make_ngx({ var = { status = "200", request_time = "2.000" } })
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "allow" })
 
-    assert.are.equal(1, ngx_mock._get_counter("latency:bucket:inf"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:latency:bucket:inf"))
   end)
 
-  it("request_time='0.001' (1ms) → bucket '1'", function()
+  it("request_time='0.001' (1ms) → bucket 'metrics:http:latency:bucket:1'", function()
     local ngx_mock = make_ngx({ var = { status = "200", request_time = "0.001" } })
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "allow" })
 
-    assert.are.equal(1, ngx_mock._get_counter("latency:bucket:1"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:latency:bucket:1"))
   end)
 
-  it("request_time='0.050' (50ms) → bucket '50'", function()
+  it("request_time='0.050' (50ms) → bucket 'metrics:http:latency:bucket:50'", function()
     local ngx_mock = make_ngx({ var = { status = "200", request_time = "0.050" } })
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "allow" })
 
-    assert.are.equal(1, ngx_mock._get_counter("latency:bucket:50"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:latency:bucket:50"))
   end)
 
-  it("request_time='0.100' (100ms) → bucket '100'", function()
+  it("request_time='0.100' (100ms) → bucket 'metrics:http:latency:bucket:100'", function()
     local ngx_mock = make_ngx({ var = { status = "200", request_time = "0.100" } })
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "allow" })
 
-    assert.are.equal(1, ngx_mock._get_counter("latency:bucket:100"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:latency:bucket:100"))
   end)
 
-  it("request_time='1.000' (1000ms) → bucket '1000'", function()
+  it("request_time='1.000' (1000ms) → bucket 'metrics:http:latency:bucket:1000'", function()
     local ngx_mock = make_ngx({ var = { status = "200", request_time = "1.000" } })
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "allow" })
 
-    assert.are.equal(1, ngx_mock._get_counter("latency:bucket:1000"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http:latency:bucket:1000"))
   end)
 end)
 

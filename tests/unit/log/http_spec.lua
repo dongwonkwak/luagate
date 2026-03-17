@@ -352,6 +352,33 @@ describe("log/http.finalize — 쿼리 파라미터 redaction", function()
     assert.are.equal("page=3&limit=20&sort=asc", record.query_string)
   end)
 
+  it("percent-encoded key(%74oken=secret) → %74oken=***으로 redact된다 (M-3)", function()
+    local ngx_mock = make_ngx()
+    -- %74 = 't', so %74oken decodes to "token"
+    ngx_mock.ctx.luagate.query_raw = "%74oken=secret&page=1"
+    _G.ngx = ngx_mock
+    local log_http = load_log_http()
+
+    log_http.finalize()
+
+    local json_str = ngx_mock.var.luagate_log_json
+    local record = dkjson.decode(json_str)
+    assert.are.equal("%74oken=***&page=1", record.query_string)
+  end)
+
+  it("배열 파라미터(token[]=secret) → token[]=***으로 redact된다 (M-3)", function()
+    local ngx_mock = make_ngx()
+    ngx_mock.ctx.luagate.query_raw = "token[]=secret&page=1"
+    _G.ngx = ngx_mock
+    local log_http = load_log_http()
+
+    log_http.finalize()
+
+    local json_str = ngx_mock.var.luagate_log_json
+    local record = dkjson.decode(json_str)
+    assert.are.equal("token[]=***&page=1", record.query_string)
+  end)
+
   it("빈 query string은 그대로 빈 문자열로 유지된다", function()
     local ngx_mock = make_ngx()
     ngx_mock.ctx.luagate.query_raw = ""

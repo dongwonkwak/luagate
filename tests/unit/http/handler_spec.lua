@@ -675,6 +675,147 @@ describe("handler.access — X-LuaGate-Block-Reason IP 노출 제어", function(
   end)
 end)
 
+describe("handler.access — H-1: JSON body reason 외부 노출 방지", function()
+  local ngx_mock
+  local said_body
+
+  before_each(function()
+    reset_stubs()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+    _evaluator_stub.evaluate_result = { action = "deny", matched_rule = "rule-secret-id", decision_source = "rule" }
+    said_body = nil
+  end)
+
+  it("외부 IP(8.8.8.8) deny 시 JSON body.reason은 generic 'policy_deny'", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "8.8.8.8" } })
+    ngx_mock.say = function(s)
+      said_body = s
+    end
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    local dkjson = require("dkjson")
+    local parsed = dkjson.decode(said_body)
+    assert.is_table(parsed)
+    assert.are.equal("policy_deny", parsed.reason)
+  end)
+
+  it("내부 IP(10.x) deny 시 JSON body.reason은 실제 rule id", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "10.1.2.3" } })
+    ngx_mock.say = function(s)
+      said_body = s
+    end
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    local dkjson = require("dkjson")
+    local parsed = dkjson.decode(said_body)
+    assert.is_table(parsed)
+    assert.are.equal("rule-secret-id", parsed.reason)
+  end)
+end)
+
+describe("handler.access — M-1: get_policy() 예외 fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    handler.rewrite()
+  end)
+
+  it("get_policy()에서 예외 발생 시 403 deny (fail-closed)", function()
+    -- evaluator stub을 직접 교체하여 get_policy()가 예외를 발생시키도록 함
+    package.loaded["luagate.policy.evaluator"] = {
+      get_policy = function()
+        error("simulated get_policy exception")
+      end,
+      evaluate = function()
+        return { action = "allow", matched_rule = nil, decision_source = "default" }
+      end,
+    }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+    -- 모듈 캐시 복원
+    package.loaded["luagate.policy.evaluator"] = nil
+  end)
+
+  it("get_policy() 예외 시 deny_reason = 'policy_load_error'", function()
+    package.loaded["luagate.policy.evaluator"] = {
+      get_policy = function()
+        error("simulated get_policy exception")
+      end,
+      evaluate = function()
+        return { action = "allow", matched_rule = nil, decision_source = "default" }
+      end,
+    }
+    handler.access()
+    assert.are.equal("policy_load_error", ngx_mock.ctx.luagate.deny_reason)
+    -- 모듈 캐시 복원
+    package.loaded["luagate.policy.evaluator"] = nil
+  end)
+
+  it("get_policy() 예외 시 luagate_action = 'deny' 설정", function()
+    package.loaded["luagate.policy.evaluator"] = {
+      get_policy = function()
+        error("simulated get_policy exception")
+      end,
+      evaluate = function()
+        return { action = "allow", matched_rule = nil, decision_source = "default" }
+      end,
+    }
+    handler.access()
+    assert.are.equal("deny", ngx_mock.var.luagate_action)
+    package.loaded["luagate.policy.evaluator"] = nil
+  end)
+end)
+
+describe("handler.access — L-1: is_internal_ip IPv6 지원", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+    _evaluator_stub.evaluate_result = { action = "deny", matched_rule = "rule-v6", decision_source = "rule" }
+  end)
+
+  it("IPv6 loopback(::1)은 내부 IP로 판정 → X-LuaGate-Block-Reason 헤더 전송", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "::1" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.are.equal("rule-v6", ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("IPv4-mapped IPv6(::ffff:10.0.0.1)은 내부 IP로 판정 → 헤더 전송", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "::ffff:10.0.0.1" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.are.equal("rule-v6", ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+
+  it("순수 IPv6 외부 주소(2001:db8::1)는 외부 IP로 판정 → 헤더 미전송", function()
+    ngx_mock = make_ngx({ var = { remote_addr = "2001:db8::1" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    handler.access()
+    assert.is_nil(ngx_mock.header["X-LuaGate-Block-Reason"])
+  end)
+end)
+
 describe("handler.access — JSON 인젝션 방지", function()
   local ngx_mock
   local said_body

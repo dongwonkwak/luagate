@@ -27,13 +27,27 @@ local _M = {}
 
 --- Return true if the IP is a private/loopback address (RFC 1918 + loopback).
 -- Used to gate X-LuaGate-Block-Reason header: internal clients only.
+-- Handles IPv6 loopback (::1) and IPv4-mapped IPv6 (::ffff:<ipv4>).
 --
--- @param ip  string  e.g. "10.1.2.3"
+-- @param ip  string  e.g. "10.1.2.3", "::1", "::ffff:192.168.1.1"
 -- @return boolean
 local function is_internal_ip(ip)
   if not ip then
     return false
   end
+  -- IPv6 loopback (L-1)
+  if ip == "::1" then
+    return true
+  end
+  -- IPv4-mapped IPv6: ::ffff:<ipv4> — extract the IPv4 part and fall through
+  local v4 = ip:match("^::ffff:(%d+%.%d+%.%d+%.%d+)$")
+  if v4 then
+    ip = v4
+  elseif ip:find(":", 1, true) then
+    -- Pure IPv6 (not ::1, not ::ffff:...) → treat as external
+    return false
+  end
+  -- IPv4 checks (RFC 1918 + loopback)
   -- 127.x.x.x (loopback)
   if ip:match("^127%.") then
     return true
@@ -61,17 +75,24 @@ end
 -- Sets ngx.status, Content-Type, X-Request-ID, X-LuaGate-Block-Reason
 -- (internal IPs only), Cache-Control headers, writes body, and calls ngx.exit(403).
 --
+-- H-1 (OWASP A05): rule id (deny_reason) is only exposed to internal clients.
+-- External clients receive the generic "policy_deny" token in the JSON body.
+--
 -- @param deny_reason  string   Short reason token (policy rule id or "no_policy")
 -- @param request_id   string   Request UUID from ngx.ctx or nginx var
 local function do_deny(deny_reason, request_id)
   local reason = deny_reason or "policy_deny"
   local rid = request_id or ""
+  local client_ip = ngx.var.remote_addr or ""
+
+  -- H-1: external clients receive a generic reason token only (OWASP A05)
+  local external_reason = is_internal_ip(client_ip) and reason or "policy_deny"
 
   -- JSON 인젝션 방지: cjson.encode로 안전하게 직렬화 (http-pipeline.md §6)
   local ok, body = pcall(cjson.encode, {
     error = "Forbidden",
     request_id = rid,
-    reason = reason,
+    reason = external_reason,
   })
   if not ok then
     body = '{"error":"Forbidden"}'
@@ -81,7 +102,6 @@ local function do_deny(deny_reason, request_id)
   ngx.header["Content-Type"] = "application/json"
   ngx.header["X-Request-ID"] = rid
   -- X-LuaGate-Block-Reason: 내부망 클라이언트에만 전송 (외부 노출 금지)
-  local client_ip = ngx.var.remote_addr or ""
   if is_internal_ip(client_ip) then
     ngx.header["X-LuaGate-Block-Reason"] = reason
   end
@@ -214,7 +234,22 @@ function _M.access()
     return
   end
 
-  local policy = evaluator.get_policy()
+  -- M-1: wrap get_policy() in pcall to prevent unhandled exceptions from
+  -- bypassing fail-closed logic and causing nginx to return 500.
+  local ok_gp, policy = pcall(evaluator.get_policy)
+  if not ok_gp then
+    ngx.log(ngx.ERR, "[luagate] get_policy() raised: ", tostring(policy))
+    ctx.action = "deny"
+    ctx.request_state = "policy_denied"
+    ctx.decision_source = "policy_engine"
+    ctx.deny_reason = "policy_load_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "policy_engine"
+    ngx.var.luagate_request_state = "policy_denied"
+    ngx.var.luagate_deny_reason = "policy_load_error"
+    do_deny("policy_load_error", ctx.request_id or "")
+    return
+  end
   if not policy then
     -- fail-closed: no active policy → deny all (http-pipeline.md §10)
     ngx.log(ngx.WARN, "[luagate] no active policy, fail-closed deny")

@@ -8,7 +8,7 @@
 --   metrics:http:requests:deny           — deny decisions
 --   metrics:http:upstream_errors:total   — upstream 5xx responses
 --   metrics:http:status:<code>           — per-status-code counter
---   latency:bucket:<ms>                  — latency histogram bucket
+--   metrics:http:latency:bucket:<ms>     — latency histogram bucket
 --
 -- Design rules:
 --   - No blocking I/O.
@@ -90,7 +90,7 @@ function _M.record(ctx)
   local request_time_s = tonumber(ngx.var.request_time) or 0
   local latency_ms = request_time_s * 1000
   local bucket = latency_bucket(latency_ms)
-  safe_incr(dict, "latency:bucket:" .. bucket)
+  safe_incr(dict, "metrics:http:latency:bucket:" .. bucket)
 end
 
 return _M
