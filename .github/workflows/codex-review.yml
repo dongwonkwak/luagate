@@ -220,14 +220,16 @@ jobs:
         id: find-comment
         uses: peter-evans/find-comment@v3
         with:
+          token: ${{ secrets.CODEX_PAT }}
           issue-number: ${{ github.event.pull_request.number }}
-          comment-author: 'github-actions[bot]'
+          comment-author: 'dongwonkwak'
           body-includes: '@codex review'
 
       - name: Create or update Codex review comment
         if: steps.build-comment.outputs.skip != 'true'
         uses: peter-evans/create-or-update-comment@v4
         with:
+          token: ${{ secrets.CODEX_PAT }}
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
           body-path: /tmp/codex-review-body.md
