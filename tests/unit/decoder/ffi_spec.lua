@@ -72,6 +72,7 @@ end
 
 -- Clear any cached module state between test runs
 package.loaded["luagate.decoder.ffi"] = nil
+package.loaded["_luagate_decoder_lib"] = nil
 
 -- ── Helper to build a mock FFI function ─────────────────────────────────────
 
@@ -103,6 +104,7 @@ describe("luagate.decoder.ffi", function()
     -- Reset call log and module cache
     calls = {}
     package.loaded["luagate.decoder.ffi"] = nil
+    package.loaded["_luagate_decoder_lib"] = nil
     decoder = require("luagate.decoder.ffi")
   end)
 
@@ -277,6 +279,36 @@ describe("luagate.decoder.ffi", function()
       assert.is_nil(result)
       assert.is_string(err)
       assert.truthy(err:find("ffi_panic"))
+    end)
+  end)
+
+  -- ── package.loaded lib caching ───────────────────────────────────────────
+
+  describe("package.loaded lib caching", function()
+    it("caches the lib handle in package.loaded['_luagate_decoder_lib']", function()
+      -- After require, the lib should be cached under the sentinel key
+      local cached = package.loaded["_luagate_decoder_lib"]
+      assert.is_not_nil(cached)
+      assert.equals(mock_lib, cached)
+    end)
+
+    it("reuses cached lib on second require without calling ffi.load again", function()
+      local load_count = 0
+      local original_load = ffi_stub.load
+      ffi_stub.load = function(name)
+        load_count = load_count + 1
+        return original_load(name)
+      end
+
+      -- Pre-seed the cache (simulates init_by_lua having loaded the lib)
+      package.loaded["_luagate_decoder_lib"] = mock_lib
+      package.loaded["luagate.decoder.ffi"] = nil
+
+      local _ = require("luagate.decoder.ffi")
+      assert.equals(0, load_count, "ffi.load must not be called when lib is already cached")
+
+      -- Restore stub
+      ffi_stub.load = original_load
     end)
   end)
 end)

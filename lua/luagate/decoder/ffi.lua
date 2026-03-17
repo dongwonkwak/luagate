@@ -34,11 +34,23 @@ int luagate_normalize_nfkc(
 );
 ]])
 
--- Library handle: loaded once per worker via ffi.load.
--- ffi.load searches LD_LIBRARY_PATH and the paths in package.cpath.
--- In production the .so lives in lib/ which is added to LD_LIBRARY_PATH
--- by the Nginx startup wrapper or nginx.conf lua_package_cpath.
-local lib = ffi.load("luagate_decoder")
+-- Library handle: loaded once per worker and cached in package.loaded.
+--
+-- Design rationale (ADR-001): .so load failure must be startup-fatal.
+-- By checking package.loaded["_luagate_decoder_lib"] first we support two
+-- patterns:
+--   1. init_by_lua calls require("luagate.decoder.ffi") early → ffi.load
+--      executes at server-start time; failure aborts nginx startup.
+--   2. Subsequent require() calls in workers reuse the cached handle without
+--      a second ffi.load.
+--
+-- ffi.load raises a Lua error on failure, which propagates through require()
+-- and, if called from init_by_lua, causes Nginx to refuse to start.
+local lib = package.loaded["_luagate_decoder_lib"]
+if not lib then
+  lib = ffi.load("luagate_decoder") -- error() on failure → startup-fatal
+  package.loaded["_luagate_decoder_lib"] = lib
+end
 
 -- ── Error code constants ────────────────────────────────────────────────────
 local LUAGATE_OK = 0
