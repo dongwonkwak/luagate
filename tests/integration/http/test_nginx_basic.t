@@ -9,6 +9,11 @@
 #   또는
 #   make test-integration-http
 
+BEGIN {
+    # Current HTTP integration cases do not assert debug/notice log lines.
+    $ENV{TEST_NGINX_LOG_LEVEL} ||= 'warn';
+}
+
 use Test::Nginx::Socket 'no_plan';
 
 # 테스트용 nginx 설정 — lua_shared_dict 포함

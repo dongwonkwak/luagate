@@ -15,6 +15,11 @@
 #   - error_code + response_body 동시 사용 시 body 검증이 있는 경우 error_code 생략
 #   - location / 충돌 방지: /health, /data/, /deny-test/ 등 명시적 경로 사용
 
+BEGIN {
+    # Current HTTP integration cases do not assert debug/notice log lines.
+    $ENV{TEST_NGINX_LOG_LEVEL} ||= 'warn';
+}
+
 use Test::Nginx::Socket 'no_plan';
 
 # 공통 http_config: shared dict 5개 + map 변수 + Lua 패키지 경로

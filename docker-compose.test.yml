@@ -25,6 +25,7 @@ services:
     environment:
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-secret-token-for-integration}
       - TEST_NGINX_BINARY=/usr/local/openresty/bin/openresty
+      - TEST_NGINX_LOG_LEVEL=${TEST_NGINX_LOG_LEVEL:-warn}
       - TEST_NGINX_WORKER_USER=nobody
       - TEST_NGINX_FAST_SHUTDOWN=1
       - TEST_NGINX_USE_HUP=1
