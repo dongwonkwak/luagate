@@ -180,6 +180,38 @@ local function path_contains(broad, narrow)
   end
 end
 
+--- Return true if broad_host contains narrow_host using evaluator wildcard
+-- semantics. "*.example.com" matches any subdomain of example.com, but not the
+-- bare domain itself.
+-- @param broad_host string
+-- @param narrow_host string
+-- @return boolean
+local function host_contains(broad_host, narrow_host)
+  if broad_host == narrow_host then
+    return true
+  end
+
+  if broad_host:sub(1, 2) ~= "*." then
+    return false
+  end
+
+  local suffix = broad_host:sub(2) -- ".example.com"
+
+  if narrow_host:sub(1, 2) == "*." then
+    local narrow_suffix = narrow_host:sub(2)
+    if narrow_suffix == suffix then
+      return true
+    end
+    return narrow_suffix:sub(-#suffix) == suffix
+  end
+
+  if narrow_host == suffix:sub(2) then
+    return false
+  end
+
+  return narrow_host:sub(-#suffix) == suffix
+end
+
 --- Compare two scope tables for equality (all fields must match).
 -- Returns true only when every scope field is identical.
 -- Omitted (nil) fields are treated as wildcards; both must agree.
@@ -331,12 +363,13 @@ local function scope_contains(scope_broad, scope_narrow)
   end
   -- if pa is nil: broad path is wildcard → ok
 
-  -- host: must be equal or broad is wildcard
+  -- host: broad exact contains only itself; broad wildcard contains matching
+  -- exact/wildcard subdomains using the same semantics as evaluator.match_host
   if scope_broad.host ~= nil then
     if scope_narrow.host == nil then
       return false
     end
-    if scope_broad.host ~= scope_narrow.host then
+    if not host_contains(scope_broad.host, scope_narrow.host) then
       return false
     end
   end

@@ -437,6 +437,25 @@ describe("conflict.detect — overlap conflict 감지", function()
     assert.are.equal(1, #conflicts)
     assert.are.equal("overlap", conflicts[1].overlap_type)
   end)
+
+  it("wildcard host가 exact host를 포함하면 overlap conflict를 감지한다", function()
+    local rules = {
+      rule({ id = "wildcard-allow", priority = 10, action = "allow", scope = { host = "*.example.com" } }),
+      rule({ id = "exact-deny", priority = 10, action = "deny", scope = { host = "api.example.com" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    assert.are.equal(1, #conflicts)
+    assert.are.equal("overlap", conflicts[1].overlap_type)
+  end)
+
+  it("wildcard host는 bare domain을 포함하지 않으므로 conflict가 아니다", function()
+    local rules = {
+      rule({ id = "wildcard-allow", priority = 10, action = "allow", scope = { host = "*.example.com" } }),
+      rule({ id = "bare-deny", priority = 10, action = "deny", scope = { host = "example.com" } }),
+    }
+    local conflicts, _ = conflict.detect(rules)
+    assert.are.equal(0, #conflicts)
+  end)
 end)
 
 -- ---------------------------------------------------------------------------
