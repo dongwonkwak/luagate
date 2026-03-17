@@ -44,6 +44,8 @@ COPY policies/ /luagate/policies/
 # ── 환경 변수 ─────────────────────────────────────────────────────────────
 # TEST_NGINX_BINARY: Test::Nginx가 임시 서버를 띄울 때 사용할 nginx 바이너리
 ENV TEST_NGINX_BINARY=/usr/local/openresty/bin/openresty
+# TEST_NGINX_LOG_LEVEL: debug 기본값을 warn으로 낮춰 불필요한 error.log I/O를 줄인다.
+ENV TEST_NGINX_LOG_LEVEL=warn
 # TEST_NGINX_PORT: 테스트용 nginx 리스닝 포트 (기본 1984)
 ENV TEST_NGINX_PORT=1984
 # TEST_NGINX_SERVROOT: 임시 nginx servroot 경로 (/tmp 아래로 지정해야 컨테이너 내 쓰기 가능)

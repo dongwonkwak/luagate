@@ -1,6 +1,11 @@
 .PHONY: build test test-unit test-unit-lua test-unit-c test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
+DOCKER_COMPOSE_TEST_FLAGS ?= --build
+TEST_HTTP_PROVE_ARGS ?= -r -v tests/integration/http/
+TEST_NGINX_PORT ?= 1984
+TEST_NGINX_SERVROOT ?= /tmp/nginx-test-servroot
+COMPOSE_PROJECT_NAME ?= luagate-test
 
 # ── Build ──────────────────────────────────────────────────────────────────
 build:
@@ -58,7 +63,12 @@ test-reload:
 # ── Docker Test ────────────────────────────────────────────────────────────
 test-docker:
 	@echo "==> Running HTTP integration tests in Docker Compose..."
-	LUAGATE_ADMIN_TOKEN=$(TEST_ADMIN_TOKEN) docker compose -f docker-compose.test.yml up --build --exit-code-from test
+	LUAGATE_ADMIN_TOKEN=$(TEST_ADMIN_TOKEN) \
+	TEST_HTTP_PROVE_ARGS='$(TEST_HTTP_PROVE_ARGS)' \
+	TEST_NGINX_PORT=$(TEST_NGINX_PORT) \
+	TEST_NGINX_SERVROOT=$(TEST_NGINX_SERVROOT) \
+	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) \
+	docker compose -f docker-compose.test.yml up $(DOCKER_COMPOSE_TEST_FLAGS) --exit-code-from test
 
 # ── Lint ───────────────────────────────────────────────────────────────────
 lint:

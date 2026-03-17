@@ -10,10 +10,10 @@
 
 services:
   test:
+    image: ${LUAGATE_TEST_IMAGE:-luagate-test:local}
     build:
       context: .
       dockerfile: Dockerfile.test
-    container_name: luagate-test
     # 소스를 실시간 마운트 — 이미지 재빌드 없이 테스트 코드 변경 반영
     volumes:
       - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
@@ -24,10 +24,14 @@ services:
     environment:
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-secret-token-for-integration}
       - TEST_NGINX_BINARY=/usr/local/openresty/bin/openresty
+      - TEST_NGINX_LOG_LEVEL=${TEST_NGINX_LOG_LEVEL:-warn}
       - TEST_NGINX_WORKER_USER=nobody
+      - TEST_NGINX_FAST_SHUTDOWN=1
+      - TEST_NGINX_USE_HUP=1
+      - TEST_HTTP_PROVE_ARGS=${TEST_HTTP_PROVE_ARGS:--r -v tests/integration/http/}
       # Test::Nginx가 임시 nginx 인스턴스를 띄울 때 사용하는 포트
-      - TEST_NGINX_PORT=1984
+      - TEST_NGINX_PORT=${TEST_NGINX_PORT:-1984}
       # tests/ 볼륨을 :ro로 마운트 시 t/servroot 생성 실패 방지
-      - TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot
-    # prove -r: 재귀적으로 .t 파일 실행, --exit-code-from이 exit code 전파
-    command: ["prove", "-r", "-v", "tests/integration/http/"]
+      - TEST_NGINX_SERVROOT=${TEST_NGINX_SERVROOT:-/tmp/nginx-test-servroot}
+    # shard별 파일 단위 prove 인자를 주입할 수 있게 shell wrapper를 사용한다.
+    command: ["sh", "-lc", "exec prove $${TEST_HTTP_PROVE_ARGS:--r -v tests/integration/http/}"]

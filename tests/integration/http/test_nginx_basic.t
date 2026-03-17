@@ -9,6 +9,11 @@
 #   또는
 #   make test-integration-http
 
+BEGIN {
+    # Current HTTP integration cases do not assert debug/notice log lines.
+    $ENV{TEST_NGINX_LOG_LEVEL} ||= 'warn';
+}
+
 use Test::Nginx::Socket 'no_plan';
 
 # 테스트용 nginx 설정 — lua_shared_dict 포함
@@ -20,6 +25,24 @@ our $http_config = <<'_END_HTTP_CONFIG_';
     lua_shared_dict luagate_connections   1m;
     lua_shared_dict luagate_state         1m;
     lua_shared_dict luagate_rate_limit    2m;
+
+    init_by_lua_block {
+        local zone_names = {
+            "luagate_policy",
+            "luagate_metrics",
+            "luagate_connections",
+            "luagate_state",
+            "luagate_rate_limit",
+        }
+
+        for _, zone_name in ipairs(zone_names) do
+            local dict = ngx.shared[zone_name]
+            if dict then
+                dict:flush_all()
+                dict:flush_expired()
+            end
+        end
+    }
 
     map $http_x_request_id $luagate_request_id {
         default  $request_id;

@@ -44,3 +44,5 @@ tests/.output/
 
 # 리뷰 파일 (임시, 요약은 Linear에 보존)
 .claude/reviews/
+
+.claude/worktrees/
