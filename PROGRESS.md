@@ -211,3 +211,5 @@ COMPLETED_REVIEW: DON-153-code (2026-03-17)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-17 | DON-142 | decoder + scanner HTTP 파이프라인 통합 | `lua/luagate/http/handler.lua`, `lua/luagate/metrics/collector.lua`, `tests/unit/http/handler_spec.lua`, `tests/unit/metrics/collector_spec.lua` | 454 tests 통과. decoder→scanner→policy eval 순서, fail-closed, 8KB 제한, scanner threat 메트릭 추가 |
+
+PENDING_REVIEW: DON-142-code
