@@ -192,7 +192,8 @@ jobs:
               common,
             ].join('\n');
 
-            core.setOutput('body', body);
+            const fs = require('fs');
+            fs.writeFileSync('/tmp/codex-review-body.md', body);
 
       - name: Find existing Codex review comment
         if: steps.build-comment.outputs.skip != 'true'
@@ -209,5 +210,5 @@ jobs:
         with:
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
-          body: ${{ steps.build-comment.outputs.body }}
+          body-path: /tmp/codex-review-body.md
           edit-mode: replace
