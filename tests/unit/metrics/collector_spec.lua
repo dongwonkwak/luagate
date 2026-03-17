@@ -394,14 +394,16 @@ end)
 -- scanner threat 카운터 (ADR-006 §3: per-threat_type counter)
 -- ===========================================================================
 
-describe("metrics.collector.record — scanner threat 카운터", function()
-  it("ctx.threat_type 설정 시 scanner_threats 카운터 증가", function()
+describe("metrics.collector.record — scanner threat 카운터 (ADR-006 §3)", function()
+  it("ctx.threat_type 설정 시 scanner_threats 카운터 증가 (ADR-006 key format)", function()
     local ngx_mock = make_ngx()
     _G.ngx = ngx_mock
     local collector = load_collector()
 
     collector.record({ action = "deny", threat_type = "sqli" })
-    assert.are.equal(1, ngx_mock._get_counter("metrics:http:scanner_threats:total:sqli"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http_scanner_threats_total:threat:sqli"))
+    -- 이전 key format은 사용하지 않음
+    assert.is_nil(ngx_mock._get_counter("metrics:http:scanner_threats:total:sqli"))
   end)
 
   it("ctx.threat_type = nil 시 scanner_threats 카운터 미증가", function()
@@ -410,7 +412,7 @@ describe("metrics.collector.record — scanner threat 카운터", function()
     local collector = load_collector()
 
     collector.record({ action = "allow" })
-    assert.is_nil(ngx_mock._get_counter("metrics:http:scanner_threats:total:sqli"))
+    assert.is_nil(ngx_mock._get_counter("metrics:http_scanner_threats_total:threat:sqli"))
   end)
 
   it("다양한 threat_type은 별도 카운터로 기록된다", function()
@@ -421,7 +423,34 @@ describe("metrics.collector.record — scanner threat 카운터", function()
     collector.record({ action = "deny", threat_type = "sqli" })
     collector.record({ action = "deny", threat_type = "xss" })
     collector.record({ action = "deny", threat_type = "sqli" })
-    assert.are.equal(2, ngx_mock._get_counter("metrics:http:scanner_threats:total:sqli"))
-    assert.are.equal(1, ngx_mock._get_counter("metrics:http:scanner_threats:total:xss"))
+    assert.are.equal(2, ngx_mock._get_counter("metrics:http_scanner_threats_total:threat:sqli"))
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http_scanner_threats_total:threat:xss"))
+  end)
+
+  it("unknown threat_type은 'other'로 정규화된다 (ADR-006 §1.1 allowlist)", function()
+    local ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    local collector = load_collector()
+
+    collector.record({ action = "deny", threat_type = "unknown_attack" })
+    assert.are.equal(1, ngx_mock._get_counter("metrics:http_scanner_threats_total:threat:other"))
+    assert.is_nil(ngx_mock._get_counter("metrics:http_scanner_threats_total:threat:unknown_attack"))
+  end)
+
+  it("allowlist에 포함된 threat_type은 그대로 사용된다", function()
+    local ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    local collector = load_collector()
+
+    local allowlisted =
+      { "sqli", "xss", "path_traversal", "cmd_injection", "lfi", "rfi", "xxe", "ssrf", "deserialization", "other" }
+    for _, tt in ipairs(allowlisted) do
+      collector.record({ action = "deny", threat_type = tt })
+      assert.are.equal(
+        1,
+        ngx_mock._get_counter("metrics:http_scanner_threats_total:threat:" .. tt),
+        "allowlisted threat_type '" .. tt .. "' should use its own key"
+      )
+    end
   end)
 end)

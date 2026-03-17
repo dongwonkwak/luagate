@@ -25,6 +25,21 @@ local _M = {}
 -- Latency histogram bucket boundaries in milliseconds (ADR-004 §4.3)
 local LATENCY_BUCKETS = { 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000 }
 
+-- Threat type allowlist (ADR-006 §1.1).
+-- Unknown values are normalized to "other" before key composition.
+local THREAT_TYPE_ALLOWLIST = {
+  sqli = true,
+  xss = true,
+  path_traversal = true,
+  cmd_injection = true,
+  lfi = true,
+  rfi = true,
+  xxe = true,
+  ssrf = true,
+  deserialization = true,
+  other = true,
+}
+
 --- Increment a counter in a shared dict.
 -- Errors are logged but not propagated (metric loss acceptable per ADR-001).
 -- @param dict  table   ngx.shared.* dict object
@@ -87,9 +102,11 @@ function _M.record(ctx)
   end
 
   -- Scanner threat counter (ADR-006 §3: per-threat_type counter)
+  -- Validate against allowlist; unknown values normalized to "other".
   local threat_type = ctx and ctx.threat_type
   if threat_type then
-    safe_incr(dict, "metrics:http:scanner_threats:total:" .. threat_type)
+    local normalized = THREAT_TYPE_ALLOWLIST[threat_type] and threat_type or "other"
+    safe_incr(dict, "metrics:http_scanner_threats_total:threat:" .. normalized)
   end
 
   -- Latency histogram bucket
