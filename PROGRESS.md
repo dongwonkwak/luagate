@@ -172,6 +172,6 @@ COMPLETED_REVIEW: DON-138-code (2026-03-17)
 
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
-| 2026-03-17 | DON-140 | HTTP 파이프라인 핸들러 통합 — rewrite/access/log_by_lua | `lua/luagate/http/handler.lua`, `lua/luagate/log/http.lua`, `lua/luagate/metrics/collector.lua`, `conf/nginx.conf`, `tests/unit/http/handler_spec.lua`, `tests/unit/log/http_spec.lua`, `tests/unit/metrics/collector_spec.lua`, `tests/integration/http/pipeline_spec.t` | 370 tests, Codex 리뷰 대기 |
+| 2026-03-17 | DON-140 | HTTP 파이프라인 핸들러 통합 — rewrite/access/log_by_lua | `lua/luagate/http/handler.lua`, `lua/luagate/log/http.lua`, `lua/luagate/metrics/collector.lua`, `conf/nginx.conf`, `tests/unit/http/handler_spec.lua`, `tests/unit/log/http_spec.lua`, `tests/unit/metrics/collector_spec.lua`, `tests/integration/http/pipeline_spec.t` | 395 tests. Codex 4건 + 보안 리뷰 PASS (H-1/M-1/M-3/L-1/L-2) |
 
-PENDING_REVIEW: DON-140-code
+COMPLETED_REVIEW: DON-140-code (2026-03-17)
