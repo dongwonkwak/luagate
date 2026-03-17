@@ -20,7 +20,7 @@ Codex CLI 리뷰를 위한 프롬프트 파일을 생성하고, 사람에게 실
 ### 1. 변경 파일 수집
 
 ```bash
-git diff main...HEAD --name-only
+./scripts/review-changed-files.sh
 ```
 
 ### 2. 생성 전 확인
@@ -61,7 +61,7 @@ PROGRESS.md에 PENDING_REVIEW 마커를 재기입합니다. 진행할까요?
   - `code` → `코드 리뷰 — 구현 정확성, 보안, 테스트 완전성 검토`
   - `design` → `설계 리뷰 — 아키텍처 결정의 타당성, 대안 검토, ADR 품질 검토`
 - `{{TITLE}}` → Linear 이슈 제목
-- `{{CHANGED_FILES}}` → `git diff main...HEAD --name-only` 결과
+- `{{CHANGED_FILES}}` → `./scripts/review-changed-files.sh` 결과
 - `{{SPEC_DOCS}}` → 관련 spec/ADR 경로
 - `{{ACCEPTANCE_CRITERIA}}` → Linear 이슈 AC 항목
 - `{{RESULT_PATH}}` → `.claude/reviews/DON-XXX-{type}-result.md`
