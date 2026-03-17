@@ -189,3 +189,5 @@ COMPLETED_REVIEW: DON-139-code (2026-03-17)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-17 | DON-141 | luagate_scanner.so Rust FFI + Lua binding | `src/scanner/Cargo.toml`, `src/scanner/src/lib.rs`, `conf/scanner-patterns/*.yaml` (8개), `lua/luagate/scanner/ffi.lua`, `tests/unit/scanner/ffi_spec.lua` | Rust 11 tests + Lua 22 tests (총 419 busted tests 통과). caller-allocated buffer, 5ms budget, 8KB limit, 8개 threat_type, panic=abort |
+
+PENDING_REVIEW: DON-141-code
