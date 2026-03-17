@@ -161,6 +161,11 @@ function _M.verify()
     return false
   end
 
+  if type(auth_header) ~= "string" then
+    _reject("malformed_header")
+    return false
+  end
+
   -- Must start with "Bearer " (case-sensitive, RFC 6750 ss2.1)
   local provided = auth_header:match("^Bearer (.+)$")
   if not provided then

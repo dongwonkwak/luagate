@@ -382,6 +382,26 @@ describe("auth.verify", function()
     assert.is_true(found_malformed, "audit 로그에 'malformed_header' reason이 포함되어야 한다")
   end)
 
+  it("중복 Authorization 헤더로 비문자열 값이 오면 401 + audit malformed_header", function()
+    _G.ngx.req.get_headers = function()
+      return { Authorization = { "Bearer invalid", "Bearer duplicate" } }
+    end
+
+    auth.verify()
+
+    assert.are.equal(401, _G.ngx.status)
+    assert.are.equal(401, _G.ngx._get_exited())
+    local logged = _G.ngx._get_logged()
+    local found_malformed = false
+    for _, entry in ipairs(logged) do
+      if entry.msg:find("malformed_header") then
+        found_malformed = true
+        break
+      end
+    end
+    assert.is_true(found_malformed, "audit 로그에 'malformed_header' reason이 포함되어야 한다")
+  end)
+
   -- 잘못된 토큰
   it("잘못된 Bearer 토큰 시 401 + audit invalid_token", function()
     _G.ngx.req.get_headers = function()
