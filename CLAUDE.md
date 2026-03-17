@@ -75,6 +75,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | `new-shdict-zone` | `.claude/skills/new-shdict-zone/` | 새 shared dict zone 추가 시 |
 | `new-security-log-field` | `.claude/skills/new-security-log-field/` | 새 보안 로그 필드 추가 시 |
 | `doc-sync` | `.claude/skills/doc-sync/` | ADR 추가/변경 후 |
+| `pr-review-context` | `.claude/skills/pr-review-context/` | PR 생성 직후 Codex 심화 리뷰 컨텍스트 생성 시 |
 
 ## 이슈 완료 Exit Criteria 체크리스트
 
@@ -141,8 +142,9 @@ Epic 완료 후 PR 생성 절차:
 
 1. `git push -u origin <epic-branch>`
 2. `gh pr create` — 제목: `type(scope): 설명 [DON-XX]`, 본문: `.github/pull_request_template.md` 참조
-3. 구현 완료 후 → `request-codex-review` 스킬 invoke (code 리뷰). 보안/설계 변경 포함 시 design 리뷰도 추가
-4. CI 통과 + 최소 1개 승인 후 Squash merge
+3. `pr-review-context` 스킬 invoke → 변경 파일 기반 심화 리뷰 컨텍스트 생성
+4. `request-codex-review` 스킬 invoke (3단계 컨텍스트 포함, code 리뷰). 보안/설계 변경 포함 시 design 리뷰도 추가
+5. CI 통과 + 최소 1개 승인 후 Squash merge
 
 > **머지 전략**: epic → main은 Squash merge (단일 커밋), issue → epic은 Merge commit.
 
