@@ -206,6 +206,7 @@ load_pr_metadata() {
   PR_HEAD_REF=$(printf '%s' "$PR_JSON" | jq -r '.headRefName')
 }
 
+# shellcheck disable=SC2016  # GraphQL 변수, shell 확장 아님
 fetch_threads_json() {
   gh api graphql \
     -F owner='{owner}' \
@@ -301,6 +302,7 @@ post_reply() {
     --silent
 }
 
+# shellcheck disable=SC2016  # GraphQL 변수, shell 확장 아님
 resolve_thread() {
   local thread_id="$1"
 
@@ -371,7 +373,9 @@ require_command git
 require_command codex
 
 CURRENT_BRANCH="$(git branch --show-current)"
-REPO_ROOT="$(pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+MAIN_ROOT="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
+REVIEWS_DIR="${MAIN_ROOT}/.claude/reviews"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
