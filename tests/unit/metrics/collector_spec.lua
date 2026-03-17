@@ -442,8 +442,20 @@ describe("metrics.collector.record — scanner threat 카운터 (ADR-006 §3)", 
     _G.ngx = ngx_mock
     local collector = load_collector()
 
-    local allowlisted =
-      { "sqli", "xss", "path_traversal", "cmd_injection", "lfi", "rfi", "xxe", "ssrf", "deserialization", "other" }
+    local allowlisted = {
+      "sqli",
+      "xss",
+      "path_traversal",
+      "cmd_injection",
+      "lfi",
+      "rfi",
+      "xxe",
+      "ssrf",
+      "log4shell",
+      "scanner",
+      "deserialization",
+      "other",
+    }
     for _, tt in ipairs(allowlisted) do
       collector.record({ action = "deny", threat_type = tt })
       assert.are.equal(

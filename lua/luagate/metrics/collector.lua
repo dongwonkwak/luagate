@@ -36,6 +36,8 @@ local THREAT_TYPE_ALLOWLIST = {
   rfi = true,
   xxe = true,
   ssrf = true,
+  log4shell = true,
+  scanner = true,
   deserialization = true,
   other = true,
 }

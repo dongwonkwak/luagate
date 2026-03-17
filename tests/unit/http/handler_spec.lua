@@ -1195,17 +1195,26 @@ describe("handler.access — scanner: error → fail-closed", function()
     assert.are.equal("security_scanner", ngx_mock.var.luagate_decision_source)
   end)
 
-  it("scanner error → deny_reason = 'scanner_error'", function()
+  it("scanner internal error → deny_reason = 'scanner_internal_error'", function()
     _scanner_stub.scan_result = { nil, "scanner_fail:-4" }
     handler.access()
-    assert.are.equal("scanner_error", ngx_mock.ctx.luagate.deny_reason)
-    assert.are.equal("scanner_error", ngx_mock.var.luagate_deny_reason)
+    assert.are.equal("scanner_internal_error", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("scanner_internal_error", ngx_mock.var.luagate_deny_reason)
   end)
 
-  it("scanner error → threat_type = 'scanner_error' (Issue #3)", function()
+  it("scanner budget_exceeded → deny_reason = 'scanner_budget_exceeded'", function()
+    _scanner_stub.scan_result = { nil, "scanner_fail:-3" }
+    handler.access()
+    assert.are.equal("scanner_budget_exceeded", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("scanner_budget_exceeded", ngx_mock.var.luagate_deny_reason)
+  end)
+
+  it("scanner error → ngx.var.threat_type = 'scanner_error' but ctx.threat_type is nil", function()
     _scanner_stub.scan_result = { nil, "scanner_fail:-4" }
     handler.access()
-    assert.are.equal("scanner_error", ngx_mock.ctx.luagate.threat_type)
+    -- ctx.threat_type NOT set for operational failures (ADR-006 metric purity)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    -- ngx.var IS set for log distinguishability
     assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
   end)
 end)
@@ -1242,16 +1251,17 @@ describe("handler.access — decoder error (from rewrite) → fail-closed", func
     assert.are.equal("ffi_fail:-3", ngx_mock.var.luagate_deny_reason)
   end)
 
-  it("ctx.decoder_error set → threat_type = 'decode_error' (Issue #3)", function()
+  it("ctx.decoder_error → ngx.var.threat_type = 'decode_error' but ctx.threat_type is nil", function()
     handler.rewrite()
     ngx_mock.ctx.luagate.decoder_error = "ffi_fail:-3"
     handler.access()
-    assert.are.equal("decode_error", ngx_mock.ctx.luagate.threat_type)
+    -- ctx.threat_type NOT set for operational failures (ADR-006 metric purity)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    -- ngx.var IS set for log distinguishability
     assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
   end)
 
-  it("decoder_load_error from rewrite → fail-closed in access with decode_error threat_type", function()
-    -- Simulate decoder load failure in rewrite by making preload raise an error
+  it("decoder_load_error from rewrite → fail-closed in access with decode_error in var", function()
     package.loaded["luagate.decoder.ffi"] = nil
     local saved_preload = package.preload["luagate.decoder.ffi"]
     package.preload["luagate.decoder.ffi"] = function()
@@ -1262,7 +1272,7 @@ describe("handler.access — decoder error (from rewrite) → fail-closed", func
     package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
     handler.access()
     assert.are.equal(403, ngx_mock.status)
-    assert.are.equal("decode_error", ngx_mock.ctx.luagate.threat_type)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
     assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
     assert.are.equal("decoder_load_error", ngx_mock.ctx.luagate.deny_reason)
   end)
@@ -1298,7 +1308,7 @@ describe("handler.access — input size limit (8KB)", function()
     assert.are.equal(403, ngx_mock.status)
     assert.are.equal("input_size_exceeded", ngx_mock.ctx.luagate.deny_reason)
     assert.are.equal("security_scanner", ngx_mock.var.luagate_decision_source)
-    assert.are.equal("scanner_error", ngx_mock.ctx.luagate.threat_type)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
     assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
   end)
 
@@ -1313,7 +1323,7 @@ describe("handler.access — input size limit (8KB)", function()
     handler.access()
     assert.are.equal(403, ngx_mock.status)
     assert.are.equal("input_size_exceeded", ngx_mock.ctx.luagate.deny_reason)
-    assert.are.equal("scanner_error", ngx_mock.ctx.luagate.threat_type)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
     assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
   end)
 
@@ -1356,7 +1366,7 @@ describe("handler.access — scanner load error → fail-closed with threat_type
     end
     handler.access()
     assert.are.equal(403, ngx_mock.status)
-    assert.are.equal("scanner_error", ngx_mock.ctx.luagate.threat_type)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
     assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
     assert.are.equal("scanner_load_error", ngx_mock.ctx.luagate.deny_reason)
     -- Restore

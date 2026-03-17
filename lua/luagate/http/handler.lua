@@ -159,8 +159,12 @@ function _M.rewrite()
 
   local ok_dec, decoder = pcall(require, "luagate.decoder.ffi")
   if ok_dec then
-    local pn, perr, pp = decoder.normalize_path(path_raw)
-    if perr then
+    -- pcall wrapping: catch Lua-level FFI exceptions (ADR-001 §1.2 fail-closed)
+    local ok_np, pn, perr, pp = pcall(decoder.normalize_path, path_raw)
+    if not ok_np then
+      ngx.log(ngx.ERR, "[luagate] decoder path exception: ", tostring(pn))
+      decoder_error = "decoder_path_exception"
+    elseif perr then
       ngx.log(ngx.ERR, "[luagate] decoder path error: ", perr)
       decoder_error = perr
     else
@@ -170,8 +174,11 @@ function _M.rewrite()
       end
     end
 
-    local qn, qerr, qp = decoder.normalize_query(query_raw)
-    if qerr then
+    local ok_nq, qn, qerr, qp = pcall(decoder.normalize_query, query_raw)
+    if not ok_nq then
+      ngx.log(ngx.ERR, "[luagate] decoder query exception: ", tostring(qn))
+      decoder_error = decoder_error or "decoder_query_exception"
+    elseif qerr then
       ngx.log(ngx.ERR, "[luagate] decoder query error: ", qerr)
       decoder_error = decoder_error or qerr
     else
@@ -308,13 +315,15 @@ function _M.access()
   local query_raw = ctx.query_raw or ""
 
   -- 2a. Decoder error check (set in rewrite phase; http-pipeline.md §5 threat_type enum)
+  --     NOTE: ctx.threat_type is NOT set for operational failures — only ngx.var
+  --     is set for log distinguishability. ctx.threat_type drives the scanner
+  --     threat metric (ADR-006) and must only reflect actual threat detections.
   if ctx.decoder_error then
     ngx.log(ngx.ERR, "[luagate] decoder error from rewrite: ", ctx.decoder_error)
     ctx.action = "deny"
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = ctx.decoder_error
-    ctx.threat_type = "decode_error"
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
@@ -332,7 +341,6 @@ function _M.access()
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = "input_size_exceeded"
-    ctx.threat_type = "scanner_error"
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
@@ -343,6 +351,7 @@ function _M.access()
   end
 
   -- 2c. Scanner scan (security-scanner.md §2)
+  --     pcall wrapping: catch Lua-level exceptions from scanner FFI (ADR-001 §1.2)
   local ok_sc, scanner = pcall(require, "luagate.scanner.ffi")
   if not ok_sc then
     ngx.log(ngx.ERR, "[luagate] failed to load scanner: ", tostring(scanner))
@@ -350,7 +359,6 @@ function _M.access()
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = "scanner_load_error"
-    ctx.threat_type = "scanner_error"
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
@@ -360,27 +368,37 @@ function _M.access()
     return
   end
 
-  local scan_result, scan_err = scanner.scan({
+  local ok_scan, scan_result, scan_err = pcall(scanner.scan, {
     path_raw = path_raw,
     path_normalized = ctx.path_normalized,
     query_raw = query_raw,
     query_normalized = ctx.query_normalized,
   })
 
+  if not ok_scan then
+    -- pcall caught a Lua-level exception from scanner.scan()
+    ngx.log(ngx.ERR, "[luagate] scanner exception: ", tostring(scan_result))
+    scan_err = "scanner_exception:" .. tostring(scan_result)
+    scan_result = nil
+  end
+
   if scan_err then
-    -- scanner_internal_error / budget_exceeded → fail-closed (403)
+    -- Distinguish budget_exceeded vs internal_error (security-scanner.md §2b)
+    local deny_reason = "scanner_internal_error"
+    if scan_err:find("%-3") then
+      deny_reason = "scanner_budget_exceeded"
+    end
     ngx.log(ngx.ERR, "[luagate] scanner error: ", scan_err)
     ctx.action = "deny"
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
-    ctx.deny_reason = "scanner_error"
-    ctx.threat_type = "scanner_error"
+    ctx.deny_reason = deny_reason
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
-    ngx.var.luagate_deny_reason = "scanner_error"
+    ngx.var.luagate_deny_reason = deny_reason
     ngx.var.luagate_threat_type = "scanner_error"
-    do_deny("scanner_error", ctx.request_id or "")
+    do_deny(deny_reason, ctx.request_id or "")
     return
   end
 
