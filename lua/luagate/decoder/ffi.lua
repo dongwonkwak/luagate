@@ -75,14 +75,13 @@ local function call_with_retry(fn, input, input_len)
     rc = fn(input, input_len, buf, cap, out_len)
   end
 
-  -- Hard failures: budget exceeded or internal error
-  if rc == LUAGATE_BUDGET_EXCEEDED or rc == LUAGATE_INTERNAL_ERROR then
+  -- Hard failures: budget exceeded, internal error, or buffer still too small after retry
+  if rc == LUAGATE_BUDGET_EXCEEDED or rc == LUAGATE_INTERNAL_ERROR or rc == LUAGATE_BUFFER_TOO_SMALL then
     return nil, "ffi_fail:" .. rc
   end
 
-  -- rc == LUAGATE_OK (0)    → full success
+  -- rc == LUAGATE_OK (0)             → full success
   -- rc == LUAGATE_INVALID_INPUT (-1) → partial/decode_partial success
-  -- rc == LUAGATE_BUFFER_TOO_SMALL (-2) after retry → return what we have
   local result = ffi.string(buf, out_len[0])
   local partial = (rc ~= LUAGATE_OK)
   return result, nil, partial

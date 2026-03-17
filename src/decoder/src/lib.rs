@@ -28,10 +28,8 @@ const BUDGET_NS: u128 = 5_000_000;
 /// Returns LUAGATE_BUFFER_TOO_SMALL if src.len() > out_cap.
 unsafe fn write_output(src: &[u8], out: *mut i8, out_cap: usize, out_len: *mut usize) -> i32 {
     if src.len() > out_cap {
-        // Write as many bytes as fit so caller can see partial content length
-        let n = out_cap;
-        std::ptr::copy_nonoverlapping(src.as_ptr(), out as *mut u8, n);
-        *out_len = n;
+        // Buffer too small — out_len=0 signals buffer contents are indeterminate (spec §3)
+        *out_len = 0;
         return LUAGATE_BUFFER_TOO_SMALL;
     }
     std::ptr::copy_nonoverlapping(src.as_ptr(), out as *mut u8, src.len());
@@ -39,12 +37,11 @@ unsafe fn write_output(src: &[u8], out: *mut i8, out_cap: usize, out_len: *mut u
     LUAGATE_OK
 }
 
-/// Apply NFKC normalization and remove null bytes / ASCII control characters.
+/// Apply NFKC normalization and remove all control characters (including CR/LF/TAB).
 fn nfkc_and_sanitize(input: &str) -> String {
     input
         .nfkc()
-        .filter(|c| !c.is_control() || *c == '\t' || *c == '\n' || *c == '\r')
-        .filter(|c| *c != '\0')
+        .filter(|c| !c.is_control())
         .collect()
 }
 
@@ -423,6 +420,52 @@ mod tests {
             )
         };
         assert_eq!(rc, LUAGATE_BUFFER_TOO_SMALL);
+        // out_len must be 0 on BUFFER_TOO_SMALL (spec §3: buffer contents indeterminate)
+        assert_eq!(out_len, 0);
+    }
+
+    #[test]
+    fn test_crlf_stripped_from_path() {
+        // %0d%0a → CR LF after percent-decode; must be removed by nfkc_and_sanitize
+        let input = b"/foo%0d%0abar";
+        let mut out = vec![0u8; 256];
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            luagate_normalize_path(
+                input.as_ptr() as *const i8,
+                input.len(),
+                out.as_mut_ptr() as *mut i8,
+                out.len(),
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, LUAGATE_OK);
+        let result = std::str::from_utf8(&out[..out_len]).unwrap();
+        assert!(
+            !result.contains('\r') && !result.contains('\n'),
+            "CRLF not stripped: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_tab_stripped_from_path() {
+        // %09 → TAB; must be removed
+        let input = b"/foo%09bar";
+        let mut out = vec![0u8; 256];
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            luagate_normalize_path(
+                input.as_ptr() as *const i8,
+                input.len(),
+                out.as_mut_ptr() as *mut i8,
+                out.len(),
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, LUAGATE_OK);
+        let result = std::str::from_utf8(&out[..out_len]).unwrap();
+        assert!(!result.contains('\t'), "TAB not stripped: {:?}", result);
     }
 
     #[test]

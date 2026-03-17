@@ -148,6 +148,17 @@ describe("luagate.decoder.ffi", function()
       assert.is_string(result)
     end)
 
+    it("returns nil + ffi_fail on LUAGATE_BUFFER_TOO_SMALL after retry (fail-closed)", function()
+      -- Both calls return BUFFER_TOO_SMALL: must not pass truncated result downstream
+      mock_lib.luagate_normalize_path = function(_i, _il, _out_buf, _cap, _out_len_slot)
+        return -2
+      end
+      local result, err = decoder.normalize_path("/some/very/long/path")
+      assert.is_nil(result)
+      assert.is_string(err)
+      assert.truthy(err:find("ffi_fail"))
+    end)
+
     it("returns nil + ffi_fail error on LUAGATE_BUDGET_EXCEEDED (-3)", function()
       mock_lib.luagate_normalize_path = make_mock_fn("", -3)
       local result, err = decoder.normalize_path("/slow")
