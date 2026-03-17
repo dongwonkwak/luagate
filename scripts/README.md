@@ -62,6 +62,15 @@ PENDING_REVIEW: DON-97-code
 COMPLETED_REVIEW: DON-97-code (2026-03-14)
 ```
 
+### Worktree 환경
+
+`git worktree`(Claude Code `isolation: "worktree"`)에서 실행할 때:
+
+- `PROGRESS.md`, `.claude/reviews/` 는 main repo root에서 읽고 쓴다.
+- `codex exec` 는 현재 worktree의 코드를 대상으로 실행한다.
+- non-worktree에서는 두 경로가 동일하므로 기존 동작과 100% 호환된다.
+- **무인자 실행 불가**: worktree에서는 `PENDING_REVIEW` 마커가 여러 개일 수 있어 자동 감지를 차단한다. 반드시 `./scripts/codex-review.sh DON-XX type` 으로 수동 지정해야 한다.
+
 ### 전제 조건
 
 - `codex` CLI가 PATH에 설치되어 있어야 한다.
@@ -122,6 +131,11 @@ conversation 을 resolve 하는 스크립트.
 - `gh`, `jq`, `git`, `codex` CLI 가 PATH 에 있어야 한다.
 - `gh auth login` 이 완료되어 있어야 한다.
 - 현재 체크아웃한 브랜치가 PR head 브랜치와 같아야 한다.
+
+### Worktree 환경
+
+`git worktree` 에서 실행할 때도 동일한 명령어로 동작한다.
+상태 파일(`.claude/reviews/pr-<number>-codex-followup.md`)은 main repo root에 저장된다.
 
 ### 상태 파일
 

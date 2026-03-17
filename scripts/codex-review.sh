@@ -44,6 +44,13 @@ if [ $# -eq 2 ]; then
   PENDING="${ISSUE}-${TYPE}"
   validate_pending "$PENDING"
 elif [ $# -eq 0 ]; then
+  # worktree 환경에서는 PENDING_REVIEW 마커가 여러 개일 수 있어 자동 감지 불가
+  if [ "$WORKTREE_ROOT" != "$MAIN_ROOT" ]; then
+    echo "오류: worktree 환경에서는 이슈/유형을 수동 지정해야 합니다." >&2
+    echo "직접 지정: ./scripts/codex-review.sh <ISSUE> <TYPE>" >&2
+    echo "예시: ./scripts/codex-review.sh DON-97 code" >&2
+    exit 1
+  fi
   # Fix #1: pipefail로 인한 무출력 종료 방지 — || true로 grep 실패를 무시
   PENDING=$(grep '^PENDING_REVIEW:' "${MAIN_ROOT}/PROGRESS.md" 2>/dev/null | tail -1 | awk '{print $2}' || true)
   if [ -z "$PENDING" ]; then

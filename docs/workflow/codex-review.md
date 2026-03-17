@@ -117,6 +117,9 @@ scripts/
 Claude Code worktree(`isolation: "worktree"`)에서 구현한 경우의 워크플로우.
 스크립트는 `git worktree list`를 활용해 main repo의 review 파일을 자동 참조한다.
 
+> **주의**: worktree에서는 `PENDING_REVIEW` 마커가 여러 이슈에 걸쳐 존재할 수 있으므로,
+> `codex-review.sh`의 무인자 실행은 차단된다. 반드시 `DON-XXX {type}`을 수동 지정해야 한다.
+
 #### Pre-PR 리뷰 (codex-review.sh)
 
 ```
@@ -124,14 +127,14 @@ Claude Code worktree(`isolation: "worktree"`)에서 구현한 경우의 워크�
    └─ worktree 경로 + 브랜치 반환
 
 2. Claude Code: request-codex-review 스킬 실행 (main context)
-   └─ main/.claude/reviews/DON-XXX-review.md 생성
+   └─ main/.claude/reviews/DON-XXX-{type}-review.md 생성
    └─ main/PROGRESS.md에 PENDING_REVIEW 마커 기입
 
 3. 사람: worktree 디렉토리에서 Codex 실행
    └─ cd <worktree-path>
-   └─ ./scripts/codex-review.sh
+   └─ ./scripts/codex-review.sh DON-XXX {type}
    └─ 스크립트가 main의 review.md 읽기 + worktree 코드 리뷰
-   └─ 결과: main/.claude/reviews/DON-XXX-result.md 생성
+   └─ 결과: main/.claude/reviews/DON-XXX-{type}-result.md 생성
 
 4. 이후 흐름은 기존과 동일
 ```
@@ -144,7 +147,7 @@ Claude Code worktree(`isolation: "worktree"`)에서 구현한 경우의 워크�
 2. 사람: worktree 디렉토리에서 스크립트 실행
    └─ cd <worktree-path>
    └─ ./scripts/codex-address-pr-review.sh
-   └─ 상태 파일: main/.claude/reviews/pr-N-codex-followup.md
+   └─ 상태 파일: main/.claude/reviews/pr-<number>-codex-followup.md
 
 3. 이후 흐름은 기존과 동일
 ```
