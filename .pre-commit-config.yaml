@@ -9,7 +9,7 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=500"]
       - id: check-yaml
-        files: \.yaml$
+        files: \.(yaml|yml)$
       - id: no-commit-to-branch
         args: ["--branch", "main"]
 
