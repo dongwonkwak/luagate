@@ -432,6 +432,36 @@ describe("handler.rewrite — ngx.ctx 초기화", function()
     package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
   end)
 
+  it("decoder path exception → decoder_error = 'decoder_path_exception'", function()
+    package.loaded["luagate.decoder.ffi"] = {
+      normalize_path = function()
+        error("simulated decoder path exception")
+      end,
+      normalize_query = function(query_raw)
+        return query_raw, nil, false
+      end,
+    }
+    handler.rewrite()
+    assert.are.equal("decoder_path_exception", ngx_mock.ctx.luagate.decoder_error)
+    assert.are.equal("/api/test", ngx_mock.ctx.luagate.path_normalized)
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+  end)
+
+  it("decoder query exception → decoder_error = 'decoder_query_exception'", function()
+    package.loaded["luagate.decoder.ffi"] = {
+      normalize_path = function(path_raw)
+        return path_raw, nil, false
+      end,
+      normalize_query = function()
+        error("simulated decoder query exception")
+      end,
+    }
+    handler.rewrite()
+    assert.are.equal("decoder_query_exception", ngx_mock.ctx.luagate.decoder_error)
+    assert.are.equal("foo=bar", ngx_mock.ctx.luagate.query_normalized)
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+  end)
+
   it("decoder partial decode → decoder_error is nil, path_normalized uses partial result", function()
     _decoder_stub.normalize_path_result = { "/partial/path", nil, true }
     handler.rewrite()
@@ -1202,11 +1232,11 @@ describe("handler.access — scanner: error → fail-closed", function()
     assert.are.equal("scanner_internal_error", ngx_mock.var.luagate_deny_reason)
   end)
 
-  it("scanner budget_exceeded → deny_reason = 'scanner_budget_exceeded'", function()
+  it("scanner budget_exceeded → deny_reason = 'budget_exceeded'", function()
     _scanner_stub.scan_result = { nil, "scanner_fail:-3" }
     handler.access()
-    assert.are.equal("scanner_budget_exceeded", ngx_mock.ctx.luagate.deny_reason)
-    assert.are.equal("scanner_budget_exceeded", ngx_mock.var.luagate_deny_reason)
+    assert.are.equal("budget_exceeded", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("budget_exceeded", ngx_mock.var.luagate_deny_reason)
   end)
 
   it("scanner error → ngx.var.threat_type = 'scanner_error' but ctx.threat_type is nil", function()
@@ -1216,6 +1246,21 @@ describe("handler.access — scanner: error → fail-closed", function()
     assert.is_nil(ngx_mock.ctx.luagate.threat_type)
     -- ngx.var IS set for log distinguishability
     assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
+  end)
+
+  it("scanner exception → 403 deny with 'scanner_internal_error'", function()
+    package.loaded["luagate.scanner.ffi"] = {
+      scan = function()
+        error("simulated scanner exception")
+      end,
+    }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+    assert.are.equal("scanner_internal_error", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("scanner_internal_error", ngx_mock.var.luagate_deny_reason)
+    assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
+    package.loaded["luagate.scanner.ffi"] = _scanner_stub_module
   end)
 end)
 
@@ -1275,6 +1320,24 @@ describe("handler.access — decoder error (from rewrite) → fail-closed", func
     assert.is_nil(ngx_mock.ctx.luagate.threat_type)
     assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
     assert.are.equal("decoder_load_error", ngx_mock.ctx.luagate.deny_reason)
+  end)
+
+  it("decoder path exception from rewrite → access에서 403 fail-closed", function()
+    package.loaded["luagate.decoder.ffi"] = {
+      normalize_path = function()
+        error("simulated decoder path exception")
+      end,
+      normalize_query = function(query_raw)
+        return query_raw, nil, false
+      end,
+    }
+    handler.rewrite()
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+    assert.are.equal("decoder_path_exception", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
   end)
 
   it("decoder partial decode → no decoder_error → 스캔 + 정책 평가 계속", function()

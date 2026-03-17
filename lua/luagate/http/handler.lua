@@ -386,7 +386,7 @@ function _M.access()
     -- Distinguish budget_exceeded vs internal_error (security-scanner.md §2b)
     local deny_reason = "scanner_internal_error"
     if scan_err:find("%-3") then
-      deny_reason = "scanner_budget_exceeded"
+      deny_reason = "budget_exceeded"
     end
     ngx.log(ngx.ERR, "[luagate] scanner error: ", scan_err)
     ctx.action = "deny"

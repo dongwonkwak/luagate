@@ -50,7 +50,7 @@ ADR-002 정책 평가 제외와 동일 규칙.
 | 에러 유형 | 의미 | 처리 |
 |---------|------|------|
 | `decode_partial` | transform 일부 실패. raw/partial-decoded 값으로 검사 계속. fail-open 아님 — 검사는 반드시 실행 | 계속 진행 (partial 값으로 스캔) |
-| `scanner_internal_error` | 스캐너 자체 실패 | fail-closed (403) |
+| `scanner_internal_error` | 스캐너 자체 실패. Lua wrapper exception, `require()` load failure, FFI wrapper 예외 포함 | fail-closed (403) |
 | `budget_exceeded` | 5ms 초과 | fail-closed (403) |
 
 ## 2c. 입력 크기 상한
@@ -176,6 +176,11 @@ end
 
 return M
 ```
+
+**호출자 계약:**
+- `M.scan(ctx)` 호출자는 반드시 `pcall(M.scan, ctx)`로 Lua-level exception을 흡수해야 한다.
+- `scanner_fail:-3`은 `budget_exceeded`, `scanner_fail:-4`와 Lua wrapper exception은 `scanner_internal_error`로 매핑한다.
+- 보안 경로에서는 위 예외를 `500`으로 전파하지 않고 `403 fail-closed`로 처리한다.
 
 ## 4. OWASP 패턴 (§5)
 
