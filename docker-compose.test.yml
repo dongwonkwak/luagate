@@ -25,6 +25,8 @@ services:
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-secret-token-for-integration}
       - TEST_NGINX_BINARY=/usr/local/openresty/bin/openresty
       - TEST_NGINX_WORKER_USER=nobody
+      - TEST_NGINX_FAST_SHUTDOWN=1
+      - TEST_NGINX_USE_HUP=1
       # Test::Nginx가 임시 nginx 인스턴스를 띄울 때 사용하는 포트
       - TEST_NGINX_PORT=1984
       # tests/ 볼륨을 :ro로 마운트 시 t/servroot 생성 실패 방지
