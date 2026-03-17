@@ -24,7 +24,6 @@ usage() {
   cat <<EOF
 사용법:
   $SCRIPT_NAME
-  $SCRIPT_NAME --resume
   $SCRIPT_NAME --thread-url <thread-url>
   $SCRIPT_NAME --pr <number>
   $SCRIPT_NAME --url <pr-url>
@@ -32,7 +31,7 @@ usage() {
   $SCRIPT_NAME --no-push
 
 옵션:
-  --resume                이전 상태 파일을 읽어 미완료 항목만 재개
+  --resume                자동 판단 대신 명시적으로 resume 모드 사용
   --thread-url <url>      특정 review thread 하나만 처리
   --pr <number>           현재 브랜치 PR 자동 탐지 실패 시 수동 지정
   --url <pr-url>          현재 브랜치 PR 자동 탐지 실패 시 수동 지정
@@ -58,12 +57,43 @@ trim_field() {
   printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
+state_checkbox() {
+  local status="$1"
+  case "$status" in
+    done)
+      printf 'x'
+      ;;
+    *)
+      printf ' '
+      ;;
+  esac
+}
+
+state_file_has_history() {
+  [ -f "$STATE_FILE" ] && grep -q '^STATE	' "$STATE_FILE" 2>/dev/null
+}
+
 append_state() {
   local status="$1"
   local thread_url="$2"
   local comment_id="$3"
   local commit_sha="$4"
-  local note="$5"
+  local title="$5"
+  local note="$6"
+  local checkbox
+
+  checkbox="$(state_checkbox "$status")"
+
+  {
+    echo ""
+    printf -- "- [%s] %s\n" "$checkbox" "$title"
+    echo "      → thread: $thread_url"
+    echo "      → 상태: $status"
+    if [ "$commit_sha" != "-" ]; then
+      echo "      → commit: $commit_sha"
+    fi
+    echo "      → 결과: $(sanitize_field "$note")"
+  } >>"$STATE_FILE"
 
   printf 'STATE\t%s\t%s\t%s\t%s\t%s\n' \
     "$status" \
@@ -87,7 +117,7 @@ latest_state() {
 
 ensure_state_file() {
   mkdir -p "$REVIEWS_DIR"
-  if [ -f "$STATE_FILE" ]; then
+  if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
     return 0
   fi
 
@@ -97,8 +127,8 @@ PR_URL: $PR_URL
 BRANCH: $CURRENT_BRANCH
 CREATED_AT: $(date '+%Y-%m-%d %H:%M:%S %z')
 
-# Columns:
-# STATE<TAB>status<TAB>thread_url<TAB>comment_id<TAB>commit_sha<TAB>note
+# 아래 체크마크 항목은 사람이 읽는 진행 기록이다.
+# 이어지는 STATE<TAB>... 라인은 resume 판단용 내부 상태 로그다.
 EOF
 }
 
@@ -356,10 +386,13 @@ if [ "$CURRENT_BRANCH" != "$PR_HEAD_REF" ]; then
 fi
 
 STATE_FILE="${REVIEWS_DIR}/pr-${PR_NUMBER}-codex-followup.md"
-if [ -f "$STATE_FILE" ] && [ "$RESUME" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
-  echo "오류: 상태 파일이 이미 존재합니다: $STATE_FILE" >&2
-  echo "이어 실행하려면 '--resume' 을 사용하세요." >&2
-  exit 1
+if [ "$DRY_RUN" -ne 1 ] && state_file_has_history; then
+  if [ "$RESUME" -eq 1 ]; then
+    echo "resume 모드: 기존 상태 파일을 사용합니다."
+  else
+    echo "기존 상태 파일 감지: 자동으로 resume 모드로 전환합니다."
+    RESUME=1
+  fi
 fi
 
 THREADS_JSON="$(fetch_threads_json)"
@@ -421,20 +454,20 @@ printf '%s\n' "$THREADS" | while IFS= read -r thread; do
   fi
 
   require_clean_worktree
-  append_state "in_progress" "$THREAD_URL" "$COMMENT_ID" "-" "$REVIEW_TITLE"
+  append_state "in_progress" "$THREAD_URL" "$COMMENT_ID" "-" "$REVIEW_TITLE" "처리를 시작합니다."
 
   PROMPT_FILE="$TMP_DIR/prompt-${COMMENT_ID}.md"
   REPLY_FILE="$TMP_DIR/reply-${COMMENT_ID}.md"
   build_reply_prompt "$PROMPT_FILE" "$THREAD_URL" "$THREAD_PATH" "$THREAD_LINE" "$REVIEW_TITLE" "$REVIEW_BODY"
 
   if ! codex exec --full-auto --color never -C "$REPO_ROOT" -o "$REPLY_FILE" - <"$PROMPT_FILE"; then
-    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "-" "codex exec 실패"
+    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "-" "$REVIEW_TITLE" "codex exec 실패"
     echo "실패: Codex 실행 실패 — $THREAD_URL" >&2
     exit 1
   fi
 
   if [ ! -s "$REPLY_FILE" ]; then
-    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "-" "reply 본문 없음"
+    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "-" "$REVIEW_TITLE" "reply 본문 없음"
     echo "실패: reply 본문이 비어 있습니다 — $THREAD_URL" >&2
     exit 1
   fi
@@ -447,7 +480,7 @@ printf '%s\n' "$THREADS" | while IFS= read -r thread; do
   fi
 
   if [ "$NO_PUSH" -eq 1 ]; then
-    append_state "done" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "local commit only; push/reply skipped"
+    append_state "local_only" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "$REVIEW_TITLE" "local commit only; push/reply skipped"
     echo "완료(로컬): $THREAD_URL"
     continue
   fi
@@ -457,17 +490,17 @@ printf '%s\n' "$THREADS" | while IFS= read -r thread; do
   fi
 
   if ! post_reply "$COMMENT_ID" "$REPLY_FILE"; then
-    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "reply 게시 실패"
+    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "$REVIEW_TITLE" "reply 게시 실패"
     echo "실패: GitHub reply 게시 실패 — $THREAD_URL" >&2
     exit 1
   fi
 
   if ! resolve_thread "$THREAD_ID"; then
-    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "thread resolve 실패"
+    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "$REVIEW_TITLE" "reply posted; thread resolve 실패"
     echo "실패: GitHub thread resolve 실패 — $THREAD_URL" >&2
     exit 1
   fi
 
-  append_state "done" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "reply posted; thread resolved"
+  append_state "done" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "$REVIEW_TITLE" "reply posted; thread resolved"
   echo "완료: $THREAD_URL"
 done

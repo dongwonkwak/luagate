@@ -82,7 +82,10 @@ conversation 을 resolve 하는 스크립트.
 # 현재 브랜치의 연결 PR을 자동 탐지해 처리
 ./scripts/codex-address-pr-review.sh
 
-# 이전 실행 상태를 읽어 미완료 항목만 재개
+# 기존 상태 파일이 있으면 자동으로 재개 판단
+./scripts/codex-address-pr-review.sh
+
+# 필요하면 명시적으로 재개 모드 사용
 ./scripts/codex-address-pr-review.sh --resume
 
 # 특정 thread 하나만 처리
@@ -106,7 +109,7 @@ conversation 을 resolve 하는 스크립트.
 
 | 옵션 | 설명 |
 |------|------|
-| `--resume` | `.claude/reviews/pr-<number>-codex-followup.md` 상태 파일을 읽어 완료된 항목은 건너뜀 |
+| `--resume` | 자동 판단 대신 명시적으로 resume 모드 사용 |
 | `--thread-url <url>` | 특정 review thread 하나만 처리 |
 | `--pr <number>` | 현재 브랜치 PR 자동 탐지 실패 시 수동 지정 |
 | `--url <pr-url>` | 현재 브랜치 PR 자동 탐지 실패 시 수동 지정 |
@@ -128,8 +131,9 @@ conversation 을 resolve 하는 스크립트.
 .claude/reviews/pr-<number>-codex-followup.md
 ```
 
-- 항목별 진행 상태, commit SHA, reply/resolve 여부를 append 형식으로 기록
-- 중단 후 `--resume` 으로 재개 가능
+- 사람이 읽는 체크마크 진행 기록과 내부 `STATE<TAB>...` 로그를 함께 append
+- 기본 실행 시 상태 파일에 실제 이력이 있으면 자동으로 resume 판단
+- `done`만 완료로 간주하고, `failed` / `local_only` 는 재실행 대상
 
 ### 주의 사항
 
@@ -137,6 +141,7 @@ conversation 을 resolve 하는 스크립트.
   - `codex-review.sh`: PR 전 내부 리뷰 프롬프트 실행
   - `codex-address-pr-review.sh`: PR 후 GitHub review thread 후속 수정/답글
 - `--no-push` 는 로컬 커밋은 만들 수 있지만 원격 push, GitHub reply, conversation resolve 는 생략한다.
+  이 상태는 `local_only` 로 기록되며, 다음 실행에서 재개 대상이다.
 
 ---
 

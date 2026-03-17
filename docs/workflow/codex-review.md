@@ -121,7 +121,10 @@ review thread 를 남긴 경우, 아래 스크립트로 후속 수정/답글을 
 # 현재 브랜치의 연결 PR 자동 탐지
 ./scripts/codex-address-pr-review.sh
 
-# 중단 후 재개
+# 기본 실행도 상태 파일을 보고 자동 재개 판단
+./scripts/codex-address-pr-review.sh
+
+# 필요 시 명시적 resume
 ./scripts/codex-address-pr-review.sh --resume
 ```
 
@@ -134,6 +137,13 @@ review thread 를 남긴 경우, 아래 스크립트로 후속 수정/답글을 
 5. 해당 thread 에 `원인 / 수정 / 검증` 형식 답글 게시
 6. reply 성공 후 `Resolve conversation`
 7. 상태는 `.claude/reviews/pr-<number>-codex-followup.md` 에 기록
+   체크마크 진행 기록 + 내부 `STATE<TAB>...` 로그를 함께 남긴다.
+
+재실행 규칙:
+
+- 상태 파일이 없으면 새 실행
+- 상태 파일이 있고 실제 이력이 있으면 기본 실행도 자동으로 resume
+- `done` 항목은 건너뛰고, `failed` / `local_only` 항목은 다시 처리
 
 > 이 플로우는 기존 `review.md → result.md` 기반 내부 리뷰와 별개다.
 > 즉, PR 전 리뷰에는 `codex-review.sh`, PR 후 GitHub thread 대응에는
