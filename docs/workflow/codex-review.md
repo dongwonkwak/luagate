@@ -112,6 +112,43 @@ scripts/
 ./scripts/codex-review.sh DON-97 design
 ```
 
+### C. Worktree 환경에서 리뷰
+
+Claude Code worktree(`isolation: "worktree"`)에서 구현한 경우의 워크플로우.
+스크립트는 `git worktree list`를 활용해 main repo의 review 파일을 자동 참조한다.
+
+#### Pre-PR 리뷰 (codex-review.sh)
+
+```
+1. Claude Code: worktree에서 구현 + 커밋 완료
+   └─ worktree 경로 + 브랜치 반환
+
+2. Claude Code: request-codex-review 스킬 실행 (main context)
+   └─ main/.claude/reviews/DON-XXX-review.md 생성
+   └─ main/PROGRESS.md에 PENDING_REVIEW 마커 기입
+
+3. 사람: worktree 디렉토리에서 Codex 실행
+   └─ cd <worktree-path>
+   └─ ./scripts/codex-review.sh
+   └─ 스크립트가 main의 review.md 읽기 + worktree 코드 리뷰
+   └─ 결과: main/.claude/reviews/DON-XXX-result.md 생성
+
+4. 이후 흐름은 기존과 동일
+```
+
+#### Post-PR 리뷰 (codex-address-pr-review.sh)
+
+```
+1. worktree에서 PR push 후 Codex review thread 생성됨
+
+2. 사람: worktree 디렉토리에서 스크립트 실행
+   └─ cd <worktree-path>
+   └─ ./scripts/codex-address-pr-review.sh
+   └─ 상태 파일: main/.claude/reviews/pr-N-codex-followup.md
+
+3. 이후 흐름은 기존과 동일
+```
+
 ### B. PR 후 GitHub Codex 리뷰 대응
 
 PR을 올린 뒤 `@codex review` 또는 자동 트리거로 `chatgpt-codex-connector` 가

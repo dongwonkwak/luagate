@@ -12,6 +12,11 @@
 
 set -euo pipefail
 
+# --- worktree 환경 지원: MAIN_ROOT / WORKTREE_ROOT 분리 ---
+WORKTREE_ROOT="$(git rev-parse --show-toplevel)"
+MAIN_ROOT="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
+cd "$WORKTREE_ROOT"
+
 # --- codex CLI 설치 확인 ---
 if ! command -v codex &>/dev/null; then
   echo "오류: codex CLI가 설치되어 있지 않습니다." >&2
@@ -19,7 +24,7 @@ if ! command -v codex &>/dev/null; then
   exit 1
 fi
 
-REVIEWS_DIR=".claude/reviews"
+REVIEWS_DIR="${MAIN_ROOT}/.claude/reviews"
 
 # --- 인자 검증 함수 ---
 validate_pending() {
@@ -40,7 +45,7 @@ if [ $# -eq 2 ]; then
   validate_pending "$PENDING"
 elif [ $# -eq 0 ]; then
   # Fix #1: pipefail로 인한 무출력 종료 방지 — || true로 grep 실패를 무시
-  PENDING=$(grep '^PENDING_REVIEW:' PROGRESS.md 2>/dev/null | tail -1 | awk '{print $2}' || true)
+  PENDING=$(grep '^PENDING_REVIEW:' "${MAIN_ROOT}/PROGRESS.md" 2>/dev/null | tail -1 | awk '{print $2}' || true)
   if [ -z "$PENDING" ]; then
     echo "오류: PROGRESS.md에 PENDING_REVIEW 마커가 없습니다." >&2
     echo "직접 지정: ./scripts/codex-review.sh <ISSUE> <TYPE>" >&2
@@ -75,6 +80,7 @@ if [ -n "$RESOLVED" ]; then
   REOPEN=$(grep '^\- \[ \]' "$RESULT" 2>/dev/null | sed 's/^- \[ \] //' || true)
   REREVIEW_PROMPT=$(mktemp)
   REREVIEW_OUTPUT=$(mktemp)
+  # shellcheck disable=SC2064  # 즉시 확장이 의도된 동작
   trap "rm -f '$REREVIEW_PROMPT' '$REREVIEW_OUTPUT'" EXIT
 
   {
@@ -115,6 +121,7 @@ else
   # 최초 리뷰: review.md → Codex → result.md 신규 생성
   # tmpfile 패턴: codex 성공 시에만 result.md 생성 (실패 시 빈 파일 잔존 방지)
   FIRST_OUTPUT=$(mktemp)
+  # shellcheck disable=SC2064  # 즉시 확장이 의도된 동작
   trap "rm -f '$FIRST_OUTPUT'" EXIT
   if codex exec - < "$REVIEW" > "$FIRST_OUTPUT"; then
     cp "$FIRST_OUTPUT" "$RESULT"
@@ -126,7 +133,7 @@ else
 fi
 
 # --- PROGRESS.md 마커 정리: PENDING_REVIEW → COMPLETED_REVIEW ---
-if grep -q "^PENDING_REVIEW: ${PENDING}$" PROGRESS.md 2>/dev/null; then
-  sed "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" PROGRESS.md > PROGRESS.md.tmp && mv PROGRESS.md.tmp PROGRESS.md
+if grep -q "^PENDING_REVIEW: ${PENDING}$" "${MAIN_ROOT}/PROGRESS.md" 2>/dev/null; then
+  sed "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" "${MAIN_ROOT}/PROGRESS.md" > "${MAIN_ROOT}/PROGRESS.md.tmp" && mv "${MAIN_ROOT}/PROGRESS.md.tmp" "${MAIN_ROOT}/PROGRESS.md"
   echo "PROGRESS.md 마커 갱신: PENDING_REVIEW → COMPLETED_REVIEW"
 fi
