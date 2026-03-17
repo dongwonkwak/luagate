@@ -39,7 +39,7 @@ git diff main...HEAD --name-only
 | `lua/luagate/log/**` | openresty-patterns | log-schema | ADR-004 |
 | `lua/luagate/metrics/**` | openresty-patterns | log-schema | ADR-004 |
 | `csrc/protocol_parser/**` | c-ffi-guide | c-ffi-modules, stream-pipeline | ADR-001 |
-| `csrc/cidr/**` | c-ffi-guide | c-ffi-modules | ADR-001 |
+| `csrc/cidr_matcher/**` | c-ffi-guide | c-ffi-modules | ADR-001 |
 | `csrc/decoder/**` | c-ffi-guide, security-patterns | c-ffi-modules, security-scanner | ADR-001 |
 | `conf/**` | openresty-patterns | architecture | ADR-001 |
 | `policies/**` | — | policy-engine | ADR-002, ADR-003 |
