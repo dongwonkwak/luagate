@@ -187,6 +187,7 @@ fetch_threads_json() {
           pullRequest(number: $number) {
             reviewThreads(first: 100) {
               nodes {
+                id
                 isResolved
                 comments(first: 20) {
                   nodes {
@@ -270,6 +271,23 @@ post_reply() {
     --silent
 }
 
+resolve_thread() {
+  local thread_id="$1"
+
+  gh api graphql \
+    -F threadId="$thread_id" \
+    -f query='
+      mutation($threadId: ID!) {
+        resolveReviewThread(input: { threadId: $threadId }) {
+          thread {
+            isResolved
+          }
+        }
+      }
+    ' \
+    --silent
+}
+
 DRY_RUN=0
 NO_PUSH=0
 RESUME=0
@@ -350,7 +368,12 @@ THREADS="$(printf '%s' "$THREADS_JSON" | jq -c \
   --arg thread_url "$THREAD_URL_FILTER" '
     .data.repository.pullRequest.reviewThreads.nodes
     | map(select(.isResolved == false))
-    | map(.comments.nodes[0])
+    | map({
+        thread_id: .id,
+        comment: .comments.nodes[0]
+      })
+    | map(select(.comment != null))
+    | map(.comment + { thread_id: .thread_id })
     | map(select(. != null))
     | map(select(.author.login == $author))
     | map(select($thread_url == "" or .url == $thread_url))
@@ -384,6 +407,7 @@ printf '%s\n' "$THREADS" | while IFS= read -r thread; do
   [ -n "$thread" ] || continue
 
   THREAD_URL="$(printf '%s' "$thread" | jq -r '.url')"
+  THREAD_ID="$(printf '%s' "$thread" | jq -r '.thread_id')"
   COMMENT_ID="$(printf '%s' "$thread" | jq -r '.databaseId')"
   THREAD_PATH="$(printf '%s' "$thread" | jq -r '.path')"
   THREAD_LINE="$(printf '%s' "$thread" | jq -r '.line // 0')"
@@ -438,6 +462,12 @@ printf '%s\n' "$THREADS" | while IFS= read -r thread; do
     exit 1
   fi
 
-  append_state "done" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "reply posted"
+  if ! resolve_thread "$THREAD_ID"; then
+    append_state "failed" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "thread resolve 실패"
+    echo "실패: GitHub thread resolve 실패 — $THREAD_URL" >&2
+    exit 1
+  fi
+
+  append_state "done" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "reply posted; thread resolved"
   echo "완료: $THREAD_URL"
 done

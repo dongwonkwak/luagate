@@ -132,7 +132,8 @@ review thread 를 남긴 경우, 아래 스크립트로 후속 수정/답글을 
 3. 각 항목마다 `codex exec` 로 수정/검증 수행
 4. 수정 사항이 있으면 항목별 커밋 + `git push origin HEAD`
 5. 해당 thread 에 `원인 / 수정 / 검증` 형식 답글 게시
-6. 상태는 `.claude/reviews/pr-<number>-codex-followup.md` 에 기록
+6. reply 성공 후 `Resolve conversation`
+7. 상태는 `.claude/reviews/pr-<number>-codex-followup.md` 에 기록
 
 > 이 플로우는 기존 `review.md → result.md` 기반 내부 리뷰와 별개다.
 > 즉, PR 전 리뷰에는 `codex-review.sh`, PR 후 GitHub thread 대응에는

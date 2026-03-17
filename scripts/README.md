@@ -73,7 +73,8 @@ COMPLETED_REVIEW: DON-97-code (2026-03-14)
 ## codex-address-pr-review.sh
 
 PR에 `chatgpt-codex-connector` 가 남긴 unresolved review thread 를 읽어,
-Codex CLI로 항목별 수정/검증을 수행한 뒤 GitHub thread 에 답글을 남기는 스크립트.
+Codex CLI로 항목별 수정/검증을 수행한 뒤 GitHub thread 에 답글을 남기고
+conversation 을 resolve 하는 스크립트.
 
 ### 사용법
 
@@ -99,6 +100,7 @@ Codex CLI로 항목별 수정/검증을 수행한 뒤 GitHub thread 에 답글�
 4. 수정 사항이 있으면 항목별 커밋 생성
 5. `git push origin HEAD`
 6. 해당 review thread 에 `원인 / 수정 / 검증` 형식 답글 게시
+7. reply 성공 후 `Resolve conversation` 처리
 
 ### 옵션
 
@@ -126,7 +128,7 @@ Codex CLI로 항목별 수정/검증을 수행한 뒤 GitHub thread 에 답글�
 .claude/reviews/pr-<number>-codex-followup.md
 ```
 
-- 항목별 진행 상태, commit SHA, reply 게시 여부를 append 형식으로 기록
+- 항목별 진행 상태, commit SHA, reply/resolve 여부를 append 형식으로 기록
 - 중단 후 `--resume` 으로 재개 가능
 
 ### 주의 사항
@@ -134,7 +136,7 @@ Codex CLI로 항목별 수정/검증을 수행한 뒤 GitHub thread 에 답글�
 - 이 스크립트는 기존 `codex-review.sh` 와 목적이 다르다.
   - `codex-review.sh`: PR 전 내부 리뷰 프롬프트 실행
   - `codex-address-pr-review.sh`: PR 후 GitHub review thread 후속 수정/답글
-- `--no-push` 는 로컬 커밋은 만들 수 있지만 원격 push 와 GitHub reply 는 생략한다.
+- `--no-push` 는 로컬 커밋은 만들 수 있지만 원격 push, GitHub reply, conversation resolve 는 생략한다.
 
 ---
 
