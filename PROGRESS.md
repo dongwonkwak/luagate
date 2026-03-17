@@ -161,3 +161,9 @@ COMPLETED_REVIEW: DON-135-code (2026-03-16)
 | 2026-03-17 | DON-104 | Claude Code skill: knowledge-based codex review context on PR creation | `.claude/skills/pr-review-context/SKILL.md`, `CLAUDE.md` (PR 워크플로우 + skills 테이블) | 16개 파일 패턴 매핑, 출력 예시 포함 |
 
 COMPLETED_REVIEW: DON-138-code (2026-03-17)
+
+## Phase 1-Core: policy/loader.lua Hot Reload 7단계 (DON-138)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-17 | DON-138 | policy/loader.lua — Hot Reload 7단계 구현 | `lua/luagate/policy/loader.lua`, `tests/unit/policy/loader_spec.lua`, `conf/nginx.conf` | 290 tests, Codex 3개+Security 2개 피드백 반영 |
