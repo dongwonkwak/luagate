@@ -199,3 +199,19 @@ COMPLETED_REVIEW: DON-153-code (2026-03-17)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-17 | DON-153 | codex review 스크립트 git worktree 호환성 확보 | `scripts/codex-review.sh`, `scripts/codex-address-pr-review.sh`, `docs/workflow/codex-review.md`, `scripts/README.md` | MAIN_ROOT/WORKTREE_ROOT 분리, worktree 무인자 실행 차단, 문서 반영. Codex 리뷰 3건 반영 |
+
+## Phase 1-Core: HTTP 로그 + 메트릭 수집 (DON-137)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-17 | DON-137 | HTTP 로그 + 메트릭 수집 | `lua/luagate/log/http.lua`, `lua/luagate/metrics/collector.lua`, `tests/unit/log/http_spec.lua`, `tests/unit/metrics/collector_spec.lua` | DON-140에서 이미 구현 완료 확인. 27필드 JSON, 리댁션, 히스토그램 포함 |
+
+## Phase 1-Security: access_by_lua 보안 스캐너 통합 (DON-142)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-17 | DON-142 | decoder + scanner HTTP 파이프라인 통합 | `lua/luagate/http/handler.lua`, `lua/luagate/metrics/collector.lua`, `tests/unit/http/handler_spec.lua`, `tests/unit/metrics/collector_spec.lua` | 454 tests 통과. decoder→scanner→policy eval 순서, fail-closed, 8KB 제한, scanner threat 메트릭 추가 |
+
+COMPLETED_REVIEW: DON-142-code (2026-03-17)
+
+COMPLETED_REVIEW: DON-142-code (2026-03-17)

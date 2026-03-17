@@ -42,7 +42,7 @@ ADR-004 §4.3은 메트릭 이름 목록, Cardinality 원칙(레이블 제한, `
 | `type` | `http`, `stream` | `luagate_active_connections` | ADR-004 §4.3 결정. 고정 2개 값, cardinality = 2 |
 | `zone` | `luagate_metrics`, `luagate_stream_metrics`, `luagate_connections`, `luagate_policy`, `luagate_state` | `luagate_shared_dict_capacity_bytes`, `luagate_shared_dict_free_bytes` | ADR-004 §4.3 결정. 고정 zone 이름, cardinality = 5 이하 |
 | `protocol` | `tls`, `http`, `raw` | `luagate_stream_protocol_detected_total` | ADR-004 §4.3 결정. 고정 3개 값, cardinality = 3 |
-| `threat_type` | `sqli`, `xss`, `path_traversal`, `cmd_injection`, `lfi`, `rfi`, `xxe`, `ssrf`, `deserialization`, `other` | `luagate_http_scanner_threats_total` | 고정 enum 최대 10개. 보안 분석 용도. 스캐너 deny 시에만 기록 |
+| `threat_type` | `sqli`, `xss`, `path_traversal`, `cmd_injection`, `lfi`, `rfi`, `xxe`, `ssrf`, `log4shell`, `scanner`, `deserialization`, `other` | `luagate_http_scanner_threats_total` | 고정 enum 최대 12개. 보안 분석 용도. 스캐너 deny 시에만 기록 |
 
 #### 1.2 `threat_type` 레이블 및 신규 메트릭 결정
 
@@ -53,13 +53,13 @@ ADR-004 §4.3은 메트릭 이름 목록, Cardinality 원칙(레이블 제한, `
 - `luagate_http_scanner_threats_total{threat_type}`: 스캐너 deny 시에만, `threat_type` 레이블과 함께 별도로 카운트. 두 메트릭은 독립 집계이므로 중복 합산 위험 없음.
 
 **근거:**
-- 값이 고정 enum(최대 10개)으로 cardinality가 통제된다.
+- 값이 고정 enum(최대 12개)으로 cardinality가 통제된다.
 - 위협 유형별 deny 분포를 Prometheus에서 직접 집계할 수 있어 보안 대시보드 구성에 유용하다.
 - ADR-004 §4.1에서 로그 필드 `threat_type`이 이미 정의되어 있으므로 메트릭 레이블과 의미가 일치한다.
 
-**`threat_type` 허용 값 (10개 고정):** `sqli`, `xss`, `path_traversal`, `cmd_injection`, `lfi`, `rfi`, `xxe`, `ssrf`, `deserialization`, `other`
+**`threat_type` 허용 값 (12개 고정):** `sqli`, `xss`, `path_traversal`, `cmd_injection`, `lfi`, `rfi`, `xxe`, `ssrf`, `log4shell`, `scanner`, `deserialization`, `other`
 
-- `other`는 위 9개에 해당하지 않는 모든 위협 유형의 폴백 값이다.
+- `other`는 위 11개에 해당하지 않는 모든 위협 유형의 폴백 값이다.
 - 새 위협 유형 추가는 이 ADR을 개정하여 목록에 명시적으로 등록해야 한다. 구현 코드가 목록에 없는 값을 받으면 `other`로 정규화한다.
 
 > **구현 제약 (보안)**: `luagate_http_scanner_threats_total` incr 시, shared dict 키 조합 **직전**에 `threat_type` 값을 위 허용 목록으로 검증하고 미등록 값은 `other`로 정규화한 뒤 키를 조합해야 한다. `/metrics` 응답 생성 단계로 정규화를 늦춰서는 안 된다. 정규화 누락 시 임의 문자열이 shared dict 키로 삽입되어 cardinality 폭발 → 메모리 고갈 DoS로 이어질 수 있다.

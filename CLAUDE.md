@@ -86,6 +86,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 - [ ] 관련 spec/ADR 준수 확인 (AGENTS.md 불변식)
 - [ ] 문서 갱신 (코드와 같은 PR — same-PR 규칙)
 - [ ] `docs/spec/` 또는 `docs/design/adr/` 변경 시 `sync-spec` 스킬 완료 (AGENTS.md 불변식 8)
+- [ ] **Codex 리뷰 완료** (`request-codex-review` 스킬 → 리뷰 결과 반영 → COMPLETED_REVIEW 마커)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터 포함
 - [ ] PROGRESS.md append (날짜/이슈/산출물/비고)
 

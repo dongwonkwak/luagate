@@ -82,6 +82,8 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 │     출력: { threat_type, rule_name }        │
 │     실패: scanner_internal_error → 403      │
 │           budget_exceeded → 403             │
+│     예외: Lua wrapper exception도 500으로    │
+│           새지 않고 fail-closed로 흡수      │
 │                                             │
 │  3. 정책 평가 (ADR-002)                     │
 │     priority 정렬 → first-match-wins        │
@@ -106,6 +108,11 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | Large body (spill to file) | 본문이 `client_body_buffer_size` 초과 시 임시 파일로 spill — MVP에서 body 검사 미지원이므로 동작 무변화. 검사 생략 사유를 WARN 로그에 기록 |
 | Chunked / streaming body | `Transfer-Encoding: chunked` 요청은 Nginx가 버퍼링 후 Lua에 전달. 청크 단위 스트리밍 검사는 Phase 2 이후 범위 |
 | Body 없는 요청 (GET 등) | `body`는 `nil`로 전달. 스캐너에 `body_len = 0`으로 호출 |
+
+**예외 흡수 계약:**
+- `rewrite_by_lua`의 decoder wrapper(`normalize_path`, `normalize_query`)와 `access_by_lua`의 scanner wrapper(`scan`)는 호출 지점에서 `pcall`로 감싼다.
+- Lua-level exception, FFI wrapper panic, `require()` load failure는 모두 fail-closed로 흡수한다.
+- 결과적으로 보안 경로 예외는 `500`으로 표면화하지 않고 `403 deny` + taxonomy token(`decoder_*`, `scanner_internal_error`, `budget_exceeded`)으로 기록한다.
 
 ### 2.4 proxy_pass (업스트림 프록시)
 
@@ -251,7 +258,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 | 실패 유형 | 실패 모드 | HTTP 응답 | 비고 |
 |---------|---------|---------|------|
-| URL decode error | fail-closed | 403 | c-ffi-modules.md `LUAGATE_INVALID_INPUT` |
+| URL decode hard error / wrapper exception | fail-closed | 403 | 예: `decoder_path_exception`, `decoder_query_exception`, `decoder_load_error`, `ffi_fail:*` |
 | scanner_internal_error | fail-closed | 403 | 스캐너 자체 오류 |
 | budget_exceeded (>5ms) | fail-closed | 403 | 스캐너 타임아웃 |
 | policy deny | — | 403 | 정책 매칭 deny |

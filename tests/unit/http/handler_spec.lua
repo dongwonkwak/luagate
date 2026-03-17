@@ -81,6 +81,64 @@ package.preload["luagate.metrics.collector"] = function()
 end
 
 -- ---------------------------------------------------------------------------
+-- decoder.ffi stub — normalize_path / normalize_query 결과 제어
+-- ---------------------------------------------------------------------------
+local _decoder_stub = {
+  normalize_path_result = nil, -- {result, err, partial}
+  normalize_query_result = nil, -- {result, err, partial}
+}
+
+-- Build the decoder stub module table (reused across resets)
+local _decoder_stub_module = {
+  normalize_path = function(path_raw)
+    if _decoder_stub.normalize_path_result then
+      local r = _decoder_stub.normalize_path_result
+      return r[1], r[2], r[3]
+    end
+    -- default: pass-through (no normalization)
+    return path_raw, nil, false
+  end,
+  normalize_query = function(query_raw)
+    if _decoder_stub.normalize_query_result then
+      local r = _decoder_stub.normalize_query_result
+      return r[1], r[2], r[3]
+    end
+    -- default: pass-through
+    return query_raw, nil, false
+  end,
+}
+
+package.preload["luagate.decoder.ffi"] = function()
+  return _decoder_stub_module
+end
+
+-- ---------------------------------------------------------------------------
+-- scanner.ffi stub — scan 결과 제어
+-- ---------------------------------------------------------------------------
+local _scanner_stub = {
+  scan_result = nil, -- {result_table, err_string}
+}
+
+-- Build the scanner stub module table (reused across resets)
+local _scanner_stub_module = {
+  scan = function(_ctx)
+    if _scanner_stub.scan_result then
+      local r = _scanner_stub.scan_result
+      return r[1], r[2]
+    end
+    -- default: no threat
+    return { threat_type = nil, rule_name = nil, threat_score = 0 }, nil
+  end,
+  init = function(_path)
+    return true, nil
+  end,
+}
+
+package.preload["luagate.scanner.ffi"] = function()
+  return _scanner_stub_module
+end
+
+-- ---------------------------------------------------------------------------
 -- ngx mock 팩토리
 -- ---------------------------------------------------------------------------
 local function make_ngx(overrides)
@@ -212,10 +270,14 @@ teardown(function()
   package.preload["luagate.policy.evaluator"] = nil
   package.preload["luagate.log.http"] = nil
   package.preload["luagate.metrics.collector"] = nil
+  package.preload["luagate.decoder.ffi"] = nil
+  package.preload["luagate.scanner.ffi"] = nil
   -- loaded 캐시도 제거 (evaluator_spec이 자체 ngx=nil 환경에서 fresh require하도록)
   package.loaded["luagate.policy.evaluator"] = nil
   package.loaded["luagate.log.http"] = nil
   package.loaded["luagate.metrics.collector"] = nil
+  package.loaded["luagate.decoder.ffi"] = nil
+  package.loaded["luagate.scanner.ffi"] = nil
   package.loaded["luagate.http.handler"] = nil
 end)
 
@@ -227,6 +289,16 @@ local function reset_stubs()
   _evaluator_stub.evaluate_result = nil
   _log_http_call_count = 0
   _metrics_record_call_count = 0
+  _decoder_stub.normalize_path_result = nil
+  _decoder_stub.normalize_query_result = nil
+  _scanner_stub.scan_result = nil
+  -- Explicitly set package.loaded with our stub modules to prevent cross-spec
+  -- contamination (e.g. decoder/ffi_spec.lua may pollute package.loaded with
+  -- the real module). This ensures handler.rewrite()/access() pcall(require,...)
+  -- always returns our controlled stubs.
+  package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+  package.loaded["luagate.scanner.ffi"] = _scanner_stub_module
+  package.loaded["luagate.policy.evaluator"] = nil
 end
 
 -- ===========================================================================
@@ -317,6 +389,84 @@ describe("handler.rewrite — ngx.ctx 초기화", function()
     handler.rewrite()
     -- rewrite 단계에서 policy를 로드하지 않으므로 ctx에 policy 없음
     assert.is_nil(ngx_mock.ctx.luagate.policy)
+  end)
+
+  it("decoder 정상 → path_normalized가 디코딩 결과로 설정된다", function()
+    _decoder_stub.normalize_path_result = { "/decoded/path", nil, false }
+    _decoder_stub.normalize_query_result = { "decoded=query", nil, false }
+    handler.rewrite()
+    assert.are.equal("/decoded/path", ngx_mock.ctx.luagate.path_normalized)
+    assert.are.equal("/decoded/path", ngx_mock.var.luagate_path_normalized)
+    assert.are.equal("decoded=query", ngx_mock.ctx.luagate.query_normalized)
+    assert.is_nil(ngx_mock.ctx.luagate.decoder_error)
+  end)
+
+  it("decoder path error → path_normalized은 path_raw fallback, decoder_error 설정", function()
+    _decoder_stub.normalize_path_result = { nil, "ffi_fail:-3", false }
+    handler.rewrite()
+    -- path_normalized falls back to path_raw
+    assert.are.equal("/api/test", ngx_mock.ctx.luagate.path_normalized)
+    assert.are.equal("ffi_fail:-3", ngx_mock.ctx.luagate.decoder_error)
+  end)
+
+  it("decoder query error → query_normalized은 query_raw fallback, decoder_error 설정", function()
+    _decoder_stub.normalize_query_result = { nil, "ffi_fail:-4", false }
+    handler.rewrite()
+    assert.are.equal("foo=bar", ngx_mock.ctx.luagate.query_normalized)
+    assert.is_not_nil(ngx_mock.ctx.luagate.decoder_error)
+  end)
+
+  it("decoder load error → decoder_error = 'decoder_load_error'", function()
+    -- Force decoder load to fail by making preload raise an error
+    package.loaded["luagate.decoder.ffi"] = nil
+    local saved_preload = package.preload["luagate.decoder.ffi"]
+    package.preload["luagate.decoder.ffi"] = function()
+      error("simulated decoder load failure")
+    end
+    handler.rewrite()
+    assert.are.equal("decoder_load_error", ngx_mock.ctx.luagate.decoder_error)
+    -- path_normalized falls back to path_raw
+    assert.are.equal("/api/test", ngx_mock.ctx.luagate.path_normalized)
+    -- Restore
+    package.preload["luagate.decoder.ffi"] = saved_preload
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+  end)
+
+  it("decoder path exception → decoder_error = 'decoder_path_exception'", function()
+    package.loaded["luagate.decoder.ffi"] = {
+      normalize_path = function()
+        error("simulated decoder path exception")
+      end,
+      normalize_query = function(query_raw)
+        return query_raw, nil, false
+      end,
+    }
+    handler.rewrite()
+    assert.are.equal("decoder_path_exception", ngx_mock.ctx.luagate.decoder_error)
+    assert.are.equal("/api/test", ngx_mock.ctx.luagate.path_normalized)
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+  end)
+
+  it("decoder query exception → decoder_error = 'decoder_query_exception'", function()
+    package.loaded["luagate.decoder.ffi"] = {
+      normalize_path = function(path_raw)
+        return path_raw, nil, false
+      end,
+      normalize_query = function()
+        error("simulated decoder query exception")
+      end,
+    }
+    handler.rewrite()
+    assert.are.equal("decoder_query_exception", ngx_mock.ctx.luagate.decoder_error)
+    assert.are.equal("foo=bar", ngx_mock.ctx.luagate.query_normalized)
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+  end)
+
+  it("decoder partial decode → decoder_error is nil, path_normalized uses partial result", function()
+    _decoder_stub.normalize_path_result = { "/partial/path", nil, true }
+    handler.rewrite()
+    assert.are.equal("/partial/path", ngx_mock.ctx.luagate.path_normalized)
+    assert.is_nil(ngx_mock.ctx.luagate.decoder_error)
   end)
 end)
 
@@ -892,6 +1042,460 @@ describe("handler.access — JSON 인젝션 방지", function()
     assert.is_nil(err, "JSON parse error: " .. tostring(err))
     assert.is_table(parsed)
     assert.are.equal("Forbidden", parsed.error)
+  end)
+end)
+
+-- ===========================================================================
+-- access() — scanner integration (DON-142) 테스트
+-- ===========================================================================
+
+describe("handler.access — scanner: threat 탐지 시 deny + 정책 평가 스킵", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+    _evaluator_stub.evaluate_result = { action = "allow", matched_rule = nil, decision_source = "default" }
+  end)
+
+  it("scanner threat 탐지 → 403 deny", function()
+    _scanner_stub.scan_result = {
+      { threat_type = "sqli", rule_name = "sqli_union_select", threat_score = 0.95 },
+      nil,
+    }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+  end)
+
+  it("scanner threat 탐지 → decision_source = 'security_scanner'", function()
+    _scanner_stub.scan_result = {
+      { threat_type = "xss", rule_name = "xss_script_tag", threat_score = 0.9 },
+      nil,
+    }
+    handler.access()
+    assert.are.equal("security_scanner", ngx_mock.var.luagate_decision_source)
+    assert.are.equal("security_scanner", ngx_mock.ctx.luagate.decision_source)
+  end)
+
+  it("scanner threat 탐지 → request_state = 'scanner_denied'", function()
+    _scanner_stub.scan_result = {
+      { threat_type = "sqli", rule_name = "sqli_tautology", threat_score = 0.85 },
+      nil,
+    }
+    handler.access()
+    assert.are.equal("scanner_denied", ngx_mock.var.luagate_request_state)
+    assert.are.equal("scanner_denied", ngx_mock.ctx.luagate.request_state)
+  end)
+
+  it("scanner threat 탐지 → threat_type, rule_name, threat_score가 ctx + ngx.var에 설정", function()
+    _scanner_stub.scan_result = {
+      { threat_type = "path_traversal", rule_name = "path_dotdot", threat_score = 0.7 },
+      nil,
+    }
+    handler.access()
+    assert.are.equal("path_traversal", ngx_mock.ctx.luagate.threat_type)
+    assert.are.equal("path_dotdot", ngx_mock.ctx.luagate.rule_name)
+    assert.are.equal(0.7, ngx_mock.ctx.luagate.threat_score)
+    assert.are.equal("path_traversal", ngx_mock.var.luagate_threat_type)
+    assert.are.equal("path_dotdot", ngx_mock.var.luagate_rule_name)
+    assert.are.equal("0.7", ngx_mock.var.luagate_threat_score)
+  end)
+
+  it("scanner threat 탐지 → deny_reason = 'scanner: <threat_type>'", function()
+    _scanner_stub.scan_result = {
+      { threat_type = "cmd_injection", rule_name = "cmd_semicolon", threat_score = 0.8 },
+      nil,
+    }
+    handler.access()
+    assert.are.equal("scanner: cmd_injection", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("scanner: cmd_injection", ngx_mock.var.luagate_deny_reason)
+  end)
+
+  it("scanner threat 탐지 시 정책 평가가 스킵된다 (evaluate 호출 안 됨)", function()
+    local evaluate_called = false
+    package.loaded["luagate.policy.evaluator"] = {
+      get_policy = function()
+        return {
+          global = { default_action = "allow" },
+          rules = {},
+          _compiled_http = {},
+        }
+      end,
+      evaluate = function()
+        evaluate_called = true
+        return { action = "allow", matched_rule = nil, decision_source = "default" }
+      end,
+    }
+    _scanner_stub.scan_result = {
+      { threat_type = "sqli", rule_name = "sqli_union", threat_score = 0.9 },
+      nil,
+    }
+    handler.access()
+    assert.is_false(evaluate_called)
+    package.loaded["luagate.policy.evaluator"] = nil
+  end)
+end)
+
+describe("handler.access — scanner: no threat → 정책 평가 진행", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+    _evaluator_stub.evaluate_result = { action = "allow", matched_rule = nil, decision_source = "default" }
+  end)
+
+  it("scanner no threat → 정책 평가 진행, allow", function()
+    _scanner_stub.scan_result = {
+      { threat_type = nil, rule_name = nil, threat_score = 0 },
+      nil,
+    }
+    handler.access()
+    assert.are.equal("allow", ngx_mock.ctx.luagate.action)
+    assert.are.equal("completed", ngx_mock.ctx.luagate.request_state)
+  end)
+
+  it("scanner no threat + informational score → threat_score가 ctx에 기록", function()
+    _scanner_stub.scan_result = {
+      { threat_type = nil, rule_name = nil, threat_score = 0.15 },
+      nil,
+    }
+    handler.access()
+    assert.are.equal(0.15, ngx_mock.ctx.luagate.threat_score)
+    assert.are.equal("0.15", ngx_mock.var.luagate_threat_score)
+    assert.are.equal("allow", ngx_mock.ctx.luagate.action)
+  end)
+
+  it("scanner no threat + zero score → threat_score는 기본값 유지", function()
+    _scanner_stub.scan_result = {
+      { threat_type = nil, rule_name = nil, threat_score = 0 },
+      nil,
+    }
+    handler.access()
+    -- threat_score stays at default "null" from rewrite
+    assert.are.equal("null", ngx_mock.var.luagate_threat_score)
+  end)
+end)
+
+describe("handler.access — scanner: error → fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+  end)
+
+  it("scanner error → 403 deny (fail-closed)", function()
+    _scanner_stub.scan_result = { nil, "scanner_fail:-4" }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+    assert.are.equal("scanner_denied", ngx_mock.var.luagate_request_state)
+  end)
+
+  it("scanner budget_exceeded → 403 deny", function()
+    _scanner_stub.scan_result = { nil, "scanner_fail:-3" }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal("security_scanner", ngx_mock.var.luagate_decision_source)
+  end)
+
+  it("scanner internal error → deny_reason = 'scanner_internal_error'", function()
+    _scanner_stub.scan_result = { nil, "scanner_fail:-4" }
+    handler.access()
+    assert.are.equal("scanner_internal_error", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("scanner_internal_error", ngx_mock.var.luagate_deny_reason)
+  end)
+
+  it("scanner budget_exceeded → deny_reason = 'budget_exceeded'", function()
+    _scanner_stub.scan_result = { nil, "scanner_fail:-3" }
+    handler.access()
+    assert.are.equal("budget_exceeded", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("budget_exceeded", ngx_mock.var.luagate_deny_reason)
+  end)
+
+  it("scanner error → ngx.var.threat_type = 'scanner_error' but ctx.threat_type is nil", function()
+    _scanner_stub.scan_result = { nil, "scanner_fail:-4" }
+    handler.access()
+    -- ctx.threat_type NOT set for operational failures (ADR-006 metric purity)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    -- ngx.var IS set for log distinguishability
+    assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
+  end)
+
+  it("scanner exception → 403 deny with 'scanner_internal_error'", function()
+    package.loaded["luagate.scanner.ffi"] = {
+      scan = function()
+        error("simulated scanner exception")
+      end,
+    }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+    assert.are.equal("scanner_internal_error", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("scanner_internal_error", ngx_mock.var.luagate_deny_reason)
+    assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
+    package.loaded["luagate.scanner.ffi"] = _scanner_stub_module
+  end)
+end)
+
+describe("handler.access — decoder error (from rewrite) → fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+  end)
+
+  it("ctx.decoder_error set → 403 deny (fail-closed)", function()
+    handler.rewrite()
+    ngx_mock.ctx.luagate.decoder_error = "ffi_fail:-3"
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+    assert.are.equal("scanner_denied", ngx_mock.var.luagate_request_state)
+  end)
+
+  it("ctx.decoder_error set → deny_reason = decoder error string", function()
+    handler.rewrite()
+    ngx_mock.ctx.luagate.decoder_error = "ffi_fail:-3"
+    handler.access()
+    assert.are.equal("ffi_fail:-3", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("ffi_fail:-3", ngx_mock.var.luagate_deny_reason)
+  end)
+
+  it("ctx.decoder_error → ngx.var.threat_type = 'decode_error' but ctx.threat_type is nil", function()
+    handler.rewrite()
+    ngx_mock.ctx.luagate.decoder_error = "ffi_fail:-3"
+    handler.access()
+    -- ctx.threat_type NOT set for operational failures (ADR-006 metric purity)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    -- ngx.var IS set for log distinguishability
+    assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
+  end)
+
+  it("decoder_load_error from rewrite → fail-closed in access with decode_error in var", function()
+    package.loaded["luagate.decoder.ffi"] = nil
+    local saved_preload = package.preload["luagate.decoder.ffi"]
+    package.preload["luagate.decoder.ffi"] = function()
+      error("simulated decoder load failure")
+    end
+    handler.rewrite()
+    package.preload["luagate.decoder.ffi"] = saved_preload
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
+    assert.are.equal("decoder_load_error", ngx_mock.ctx.luagate.deny_reason)
+  end)
+
+  it("decoder path exception from rewrite → access에서 403 fail-closed", function()
+    package.loaded["luagate.decoder.ffi"] = {
+      normalize_path = function()
+        error("simulated decoder path exception")
+      end,
+      normalize_query = function(query_raw)
+        return query_raw, nil, false
+      end,
+    }
+    handler.rewrite()
+    package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal(403, ngx_mock._get_exited())
+    assert.are.equal("decoder_path_exception", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
+  end)
+
+  it("decoder partial decode → no decoder_error → 스캔 + 정책 평가 계속", function()
+    _decoder_stub.normalize_path_result = { "/partial/path", nil, true }
+    handler.rewrite()
+    handler.access()
+    -- partial decode는 에러가 아님 → 스캔 + 정책 평가 계속
+    assert.are.equal("/partial/path", ngx_mock.ctx.luagate.path_normalized)
+    assert.are.equal("completed", ngx_mock.ctx.luagate.request_state)
+  end)
+end)
+
+describe("handler.access — input size limit (8KB)", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("path > 8KB → 403 deny (fail-closed)", function()
+    ngx_mock.var.request_uri = "/" .. string.rep("a", 8193)
+    handler.rewrite()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      _compiled_http = {},
+    }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal("input_size_exceeded", ngx_mock.ctx.luagate.deny_reason)
+    assert.are.equal("security_scanner", ngx_mock.var.luagate_decision_source)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
+  end)
+
+  it("query > 8KB → 403 deny (fail-closed)", function()
+    ngx_mock.var.args = string.rep("x", 8193)
+    handler.rewrite()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      _compiled_http = {},
+    }
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.are.equal("input_size_exceeded", ngx_mock.ctx.luagate.deny_reason)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
+  end)
+
+  it("path + query 각각 8KB 이하 → 정상 진행", function()
+    ngx_mock.var.request_uri = "/" .. string.rep("a", 100)
+    ngx_mock.var.args = string.rep("b", 100)
+    handler.rewrite()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      _compiled_http = {},
+    }
+    _evaluator_stub.evaluate_result = { action = "allow", matched_rule = nil, decision_source = "default" }
+    handler.access()
+    assert.are.equal("completed", ngx_mock.ctx.luagate.request_state)
+  end)
+end)
+
+describe("handler.access — scanner load error → fail-closed with threat_type", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    handler.rewrite()
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      _compiled_http = {},
+    }
+  end)
+
+  it("scanner load failure → 403 deny with threat_type = 'scanner_error'", function()
+    -- Force scanner load to fail by making preload raise an error
+    package.loaded["luagate.scanner.ffi"] = nil
+    local saved_preload = package.preload["luagate.scanner.ffi"]
+    package.preload["luagate.scanner.ffi"] = function()
+      error("simulated scanner load failure")
+    end
+    handler.access()
+    assert.are.equal(403, ngx_mock.status)
+    assert.is_nil(ngx_mock.ctx.luagate.threat_type)
+    assert.are.equal("scanner_error", ngx_mock.var.luagate_threat_type)
+    assert.are.equal("scanner_load_error", ngx_mock.ctx.luagate.deny_reason)
+    -- Restore
+    package.preload["luagate.scanner.ffi"] = saved_preload
+    package.loaded["luagate.scanner.ffi"] = _scanner_stub_module
+  end)
+end)
+
+describe("handler.access — admin plane: scanner 제외 확인", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx({ var = { server_port = "9090" } })
+    _G.ngx = ngx_mock
+    handler.rewrite()
+  end)
+
+  it("server_port=9090 → scanner 호출 없이 return", function()
+    local scanner_called = false
+    package.loaded["luagate.scanner.ffi"] = {
+      scan = function()
+        scanner_called = true
+        return { threat_type = nil, rule_name = nil, threat_score = 0 }, nil
+      end,
+    }
+    handler.access()
+    assert.is_false(scanner_called)
+    package.loaded["luagate.scanner.ffi"] = nil
+  end)
+end)
+
+describe("handler.access — rewrite decoder → access scanner 순서 보장", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      rules = {},
+      stream_rules = {},
+      _compiled_http = {},
+    }
+    _evaluator_stub.evaluate_result = { action = "allow", matched_rule = nil, decision_source = "default" }
+  end)
+
+  it("rewrite decoder 결과가 access scanner에 전달된다 (path_normalized)", function()
+    local scanner_received_ctx = nil
+    _decoder_stub.normalize_path_result = { "/decoded/path", nil, false }
+    _decoder_stub.normalize_query_result = { "decoded=query", nil, false }
+    -- rewrite phase: decoder runs, sets ctx.path_normalized/query_normalized
+    handler.rewrite()
+    package.loaded["luagate.scanner.ffi"] = {
+      scan = function(ctx)
+        scanner_received_ctx = ctx
+        return { threat_type = nil, rule_name = nil, threat_score = 0 }, nil
+      end,
+    }
+    -- access phase: scanner reads from ctx
+    handler.access()
+    assert.is_not_nil(scanner_received_ctx)
+    assert.are.equal("/decoded/path", scanner_received_ctx.path_normalized)
+    assert.are.equal("decoded=query", scanner_received_ctx.query_normalized)
+    package.loaded["luagate.scanner.ffi"] = nil
   end)
 end)
 

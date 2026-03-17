@@ -10,8 +10,8 @@
 --   - All nginx variable names use luagate_ prefix.
 --
 -- Pipeline order (http-pipeline.md §2):
---   rewrite_by_lua  → URL normalisation + ngx.ctx init + nginx var defaults
---   access_by_lua   → policy evaluation + optional scanner (MVP stub)
+--   rewrite_by_lua  → URL normalisation (decoder) + ngx.ctx init + nginx var defaults
+--   access_by_lua   → decoder error check → scanner → policy evaluation
 --   log_by_lua      → request_state finalise + metrics update
 --
 -- Implementation: lua/luagate/http/handler.lua
@@ -119,13 +119,14 @@ end
 -- Called from rewrite_by_lua_block in nginx.conf.
 --
 -- Responsibilities (http-pipeline.md §2.2 + §9):
---   1. Initialise ngx.ctx.luagate with request metadata.
---   2. Pre-assign nginx variable defaults (http-pipeline.md §3).
---   3. Compute path_raw (query-stripped request_uri).
---   4. path_normalized: decoder FFI is a future issue; use path_raw as stub.
---   5. Snapshot active_version from shared dict at request start.
---   6. Determine src_ip (MVP: remote_addr only; full logic in future issue).
---   7. Record start_time_ms.
+--   1. Pre-assign nginx variable defaults (http-pipeline.md §3).
+--   2. Compute path_raw (query-stripped request_uri).
+--   3. URL normalization via decoder FFI (path + query).
+--      Errors stored in ctx.decoder_error for access phase fail-closed.
+--   4. Snapshot active_version from shared dict at request start.
+--   5. Determine src_ip (MVP: remote_addr only; full logic in future issue).
+--   6. Record start_time_ms.
+--   7. Initialise ngx.ctx.luagate with request metadata.
 function _M.rewrite()
   -- 1. Nginx variable defaults (http-pipeline.md §3, log-schema.md §2)
   --    These ensure all 27 log fields are populated even on nginx_core
@@ -146,14 +147,51 @@ function _M.rewrite()
   local path_raw = request_uri:match("^([^?]*)") or ngx.var.uri
   ngx.var.luagate_path_raw = path_raw
 
-  -- 3. path_normalized stub (decoder FFI is a future issue — DON-98+)
-  --    decoder stub: full normalization in future FFI issue
-  local path_normalized = path_raw
-  ngx.var.luagate_path_normalized = path_normalized
-
-  -- 4. query_string: raw args (redaction applied in log/http.lua finalize)
+  -- 3. query_string: raw args (redaction applied in log/http.lua finalize)
   local query_raw = ngx.var.args or ""
   ngx.var.luagate_query_string = query_raw
+
+  -- 4. URL normalization (http-pipeline.md §2.2: rewrite에서만 수행)
+  --    Decoder errors are stored in ctx.decoder_error for access phase fail-closed.
+  local path_normalized = path_raw
+  local query_normalized = query_raw
+  local decoder_error = nil
+
+  local ok_dec, decoder = pcall(require, "luagate.decoder.ffi")
+  if ok_dec then
+    -- pcall wrapping: catch Lua-level FFI exceptions (ADR-001 §1.2 fail-closed)
+    local ok_np, pn, perr, pp = pcall(decoder.normalize_path, path_raw)
+    if not ok_np then
+      ngx.log(ngx.ERR, "[luagate] decoder path exception: ", tostring(pn))
+      decoder_error = "decoder_path_exception"
+    elseif perr then
+      ngx.log(ngx.ERR, "[luagate] decoder path error: ", perr)
+      decoder_error = perr
+    else
+      path_normalized = pn or path_raw
+      if pp then
+        ngx.log(ngx.WARN, "[luagate] decoder: path partial decode")
+      end
+    end
+
+    local ok_nq, qn, qerr, qp = pcall(decoder.normalize_query, query_raw)
+    if not ok_nq then
+      ngx.log(ngx.ERR, "[luagate] decoder query exception: ", tostring(qn))
+      decoder_error = decoder_error or "decoder_query_exception"
+    elseif qerr then
+      ngx.log(ngx.ERR, "[luagate] decoder query error: ", qerr)
+      decoder_error = decoder_error or qerr
+    else
+      query_normalized = qn or query_raw
+      if qp then
+        ngx.log(ngx.WARN, "[luagate] decoder: query partial decode")
+      end
+    end
+  else
+    ngx.log(ngx.ERR, "[luagate] failed to load decoder: ", tostring(decoder))
+    decoder_error = "decoder_load_error"
+  end
+  ngx.var.luagate_path_normalized = path_normalized
 
   -- 5. src_ip: MVP uses remote_addr directly.
   --    Full PROXY Protocol / XFF trusted-proxy logic is a future issue.
@@ -170,14 +208,15 @@ function _M.rewrite()
   ngx.ctx.luagate = {
     request_id = ngx.var.luagate_request_id,
     path_raw = path_raw,
-    -- decoder stub: full normalization in future FFI issue
     path_normalized = path_normalized,
     query_raw = query_raw,
-    query_normalized = query_raw, -- stub: same as raw until decoder FFI
+    query_normalized = query_normalized,
     action = "allow",
     decision_source = "nginx_core",
     active_version = ver,
     start_time_ms = ngx.now() * 1000,
+    -- decoder error flag: non-nil triggers fail-closed in access phase
+    decoder_error = decoder_error,
   }
 end
 
@@ -191,11 +230,14 @@ end
 -- Processing order (http-pipeline.md §2.3):
 --   1. Admin plane guard (server_port 9090 → skip — handled by separate block).
 --   2. get_policy() from evaluator (L1 cache + L2 reload).
---   3. Build request_ctx from ngx.ctx and nginx vars.
---   4. evaluate() with compiled HTTP rules and global default_action.
---   5. Update ngx.ctx + nginx vars with result.
---   6. deny action → send 403 response + ngx.exit(403).
---   7. allow → set request_state = "completed" for log phase.
+--   3. Decoder error check (set in rewrite phase) → fail-closed.
+--   4. Input size limit check (8KB) → fail-closed.
+--   5. Scanner scan → fail-closed on error, deny on threat.
+--   6. Build request_ctx from ngx.ctx and nginx vars.
+--   7. evaluate() with compiled HTTP rules and global default_action.
+--   8. Update ngx.ctx + nginx vars with result.
+--   9. deny action → send 403 response + ngx.exit(403).
+--  10. allow → set request_state = "completed" for log phase.
 --
 -- fail-closed invariant: any error path returns deny (403).
 function _M.access()
@@ -265,9 +307,129 @@ function _M.access()
     return
   end
 
-  -- 2. Build request context for policy evaluation (http-pipeline.md §2.3)
-  --    path_normalized from rewrite phase only; no re-normalisation here
-  --    (http-pipeline.md §2.2 invariant).
+  -- 2. Decoder error check + Scanner integration (http-pipeline.md §2.3)
+  --    Decoder runs in rewrite phase; access checks ctx.decoder_error for fail-closed.
+  --    Order: decoder error check → size check → scanner scan → policy evaluation
+
+  local path_raw = ctx.path_raw or ""
+  local query_raw = ctx.query_raw or ""
+
+  -- 2a. Decoder error check (set in rewrite phase; http-pipeline.md §5 threat_type enum)
+  --     NOTE: ctx.threat_type is NOT set for operational failures — only ngx.var
+  --     is set for log distinguishability. ctx.threat_type drives the scanner
+  --     threat metric (ADR-006) and must only reflect actual threat detections.
+  if ctx.decoder_error then
+    ngx.log(ngx.ERR, "[luagate] decoder error from rewrite: ", ctx.decoder_error)
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = ctx.decoder_error
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = ctx.decoder_error
+    ngx.var.luagate_threat_type = "decode_error"
+    do_deny(ctx.decoder_error, ctx.request_id or "")
+    return
+  end
+
+  -- 2b. Size limit check: 8KB per input (security-scanner.md §2)
+  local INPUT_SIZE_LIMIT = 8192
+  if #path_raw > INPUT_SIZE_LIMIT or #query_raw > INPUT_SIZE_LIMIT then
+    ngx.log(ngx.ERR, "[luagate] input size exceeded: path=", #path_raw, " query=", #query_raw)
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "input_size_exceeded"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "input_size_exceeded"
+    ngx.var.luagate_threat_type = "scanner_error"
+    do_deny("input_size_exceeded", ctx.request_id or "")
+    return
+  end
+
+  -- 2c. Scanner scan (security-scanner.md §2)
+  --     pcall wrapping: catch Lua-level exceptions from scanner FFI (ADR-001 §1.2)
+  local ok_sc, scanner = pcall(require, "luagate.scanner.ffi")
+  if not ok_sc then
+    ngx.log(ngx.ERR, "[luagate] failed to load scanner: ", tostring(scanner))
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "scanner_load_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = "scanner_load_error"
+    ngx.var.luagate_threat_type = "scanner_error"
+    do_deny("scanner_load_error", ctx.request_id or "")
+    return
+  end
+
+  local ok_scan, scan_result, scan_err = pcall(scanner.scan, {
+    path_raw = path_raw,
+    path_normalized = ctx.path_normalized,
+    query_raw = query_raw,
+    query_normalized = ctx.query_normalized,
+  })
+
+  if not ok_scan then
+    -- pcall caught a Lua-level exception from scanner.scan()
+    ngx.log(ngx.ERR, "[luagate] scanner exception: ", tostring(scan_result))
+    scan_err = "scanner_exception:" .. tostring(scan_result)
+    scan_result = nil
+  end
+
+  if scan_err then
+    -- Distinguish budget_exceeded vs internal_error (security-scanner.md §2b)
+    local deny_reason = "scanner_internal_error"
+    if scan_err:find("%-3") then
+      deny_reason = "budget_exceeded"
+    end
+    ngx.log(ngx.ERR, "[luagate] scanner error: ", scan_err)
+    ctx.action = "deny"
+    ctx.request_state = "scanner_denied"
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = deny_reason
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_request_state = "scanner_denied"
+    ngx.var.luagate_deny_reason = deny_reason
+    ngx.var.luagate_threat_type = "scanner_error"
+    do_deny(deny_reason, ctx.request_id or "")
+    return
+  end
+
+  if scan_result and scan_result.threat_type then
+    -- Threat detected → deny, skip policy evaluation
+    ctx.action = "deny"
+    ctx.threat_type = scan_result.threat_type
+    ctx.rule_name = scan_result.rule_name
+    ctx.threat_score = scan_result.threat_score
+    ctx.decision_source = "security_scanner"
+    ctx.deny_reason = "scanner: " .. scan_result.threat_type
+    ctx.request_state = "scanner_denied"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "security_scanner"
+    ngx.var.luagate_threat_type = scan_result.threat_type
+    ngx.var.luagate_rule_name = scan_result.rule_name or "null"
+    ngx.var.luagate_threat_score = tostring(scan_result.threat_score)
+    ngx.var.luagate_deny_reason = "scanner: " .. scan_result.threat_type
+    ngx.var.luagate_request_state = "scanner_denied"
+    do_deny("scanner: " .. scan_result.threat_type, ctx.request_id or "")
+    return
+  end
+
+  -- No threat: record informational threat_score if present
+  if scan_result and scan_result.threat_score and scan_result.threat_score > 0 then
+    ctx.threat_score = scan_result.threat_score
+    ngx.var.luagate_threat_score = tostring(scan_result.threat_score)
+  end
+
+  -- 3. Build request context for policy evaluation (http-pipeline.md §2.3)
+  --    path_normalized and query_normalized set in rewrite phase.
   local request_ctx = {
     path = ctx.path_normalized,
     host = ngx.var.host,
@@ -277,25 +439,21 @@ function _M.access()
     header = ngx.req.get_headers(),
   }
 
-  -- 3. Determine default action from policy global config
+  -- 4. Determine default action from policy global config
   local default_action = (policy.global and policy.global.default_action) or "deny"
 
-  -- 4. Evaluate against compiled HTTP rules (ADR-002 §3.1 first-match-wins)
+  -- 5. Evaluate against compiled HTTP rules (ADR-002 §3.1 first-match-wins)
   local result = evaluator.evaluate(policy._compiled_http or {}, request_ctx, default_action)
 
-  -- 5. Update ngx.ctx with evaluation result
+  -- 6. Update ngx.ctx with evaluation result
   ctx.action = result.action
   ctx.matched_rule_id = result.matched_rule
   ctx.decision_source = "policy_engine"
 
-  -- 6. Propagate to nginx variables (used by log_format)
+  -- 7. Propagate to nginx variables (used by log_format)
   ngx.var.luagate_action = result.action
   ngx.var.luagate_decision_source = "policy_engine"
   ngx.var.luagate_matched_rule = result.matched_rule or "null"
-
-  -- 7. Scanner stub: MVP — scanner FFI not yet integrated (future issue)
-  --    threat_type, rule_name, threat_score remain at default "null".
-  --    When scanner is integrated, it will set these vars and ctx fields.
 
   -- 8. Handle deny
   if result.action == "deny" then
