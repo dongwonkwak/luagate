@@ -65,3 +65,17 @@ jobs:
         env:
           LUAGATE_TEST_IMAGE: luagate-test:gha
         # make test-docker: shard별 Compose 실행 + EXIT_CODE 전파 (이미지는 선행 빌드 결과 재사용)
+
+  test-docker-compat:
+    name: Test::Nginx (Docker)
+    runs-on: ubuntu-latest
+    needs: test-docker
+    if: ${{ always() }}
+
+    steps:
+      - name: Check matrix result
+        run: |
+          if [ "${{ needs.test-docker.result }}" != "success" ]; then
+            echo "HTTP integration shards did not all succeed."
+            exit 1
+          fi
