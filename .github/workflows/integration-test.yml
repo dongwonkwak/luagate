@@ -20,8 +20,22 @@ permissions:
 
 jobs:
   test-docker:
-    name: Test::Nginx (Docker)
+    name: Test::Nginx (${{ matrix.shard.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: pipeline_spec
+            prove_args: -v tests/integration/http/pipeline_spec.t
+            port: 1984
+            servroot: /tmp/nginx-test-servroot-pipeline
+            compose_project: luagate-pipeline
+          - name: test_nginx_basic
+            prove_args: -v tests/integration/http/test_nginx_basic.t
+            port: 1985
+            servroot: /tmp/nginx-test-servroot-basic
+            compose_project: luagate-basic
 
     steps:
       - name: Checkout repository
@@ -41,7 +55,13 @@ jobs:
           cache-to: type=gha,mode=max,scope=integration-test
 
       - name: Run integration tests via make test-docker
-        run: make test-docker DOCKER_COMPOSE_TEST_FLAGS=--no-build
+        run: >
+          make test-docker
+          DOCKER_COMPOSE_TEST_FLAGS=--no-build
+          TEST_HTTP_PROVE_ARGS="${{ matrix.shard.prove_args }}"
+          TEST_NGINX_PORT=${{ matrix.shard.port }}
+          TEST_NGINX_SERVROOT=${{ matrix.shard.servroot }}
+          COMPOSE_PROJECT_NAME=${{ matrix.shard.compose_project }}
         env:
           LUAGATE_TEST_IMAGE: luagate-test:gha
-        # make test-docker: Compose 실행 + EXIT_CODE 전파 (이미지는 선행 빌드 결과 재사용)
+        # make test-docker: shard별 Compose 실행 + EXIT_CODE 전파 (이미지는 선행 빌드 결과 재사용)

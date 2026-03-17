@@ -21,7 +21,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 | `make test-integration-http` | HTTP 통합 (로컬 Test::Nginx 또는 Docker Compose fallback) | Yes |
 | `make test-integration-stream` | Stream 통합 (Test::Nginx::Stream) | Yes |
 | `make test-reload` | Hot reload 전용 테스트 | Yes |
-| `make test-docker` | Docker Compose 기반 HTTP 통합 테스트 | No |
+| `make test-docker` | Docker Compose 기반 HTTP 통합 테스트 (shard env override 지원) | No |
 | `make bench` | 전체 벤치마크 (smoke) | No |
 | `make bench-http` | HTTP 벤치마크 (wrk/vegeta) | No |
 | `make bench-stream` | Stream 벤치마크 | No |
@@ -41,7 +41,8 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 - `nix develop` 환경은 `busted`, `prove`, `ctest`를 제공한다.
 - `make test-integration-http`는 로컬 Perl에 `Test::Nginx::Socket`이 있으면 직접 `prove`를 실행한다.
 - 로컬 `Test::Nginx::Socket`이 없고 Docker가 있으면 `make test-integration-http`는 자동으로 `make test-docker`로 fallback 한다.
-- CI의 HTTP 통합 테스트 source of truth는 `make test-docker`이다.
+- CI의 HTTP 통합 테스트 source of truth는 `make test-docker`이며, GitHub Actions에서는 `tests/integration/http/*.t`를 파일 단위 matrix shard로 병렬 실행한다.
+- shard 실행 시 `make test-docker`는 `TEST_HTTP_PROVE_ARGS`, `TEST_NGINX_PORT`, `TEST_NGINX_SERVROOT`, `COMPOSE_PROJECT_NAME` override를 지원한다.
 - `make test-unit-c`는 `csrc/build/CTestTestfile.cmake`가 없으면 skip 한다.
 - `make test-integration-stream`, `make test-reload`는 해당 테스트 디렉터리가 없으면 skip 한다.
 
@@ -53,6 +54,13 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make te
 
 # HTTP 통합 테스트만 Docker Compose로 실행
 make test-docker
+
+# 특정 HTTP integration 파일만 shard처럼 실행
+make test-docker \
+  TEST_HTTP_PROVE_ARGS='-v tests/integration/http/pipeline_spec.t' \
+  TEST_NGINX_PORT=1984 \
+  TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot-pipeline \
+  COMPOSE_PROJECT_NAME=luagate-pipeline
 ```
 
 ## 3. 단위 테스트 (§7.1)
@@ -205,6 +213,8 @@ make test-integration-http
 - 로컬에 `Test::Nginx::Socket`이 있으면 `LUAGATE_ADMIN_TOKEN=<token> prove -r tests/integration/http/`
 - 로컬 모듈이 없으면 Docker Compose fallback: `make test-docker`
 - 기본 admin 토큰 값은 `TEST_ADMIN_TOKEN` / `LUAGATE_ADMIN_TOKEN`의 기본값 `test-secret-token-for-integration`
+- CI는 현재 `pipeline_spec.t`, `test_nginx_basic.t`를 파일 단위 shard로 나눠 병렬 실행한다.
+- shard 간 간섭 방지를 위해 각 실행은 고유한 `TEST_NGINX_PORT`, `TEST_NGINX_SERVROOT`, `COMPOSE_PROJECT_NAME`을 사용한다.
 
 ```bash
 make test-integration-http
@@ -212,6 +222,14 @@ make test-integration-http
 make test-docker
 # 또는:
 LUAGATE_ADMIN_TOKEN=test-secret-token-for-integration \
+docker compose -f docker-compose.test.yml up --build --exit-code-from test
+
+# 또는 특정 shard만 Docker Compose로 실행:
+LUAGATE_ADMIN_TOKEN=test-secret-token-for-integration \
+TEST_HTTP_PROVE_ARGS='-v tests/integration/http/test_nginx_basic.t' \
+TEST_NGINX_PORT=1985 \
+TEST_NGINX_SERVROOT=/tmp/nginx-test-servroot-basic \
+COMPOSE_PROJECT_NAME=luagate-basic \
 docker compose -f docker-compose.test.yml up --build --exit-code-from test
 ```
 
