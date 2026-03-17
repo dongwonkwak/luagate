@@ -28,6 +28,7 @@ jobs:
   detect-and-comment:
     name: Detect changed files and post Codex review directive
     runs-on: ubuntu-latest
+    if: "!contains(github.event.pull_request.title, '[skip review]') && !contains(github.event.head_commit.message, '[skip review]')"
 
     steps:
       - name: Checkout repository
