@@ -566,6 +566,34 @@ describe("loader.load_policy — commit (pointer swap) [7단계]", function()
     assert.are.equal(result.new_version, _shared_dict_instance._store["source_version"])
   end)
 
+  it("policy_loaded_at 기록 실패는 로그를 남기고 reload 성공은 유지한다", function()
+    register_valid_policy()
+    local original_safe_set = _shared_dict_instance.safe_set
+    _shared_dict_instance.safe_set = function(self, key, value)
+      if key == "policy_loaded_at" then
+        return false, "no memory"
+      end
+      return original_safe_set(self, key, value)
+    end
+
+    local result = loader.load_policy(VALID_PATH)
+
+    assert.is_true(result.ok)
+    assert.is_true(result.http_ok)
+    assert.is_true(result.stream_ok)
+    assert.are.equal(result.new_version, _shared_dict_instance._store["source_version"])
+    assert.is_nil(_shared_dict_instance._store["policy_loaded_at"])
+
+    local warn_found = false
+    for _, entry in ipairs(_log_lines) do
+      if entry.level == ngx.WARN and entry.msg:find("policy_loaded_at") then
+        warn_found = true
+        break
+      end
+    end
+    assert.is_true(warn_found)
+  end)
+
   it("http pointer swap 실패 시 http_ok=false, stream_ok은 독립 판정", function()
     register_valid_policy()
     -- http set만 실패하도록
