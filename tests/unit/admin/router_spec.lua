@@ -26,12 +26,22 @@ local function make_shared_dict(data)
     get = function(_, key)
       return data[key]
     end,
+    incr = function(_, key, value, init, _ttl)
+      if data[key] then
+        data[key] = data[key] + value
+      else
+        data[key] = (init or 0) + value
+      end
+      return data[key], nil
+    end,
     capacity = function()
       return 10485760
     end, -- 10MB
     free_space = function()
       return 8388608
     end, -- 8MB
+    -- Expose internal data for direct manipulation in tests
+    _data = data,
   }
 end
 
@@ -70,7 +80,16 @@ local function make_ngx(overrides)
       luagate_metrics = make_shared_dict(),
       luagate_stream_metrics = make_shared_dict(),
       luagate_connections = make_shared_dict(),
+      luagate_admin_ratelimit = make_shared_dict(),
     },
+    worker = {
+      id = function()
+        return 0
+      end,
+    },
+    now = function()
+      return 1700000100.5
+    end,
     log = function(level, ...)
       local parts = {}
       for _, v in ipairs({ ... }) do
@@ -188,6 +207,7 @@ local router -- 테스트마다 fresh require
 local function load_router(auth_mock)
   package.loaded["luagate.admin.router"] = nil
   package.loaded["luagate.admin.auth"] = nil
+  package.loaded["luagate.admin.ratelimit"] = nil
   package.preload["luagate.admin.auth"] = function()
     return auth_mock or make_auth_pass()
   end
@@ -203,6 +223,7 @@ teardown(function()
   package.preload["luagate.admin.auth"] = nil
   package.loaded["cjson.safe"] = nil
   package.loaded["luagate.admin.auth"] = nil
+  package.loaded["luagate.admin.ratelimit"] = nil
   package.loaded["luagate.admin.router"] = nil
 end)
 
@@ -311,6 +332,33 @@ describe("router.dispatch", function()
       assert.are.equal("routing", body.stage)
     end)
 
+    it("POST /health은 rate limit 면제 아님 (GET만 면제)", function()
+      _G.ngx = make_ngx()
+      -- Pre-populate rate limit to exceed limit
+      local now = _G.ngx.now()
+      local current_slot = math.floor(now / 60)
+      local key = "rl:10.0.0.1:" .. tostring(current_slot)
+      _G.ngx.shared.luagate_admin_ratelimit._data[key] = 30
+
+      _G.ngx.var.uri = "/health"
+      _G.ngx.req.get_method = function()
+        return "POST"
+      end
+      -- Simulate OpenResty coroutine abort: ngx.exit() throws to stop execution
+      local saved_exit = _G.ngx.exit
+      _G.ngx.exit = function(code)
+        saved_exit(code)
+        error("ngx.exit(" .. tostring(code) .. ")")
+      end
+
+      router = load_router(make_auth_pass())
+      local ok, _ = pcall(router.dispatch)
+      assert.is_false(ok, "rate limit 초과 시 ngx.exit로 coroutine abort되어야 한다")
+
+      -- Should get 429 (rate limited), not 405 (method not allowed)
+      assert.are.equal(429, _G.ngx.status)
+    end)
+
     it("잘못된 메서드 (DELETE /metrics) -> 405", function()
       _G.ngx.var.uri = "/metrics"
       _G.ngx.req.get_method = function()
@@ -355,6 +403,30 @@ describe("router.dispatch", function()
 
       assert.are.equal(204, _G.ngx.status)
     end)
+
+    it("OPTIONS 요청도 rate limit 적용 후 204 처리", function()
+      _G.ngx = make_ngx()
+      local now = _G.ngx.now()
+      local current_slot = math.floor(now / 60)
+      local key = "rl:10.0.0.1:" .. tostring(current_slot)
+      _G.ngx.shared.luagate_admin_ratelimit._data[key] = 30
+
+      _G.ngx.var.uri = "/metrics"
+      _G.ngx.req.get_method = function()
+        return "OPTIONS"
+      end
+
+      local saved_exit = _G.ngx.exit
+      _G.ngx.exit = function(code)
+        saved_exit(code)
+        error("ngx.exit(" .. tostring(code) .. ")")
+      end
+
+      router = load_router(make_auth_pass())
+      local ok, _ = pcall(router.dispatch)
+      assert.is_false(ok, "rate limit 초과 시 OPTIONS도 coroutine abort되어야 한다")
+      assert.are.equal(429, _G.ngx.status)
+    end)
   end)
 
   -- =========================================================================
@@ -373,6 +445,7 @@ describe("router.dispatch", function()
           luagate_metrics = make_shared_dict(metrics_data or {}),
           luagate_stream_metrics = make_shared_dict(stream_data or {}),
           luagate_connections = make_shared_dict(connections_data or {}),
+          luagate_admin_ratelimit = make_shared_dict(),
         },
       })
       _G.ngx.req.get_method = function()
@@ -475,18 +548,19 @@ describe("router.dispatch", function()
       assert.truthy(output:find('luagate_active_connections{type="stream"} 8'), "stream active가 8이어야 한다")
     end)
 
-    it("shared dict capacity/free gauges 포함 (5개 zone)", function()
+    it("shared dict capacity/free gauges 포함 (6개 zone)", function()
       output = get_metrics_output()
 
       assert.truthy(output:find("luagate_shared_dict_capacity_bytes"), "capacity 메트릭이 있어야 한다")
       assert.truthy(output:find("luagate_shared_dict_free_bytes"), "free 메트릭이 있어야 한다")
-      -- 5개 zone 모두 존재 확인
+      -- 6개 zone 모두 존재 확인
       local zones = {
         "luagate_policy",
         "luagate_state",
         "luagate_metrics",
         "luagate_stream_metrics",
         "luagate_connections",
+        "luagate_admin_ratelimit",
       }
       for _, zone in ipairs(zones) do
         assert.truthy(
@@ -567,6 +641,7 @@ describe("router.dispatch", function()
           luagate_metrics = nil,
           luagate_stream_metrics = nil,
           luagate_connections = nil,
+          luagate_admin_ratelimit = make_shared_dict(),
         },
       })
       _G.ngx.req.get_method = function()

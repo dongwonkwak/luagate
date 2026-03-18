@@ -104,6 +104,41 @@ ngx.shared.luagate_connections:incr("active_stream", -1, 0)
 
 ---
 
+## Zone 4: luagate_admin_ratelimit
+
+| 항목 | 값 |
+|------|-----|
+| **역할** | Admin API IP별 sliding window rate limit 카운터 |
+| **크기** | 1m |
+| **Writer** | admin content_by_lua (ratelimit.check) |
+| **Reader** | admin content_by_lua (ratelimit.check) |
+| **Phase** | content (admin server block) |
+| **Fail Mode** | fail-closed: dict 미사용 시 503 반환 |
+| **HTTP/Stream** | HTTP (admin only) |
+| **Reload 민감도** | 낮음 — 정책 reload와 무관 |
+
+**Value Shape:**
+```
+Key: "rl:<ip>:<window_slot>"
+Value: number (counter, 해당 window 내 요청 수)
+예: "rl:127.0.0.1:28335" = 15
+```
+
+**TTL**: 120s (2 * WINDOW_SIZE) — 이전 window 참조용
+**incr 패턴:**
+```lua
+ngx.shared.luagate_admin_ratelimit:incr("rl:127.0.0.1:28335", 1, 0, 120)
+--                                                                       ↑ TTL
+```
+
+**Sliding Window 알고리즘:**
+- Window: 60s, 최대 30 req/IP
+- weighted_count = prev_window * (1 - elapsed_fraction) + curr_window
+- 초과 시: 429 + Retry-After 헤더
+- `GET /health`만 exempt (다른 메서드/엔드포인트는 rate limit 적용)
+
+---
+
 ## Zone 추가 시 체크리스트
 
 - [ ] 이름: `luagate_` prefix

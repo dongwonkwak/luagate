@@ -16,6 +16,7 @@
 
 local cjson = require("cjson.safe")
 local auth = require("luagate.admin.auth")
+local ratelimit = require("luagate.admin.ratelimit")
 local policies = require("luagate.admin.policies")
 
 local _M = {}
@@ -43,13 +44,14 @@ local THREAT_TYPES = {
   "other",
 }
 
--- All 5 shared dict zones for capacity/free_space gauges
+-- All 6 shared dict zones for capacity/free_space gauges
 local SHARED_DICT_ZONES = {
   "luagate_policy",
   "luagate_state",
   "luagate_metrics",
   "luagate_stream_metrics",
   "luagate_connections",
+  "luagate_admin_ratelimit",
 }
 
 -- Stream protocol types for protocol_detected_total
@@ -278,11 +280,12 @@ local ROUTES = {
 --- Dispatch the current request to the appropriate handler.
 -- Called from content_by_lua_block in the admin server block.
 -- Flow:
---   0. OPTIONS preflight → 204 (admin-auth-contract.md)
---   1. auth.verify() — handles /health exemption internally
---   2. Route lookup by URI path
---   3. Method check
---   4. Handler invocation
+--   0. ratelimit.check() — sliding window IP rate limit (/health exempt)
+--   1. OPTIONS preflight → 204 (admin-auth-contract.md)
+--   2. auth.verify() — handles /health exemption internally
+--   3. Route lookup by URI path
+--   4. Method check
+--   5. Handler invocation
 --
 -- Note: no pcall around auth.verify() or handlers. In OpenResty,
 -- ngx.exit() throws a Lua error to abort the coroutine — wrapping
@@ -291,18 +294,22 @@ local ROUTES = {
 function _M.dispatch()
   local method = ngx.req.get_method()
 
-  -- 0. OPTIONS preflight: 204 (CORS, admin-auth-contract.md)
+  -- 0. Rate limiting (check handles /health exemption)
+  -- ratelimit.check() calls ngx.exit(429) on exceeded, aborting the coroutine.
+  ratelimit.check()
+
+  -- 1. OPTIONS preflight: 204 (CORS, admin-auth-contract.md)
   if method == "OPTIONS" then
     ngx.status = 204
     ngx.exit(204)
     return
   end
 
-  -- 1. Authentication (verify handles /health exemption)
+  -- 2. Authentication (verify handles /health exemption)
   -- auth.verify() calls ngx.exit(401) on failure, aborting the coroutine.
   auth.verify()
 
-  -- 2. Route lookup
+  -- 3. Route lookup
   local uri = ngx.var.uri
 
   local route = ROUTES[uri]
@@ -311,14 +318,14 @@ function _M.dispatch()
     return
   end
 
-  -- 3. Method check
+  -- 4. Method check
   local handler = route[method]
   if not handler then
     send_error(405, "method_not_allowed", "routing", method .. " not allowed for " .. uri)
     return
   end
 
-  -- 4. Invoke handler
+  -- 5. Invoke handler
   handler()
 end
 

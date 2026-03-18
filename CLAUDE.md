@@ -141,11 +141,15 @@ make build-ffi              # Rust FFI 빌드 + lib/ 복사
 
 Epic 완료 후 PR 생성 절차:
 
-1. `git push -u origin <epic-branch>`
-2. `gh pr create` — 제목: `type(scope): 설명 [DON-XX]`, 본문: `.github/pull_request_template.md` 참조
-3. `pr-review-context` 스킬 invoke → 변경 파일 기반 심화 리뷰 컨텍스트 생성
-4. `request-codex-review` 스킬 invoke (3단계 컨텍스트 포함, code 리뷰). 보안/설계 변경 포함 시 design 리뷰도 추가
-5. CI 통과 + 최소 1개 승인 후 Squash merge
+1. **Test Plan 검증** — PR 본문에 포함될 Test Plan 항목을 **모두** 실행하여 통과 확인
+   - 코드 변경: `make test-unit` + 관련 테스트 파일 개별 실행 (TAP 출력으로 항목별 확인)
+   - 문서/ADR 변경: spec 정합성 검증 (관련 spec 파일 간 참조 일관성, TODO 교체 여부, same-PR 동기화)
+   - Test Plan 항목 중 하나라도 FAIL이면 PR 생성 불가
+2. `git push -u origin <epic-branch>`
+3. `gh pr create` — 제목: `type(scope): 설명 [DON-XX]`, 본문: `.github/pull_request_template.md` 참조
+4. `pr-review-context` 스킬 invoke → 변경 파일 기반 심화 리뷰 컨텍스트 생성
+5. `request-codex-review` 스킬 invoke (3단계 컨텍스트 포함, code 리뷰). 보안/설계 변경 포함 시 design 리뷰도 추가
+6. CI 통과 + 최소 1개 승인 후 Squash merge
 
 > **머지 전략**: epic → main은 Squash merge (단일 커밋), issue → epic은 Merge commit.
 

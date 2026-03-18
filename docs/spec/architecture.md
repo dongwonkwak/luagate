@@ -67,6 +67,7 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 | `luagate_metrics` | HTTP 메트릭 | 단순 카운터: `metrics:*` + Histogram: `latency:*` (ADR-006 §3.2 참조) | 각 worker (incr) | 키 단위 |
 | `luagate_connections` | 활성 연결 수 | 단순 카운터: `active_http`, `active_stream` | 해당 worker | 키 단위 |
 | `luagate_state` | Reload/health 플래그 | **State**: `state:reload_flag`, `state:health` — version 필드 없음 | reload worker | 키 단위 |
+| `luagate_admin_ratelimit` | Admin API IP별 sliding window rate limit 카운터 | 단순 카운터: `rl:<ip>:<slot>` | 각 worker (incr) | 키 단위 |
 
 > **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):
 > 새 정책을 `policy:<new_version>:blob`에 먼저 기록한 뒤, `http:active_version` / `stream:active_version` 포인터를 교체한다.
@@ -196,7 +197,8 @@ Client TCP Connect
 | 정책 compile 에러 | fail-closed (all-or-nothing) | |
 | 정책 commit 에러 | partial (서브시스템별 독립) | 실패 서브시스템만 LKG 유지 |
 | upstream 연결 실패 | 502 반환 | |
-| rate limit counter eviction | fail-open | shared_dict 용량 초과 시 |
+| rate limit counter eviction | fail-open | shared_dict 용량 초과 시 카운터 소실 |
+| Admin API rate limit error | **fail-closed** | dict 접근 에러 시 503 반환 |
 | logging 실패 | fail-closed (감사 로그) | ADR-004: 감사 로그 드롭 금지 |
 | FFI .so 로드 실패 | fail-closed | 기동 거부 |
 | FFI Layer 1 budget 초과 | **fail-closed** | `LUAGATE_BUDGET_EXCEEDED(-3)` → deny (ADR-009) |
