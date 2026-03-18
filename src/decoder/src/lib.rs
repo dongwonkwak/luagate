@@ -1,17 +1,17 @@
 // luagate_decoder: Multi-layer URL decoder Rust cdylib
 //
-// ABI contract (docs/spec/c-ffi-modules.md §5):
+// ABI contract (docs/spec/rust-ffi-modules.md §5):
 //   - caller-allocated output buffers (no Rust malloc returned to caller)
 //   - NULL pointer input → LUAGATE_INVALID_INPUT (-1), no panic
 //   - LUAGATE_INVALID_INPUT with partial output: decode_partial semantics
 //   - panic = "abort" in release profile (see Cargo.toml)
-//   - 0.5ms budget enforced per call (decoder/parser budget — c-ffi-modules.md §7)
+//   - 0.5ms budget enforced per call (decoder/parser budget — rust-ffi-modules.md §7)
 
 use percent_encoding::percent_decode;
 use std::time::Instant;
 use unicode_normalization::UnicodeNormalization;
 
-// ── Error codes (c-ffi-modules.md §5) ───────────────────────────────────────
+// ── Error codes (rust-ffi-modules.md §5) ───────────────────────────────────────
 const LUAGATE_OK: i32 = 0;
 const LUAGATE_NEED_MORE_DATA: i32 = 1;
 const LUAGATE_INVALID_INPUT: i32 = -1;
@@ -19,7 +19,7 @@ const LUAGATE_BUFFER_TOO_SMALL: i32 = -2;
 const LUAGATE_BUDGET_EXCEEDED: i32 = -3;
 const LUAGATE_INTERNAL_ERROR: i32 = -4;
 
-/// Budget: 0.5 ms per FFI call (decoder/parser budget — c-ffi-modules.md §7)
+/// Budget: 0.5 ms per FFI call (decoder/parser budget — rust-ffi-modules.md §7)
 const BUDGET_NS: u128 = 500_000;
 
 // ── Internal helpers ─────────────────────────────────────────────────────────

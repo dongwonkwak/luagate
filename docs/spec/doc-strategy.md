@@ -44,7 +44,7 @@ docs/
     ├── stream-pipeline.md          # TCP 스트림 파이프라인
     ├── policy-engine.md            # 정책 엔진
     ├── security-scanner.md         # 보안 스캐너
-    ├── c-ffi-modules.md            # C FFI 모듈
+    ├── rust-ffi-modules.md          # Rust FFI 모듈
     ├── admin-api.md                # Admin API (canonical reference)
     ├── log-schema.md               # 로그 스키마
     ├── test-strategy.md            # 테스트 전략
@@ -63,7 +63,7 @@ docs/
 | 정책 평가 로직 변경 | `policy-engine.md` | Yes |
 | Admin API 엔드포인트 추가/변경 | `admin-api.md` | Yes |
 | 로그 필드 추가/제거 | `log-schema.md` | Yes |
-| FFI 함수 추가/변경 | `c-ffi-modules.md` | Yes |
+| FFI 함수 추가/변경 | `rust-ffi-modules.md` | Yes |
 | 보안 스캐너 변경 | `security-scanner.md` | Yes |
 | 아키텍처 결정 (새 패턴) | ADR 작성 + 관련 spec | Yes |
 | 테스트 전략 변경 | `test-strategy.md` | Yes |
@@ -225,8 +225,6 @@ PR에서 다음을 확인한다:
 | 위치 | 기능 | 우선순위 |
 |------|------|----------|
 | `architecture.md` | 멀티 인스턴스 정책 동기화 | Low |
-| `architecture.md` | C FFI 타임아웃 강제 메커니즘 | Medium |
-| `http-pipeline.md` | C FFI 타임아웃 강제 메커니즘 | Medium |
 | `security-scanner.md` | threat_score 기반 자동 차단 scope | Medium |
 | `security-scanner.md` | 패턴 핫 업데이트 | Low |
 | `stream-pipeline.md` | TLS 터미네이션 지원 | Low |

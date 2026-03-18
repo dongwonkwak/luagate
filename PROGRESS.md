@@ -310,3 +310,15 @@ COMPLETED_REVIEW: DON-199-code (2026-03-18)
 | 2026-03-18 | DON-195 | 병렬 작업 인프라 — git worktree 가이드 + parallel-work 스킬 | `.claude/knowledge/parallel-work.md`, `.claude/skills/parallel-work/SKILL.md`, `.claude/skills/implement-issue/SKILL.md`, `CLAUDE.md` | Codex 리뷰 3건 반영 (worktree -b, implement-issue 충돌, PROGRESS.md 충돌) |
 
 COMPLETED_REVIEW: DON-195-code (2026-03-18)
+
+## Phase 0-B: C → Rust FFI 문서/설정 일괄 정리 (DON-197)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-197 | C → Rust FFI 전환에 따른 문서/설정 일괄 정리 | `docs/spec/rust-ffi-modules.md`, `.claude/knowledge/rust-ffi-guide.md`, `ffi-abi-contract.md`, `Dockerfile`, `flake.nix`, `Makefile`, `AGENTS.md`, `CLAUDE.md`, `README.md` 등 44파일 | Codex 리뷰 3회 (1차 3건, 2차 3건, 3차 Codex 직접 수정). csrc/ 삭제, Dockerfile C stage 제거, caller-allocated buffer 모델 정합성 확보 |
+
+COMPLETED_REVIEW: DON-197-code (2026-03-18)
+
+COMPLETED_REVIEW: DON-197-code (2026-03-18)
+
+COMPLETED_REVIEW: DON-197-code (2026-03-18)

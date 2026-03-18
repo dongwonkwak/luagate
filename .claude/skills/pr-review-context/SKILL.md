@@ -38,9 +38,9 @@ DON-103(GitHub Actions 범용 체크리스트)과의 차이:
 | `lua/luagate/admin/**` | security-patterns, conventions | admin-api | ADR-003, ADR-004 |
 | `lua/luagate/log/**` | openresty-patterns | log-schema | ADR-004 |
 | `lua/luagate/metrics/**` | openresty-patterns | log-schema | ADR-004 |
-| `csrc/protocol_parser/**` | c-ffi-guide | c-ffi-modules, stream-pipeline | ADR-001 |
-| `csrc/cidr_matcher/**` | c-ffi-guide | c-ffi-modules | ADR-001 |
-| `csrc/decoder/**` | c-ffi-guide, security-patterns | c-ffi-modules, security-scanner | ADR-001 |
+| `src/stream/**` | rust-ffi-guide | rust-ffi-modules, stream-pipeline | ADR-001 |
+| `src/scanner/**` | rust-ffi-guide, security-patterns | rust-ffi-modules, security-scanner | ADR-001 |
+| `src/decoder/**` | rust-ffi-guide, security-patterns | rust-ffi-modules, security-scanner | ADR-001 |
 | `conf/**` | openresty-patterns | architecture | ADR-001 |
 | `policies/**` | — | policy-engine | ADR-002, ADR-003 |
 | `frontend/**` | — | admin-api | ADR-004 |
@@ -49,13 +49,13 @@ DON-103(GitHub Actions 범용 체크리스트)과의 차이:
 | `docs/design/adr/**` | — | doc-strategy | — |
 | `docs/spec/**` | — | doc-strategy | — |
 
-**파일 경로 매핑표**
+### 파일 경로 매핑표
 
 | 이름 | 실제 경로 |
 |---|---|
 | openresty-patterns | `.claude/knowledge/openresty-patterns.md` |
 | security-patterns | `.claude/knowledge/security-patterns.md` |
-| c-ffi-guide | `.claude/knowledge/c-ffi-guide.md` |
+| rust-ffi-guide | `.claude/knowledge/rust-ffi-guide.md` |
 | conventions | `.claude/knowledge/conventions.md` |
 | policy-engine | `docs/spec/policy-engine.md` |
 | http-pipeline | `docs/spec/http-pipeline.md` |
@@ -63,7 +63,7 @@ DON-103(GitHub Actions 범용 체크리스트)과의 차이:
 | security-scanner | `docs/spec/security-scanner.md` |
 | admin-api | `docs/spec/admin-api.md` |
 | log-schema | `docs/spec/log-schema.md` |
-| c-ffi-modules | `docs/spec/c-ffi-modules.md` |
+| rust-ffi-modules | `docs/spec/rust-ffi-modules.md` |
 | architecture | `docs/spec/architecture.md` |
 | test-strategy | `docs/spec/test-strategy.md` |
 | doc-strategy | `docs/spec/doc-strategy.md` |

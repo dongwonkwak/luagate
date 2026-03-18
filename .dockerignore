@@ -9,7 +9,7 @@ result-*
 flake.lock
 
 # Build artifacts
-csrc/build/
+src/*/target/
 frontend/dist/
 frontend/node_modules/
 node_modules/

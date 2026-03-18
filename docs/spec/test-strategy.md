@@ -6,7 +6,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 
 | 계층 | 프레임워크 | 범위 | 속도 |
 |------|-----------|------|------|
-| 단위 테스트 | busted (Lua) + CMocka (C) + cargo test (Rust) | 함수/모듈 | 빠름 |
+| 단위 테스트 | busted (Lua) + cargo test (Rust) | 함수/모듈 | 빠름 |
 | 통합 테스트 | Test::Nginx (HTTP/Stream) | HTTP/TCP 엔드투엔드 | 중간 |
 | E2E 테스트 | Playwright (TypeScript) | 대시보드 UI 유저 플로우 | 중간 |
 | 부하 테스트 | wrk / vegeta | 성능/처리량 | 느림 (선택) |
@@ -16,9 +16,9 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 | 명령 | 내용 | PR blocking |
 |------|------|------------|
 | `make test` | 전체 (unit + integration) | Yes |
-| `make test-unit` | Lua + C 단위 테스트 | Yes |
+| `make test-unit` | Lua + Rust 단위 테스트 | Yes |
 | `make test-unit-lua` | busted 단위 테스트만 | Yes |
-| `make test-unit-c` | CMocka 단위 테스트만 | Yes |
+| `make test-unit-rust` | Rust cargo test 단위 테스트만 | Yes |
 | `make test-integration-http` | HTTP 통합 (로컬 Test::Nginx 또는 Docker Compose fallback) | Yes |
 | `make test-integration-stream` | Stream 통합 (Test::Nginx::Stream) | Yes |
 | `make test-reload` | Hot reload 전용 테스트 | Yes |
@@ -46,7 +46,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 - 로컬 `Test::Nginx::Socket`이 없고 Docker가 있으면 `make test-integration-http`는 자동으로 `make test-docker`로 fallback 한다.
 - CI의 HTTP 통합 테스트 source of truth는 `make test-docker`이며, GitHub Actions에서는 `tests/integration/http/*.t`를 파일 단위 matrix shard로 병렬 실행한다.
 - shard 실행 시 `make test-docker`는 `TEST_HTTP_PROVE_ARGS`, `TEST_NGINX_PORT`, `TEST_NGINX_SERVROOT`, `COMPOSE_PROJECT_NAME` override를 지원한다.
-- `make test-unit-c`는 `csrc/build/CTestTestfile.cmake`가 없으면 skip 한다.
+- `make test-unit-rust`는 각 Rust crate 디렉토리에 `Cargo.toml`이 없으면 skip 한다.
 - `make test-integration-stream`, `make test-reload`는 해당 테스트 디렉터리가 없으면 skip 한다.
 
 ### 예시
@@ -135,52 +135,63 @@ describe("Policy Evaluator", function()
 end)
 ```
 
-### 3.2 C 단위 테스트 — CMocka
-
-**테스트 위치**: `csrc/tests/` (단일 위치)
-
-CMake test discovery 규칙:
-- 파일명: `test_<module>.c`
-- CMake: `add_executable(test_<module> tests/test_<module>.c)` + `add_test(NAME <module> COMMAND test_<module>)`
+### 3.2 Rust 단위 테스트 — cargo test
 
 ```bash
-make test-unit-c
-# 또는: cmake --build csrc/build --target test && ctest --test-dir csrc/build
+make test-unit-rust
+# 또는: cd src/scanner && cargo test && cd ../decoder && cargo test && cd ../stream && cargo test
 ```
 
-### 3.3 Rust 단위 테스트 — cargo test
+### 3.3 FFI Contract 테스트
 
-```bash
-cd csrc && cargo test
-```
-
-### 3.4 FFI Contract 테스트
-
-Lua↔C FFI 계약 검증 (ABI/메모리/에러 전파):
+Lua↔Rust FFI 계약 검증 (ABI/메모리/에러 전파):
 
 ```lua
--- tests/unit/scanner/ffi_test.lua
+-- tests/unit/scanner/ffi_spec.lua
 describe("FFI contract", function()
-    it("returns non-NULL result for valid input", function()
-        local result = ffi_scanner.scan_http("/path", "body", "ua")
-        assert.is_not_nil(result)
+    it("maps caller-allocated scanner output into Lua values", function()
+        local scanner = load_module_with({
+            threat_type = "sqli",
+            rule_name = "sqli_union_select",
+        })
+        local result, err = scanner.scan({
+            path_raw = "/search",
+            path_normalized = "/search",
+            query_raw = "id=1 UNION SELECT",
+            query_normalized = "id=1 UNION SELECT",
+        })
+
+        assert.is_nil(err)
+        assert.equals("sqli", result.threat_type)
+        assert.equals("sqli_union_select", result.rule_name)
     end)
 
-    it("frees result without error", function()
-        local result = ffi_scanner.scan_http("/path", "", "")
-        -- free 호출 후 dangling pointer 없음 검증
-        ffi_scanner.free_result(result)
+    it("defaults optional fields and NULL body safely", function()
+        local scanner = load_module_with()
+        local result, err = scanner.scan({
+            path_raw = "/health",
+            path_normalized = "/health",
+        })
+
+        assert.is_nil(err)
+        assert.is_nil(result.threat_type)
+        assert.is_nil(result.rule_name)
     end)
 
-    it("handles NULL body gracefully (fail-closed)", function()
-        local result = ffi_scanner.scan_http("/path", nil, "ua")
-        -- fail-closed: NULL input은 deny 결과
-        assert.equals("deny", result.action)
+    it("propagates hard FFI errors as fail-closed tokens", function()
+        local scanner = load_module_with({ scan_rc = -3 })
+        local result, err = scanner.scan({
+            path_raw = "/search",
+            path_normalized = "/search",
+        })
+
+        assert.is_nil(result)
+        assert.truthy(err and err:find("scanner_fail"))
     end)
 end)
 ```
 
-### 3.5 로그 Golden/Snapshot 테스트
+### 3.4 로그 Golden/Snapshot 테스트
 
 `log-schema.md` 필드와 동기화:
 
@@ -301,8 +312,7 @@ rules:
 | `lua/luagate/policy/` | 90%+ | luacov |
 | `lua/luagate/log/` | 80%+ | luacov |
 | `lua/luagate/admin/` | 80%+ | luacov |
-| `csrc/` (C) | 80%+ | gcov/lcov |
-| `csrc/` (Rust) | 80%+ | cargo-llvm-cov |
+| `src/` (Rust) | 80%+ | cargo-llvm-cov |
 | FFI contract paths | 100% | 수동 확인 |
 
 > 커버리지는 CI에서 측정하고 PR에 리포트. 핵심 경로(policy evaluation, scanner) 아래로 내려가면 PR 블록.
@@ -313,7 +323,7 @@ rules:
 |----------|-----------|
 | 정책 평가 로직 | `test-unit-lua` (evaluator_test, conflict_test) |
 | Hot Reload 경로 | `test-reload` + `test-unit-lua` (reload/) |
-| FFI 모듈 변경 | `test-unit-c` + `test-unit-lua` (ffi_test) |
+| FFI 모듈 변경 | `test-unit-rust` + `test-unit-lua` (ffi_test) |
 | 로그 스키마 변경 | `test-unit-lua` (log/ golden test) |
 | Admin API 변경 | `test-unit-lua` (auth_test) + `test-integration-http` |
 | Stream 파이프라인 | `test-integration-stream` |
@@ -423,8 +433,8 @@ OWASP Top 10 기반 공격 벡터 테스트 (`tests/fixtures/` 픽스처):
 ```yaml
 # .github/workflows/test.yml
 stages:
-  - lint        # stylua, luacheck, clang-format
-  - unit        # test-unit-lua, test-unit-c, cargo test
+  - lint        # stylua, luacheck, clang-format, cargo clippy
+  - unit        # test-unit-lua, cargo test
   - build       # make build-ffi
   - integration # test-integration-http, test-integration-stream, test-reload
 ```

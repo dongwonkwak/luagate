@@ -8,7 +8,7 @@
 - [ ] ✅ 코드와 문서 변경이 같은 PR에 포함 (same-PR 규칙)
 - [ ] ✅ 전역 변수 없음 (module-level upvalue 또는 ngx.ctx 사용)
 - [ ] ✅ Linear 코멘트에 파일 경로 포인터 포함
-- [ ] ✅ StyLua / clang-format / cargo fmt 통과
+- [ ] ✅ StyLua / cargo fmt / cargo clippy 통과 (clang-format은 C 헤더가 있는 경우)
 
 ## Lua 핸들러
 

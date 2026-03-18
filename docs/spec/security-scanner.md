@@ -1,7 +1,7 @@
 # Security Scanner Specification
 
 > **ADR 참조**:
-> - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — C FFI 통합 방식
+> - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — Rust FFI 통합 방식
 
 ## 1. 개요
 
@@ -11,7 +11,7 @@
 - **구현**: `src/scanner/` (Rust cdylib)
 - **빌드 산출물**: `luagate_scanner.so`
 - **Lua 바인딩**: `lua/luagate/scanner/ffi.lua`
-- **호출 방식**: C FFI, 동일 worker 내 동기 호출 (ADR-001)
+- **호출 방식**: Rust FFI (extern "C"), 동일 worker 내 동기 호출 (ADR-001)
 
 ### Admin plane 스캐너 대상 제외
 
@@ -76,16 +76,16 @@ ADR-002 정책 평가 제외와 동일 규칙.
 - duplicate params → 각각 독립 검사 (첫 번째만 취하지 않음)
 - path separator decode (`%2F` → `/`) → path normalize 단계에서 처리
 
-## 3. C FFI 인터페이스
+## 3. Rust FFI 인터페이스
 
-> **ABI canonical source**: [c-ffi-modules.md §4](./c-ffi-modules.md#4-보안-스캐너-luagate_scannerso).
-> 이 섹션은 스캐너 동작 설명을 보완하며, 함수 시그니처는 c-ffi-modules.md가 단일 진실 소스다.
-> **caller-allocated output buffer 방식** (c-ffi-modules.md §3 참조). Rust는 메모리를 할당하여 반환하지 않는다.
+> **ABI canonical source**: [rust-ffi-modules.md §4](./rust-ffi-modules.md#4-보안-스캐너-luagate_scannerso).
+> 이 섹션은 스캐너 동작 설명을 보완하며, 함수 시그니처는 rust-ffi-modules.md가 단일 진실 소스다.
+> **caller-allocated output buffer 방식** (rust-ffi-modules.md §3 참조). Rust는 메모리를 할당하여 반환하지 않는다.
 
-### 3.1 C 함수 시그니처
+### 3.1 ABI 시그니처 (extern "C")
 
 ```c
-/* luagate_scanner.h — canonical: c-ffi-modules.md §4.1 */
+/* luagate_scanner ABI — canonical: rust-ffi-modules.md §4.1 */
 #include "luagate.h"
 
 /**
@@ -118,7 +118,7 @@ int luagate_scanner_init(const char *patterns_path, size_t patterns_path_len);
 ### 3.2 Lua FFI 바인딩
 
 ```lua
--- lua/luagate/scanner/ffi.lua (canonical: c-ffi-modules.md §4.2)
+-- lua/luagate/scanner/ffi.lua (canonical: rust-ffi-modules.md §4.2)
 local ffi = require("ffi")
 
 ffi.cdef[[
@@ -283,5 +283,5 @@ conf/
 ## 8. 의존성
 
 - [spec/http-pipeline.md](./http-pipeline.md) — 스캐너 호출 컨텍스트
-- [spec/c-ffi-modules.md](./c-ffi-modules.md) — FFI 공통 패턴
+- [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — FFI 공통 패턴
 - [ADR-001](../design/adr/ADR-001-execution-shared-state-model.md) — FFI 호출 모델

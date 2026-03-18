@@ -38,7 +38,7 @@ if not data then
     return ngx.exit(ngx.ERROR)
 end
 
--- 프로토콜 탐지 순서 (c-ffi-modules.md detect_protocol 호출)
+-- 프로토콜 탐지 순서 (rust-ffi-modules.md detect_protocol 호출)
 1. TLS ClientHello 탐지 (0x16 0x03 ...)
    └─ SNI 추출: TLS Extension(server_name) 파싱
    └─ fragmented ClientHello → LUAGATE_NEED_MORE_DATA (최대 preread_timeout까지 재시도)
@@ -75,7 +75,7 @@ end
 │                                          │
 │  2. CIDR radix tree 조회                 │
 │     active_version 변경 시 worker-local  │
-│     rebuild (c-ffi-modules.md 참조)      │
+│     rebuild (rust-ffi-modules.md 참조)      │
 │                                          │
 │  3. 스트림 정책 매칭 (ADR-002)            │
 │     scope 기준:                          │
@@ -271,4 +271,4 @@ LuaGate Stream 파이프라인은 기본적으로 **TLS 패스스루** 모드다
 - [spec/policy-engine.md](./policy-engine.md) — 스트림 정책 평가
 - [spec/log-schema.md](./log-schema.md) — TCP 세션 로그 스키마 (18필드)
 - [spec/architecture.md](./architecture.md) — 전체 프로세스 모델, zone 목록
-- [spec/c-ffi-modules.md](./c-ffi-modules.md) — detect_protocol, radix tree lifecycle
+- [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — detect_protocol, radix tree lifecycle

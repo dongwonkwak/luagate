@@ -1,5 +1,4 @@
 # Build artifacts
-csrc/build/
 *.so
 
 # Rust

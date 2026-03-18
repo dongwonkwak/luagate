@@ -1,10 +1,9 @@
-# C FFI 가이드 — 메모리 관리 & 안전 규칙
+# Rust FFI 가이드 — 메모리 관리 & 안전 규칙
 
 > ⚠️ **FFI는 본질적으로 unsafe하다.** 잘못된 포인터 연산, 이중 해제, 버퍼 오버플로우는
 > Lua pcall로도 복구할 수 없는 worker abort를 유발한다.
 > 아래 규칙을 엄격히 준수하고, FFI 코드 변경 시 반드시 security-reviewer와 협의한다.
-
-> 참조: `docs/spec/c-ffi-modules.md`, `docs/design/adr/ADR-001`
+> 참조: `docs/spec/rust-ffi-modules.md`, `docs/design/adr/ADR-001`
 
 ## FFI 통합 원칙 (ADR-001)
 
@@ -19,6 +18,7 @@
 |------|----------|------|------|
 | 보안 스캐너 | `luagate_scanner.so` | `src/scanner/` | 위협 탐지, OWASP 패턴 매칭 |
 | URL 디코더 | `luagate_decoder.so` | `src/decoder/` | 멀티레이어 인코딩 디코딩/정규화 |
+| Stream 프로토콜 | `luagate_stream.so` | `src/stream/` | TLS SNI 추출, 프로토콜 탐지, radix tree |
 
 ## 라이브러리 로드 (init_by_lua에서 1회)
 
@@ -49,71 +49,84 @@ end
 
 ## 메모리 관리 규칙 (엄격 준수)
 
-### 규칙 1: Rust 할당 메모리는 Rust free 함수로만 해제
+LuaGate FFI는 **caller-allocated buffer** 모델을 사용한다.
+Rust는 메모리를 할당하여 반환하지 않고, Lua가 미리 할당한 버퍼에 결과를 기록한다.
+**예외**: `luagate_stream.so`의 radix tree는 Rust가 할당하며, `luagate_radix_free()`로 해제 필수.
+
+### 규칙 1: Caller-allocated buffer 패턴
 
 ```lua
--- GOOD: 즉시 Lua 값으로 복사 + Rust free
-local result = lib.luagate_scan_http(...)
-local scan_result = {
-    threat_type  = (result.threat_type ~= nil) and ffi.string(result.threat_type) or nil,
-    threat_score = result.threat_score,
-}
-lib.luagate_scan_result_free(result)  -- 반드시 호출
-result = nil  -- C 포인터 참조 제거
+-- GOOD: Lua가 버퍼를 할당하고 Rust가 결과를 기록
+local threat_type_buf = ffi.new("char[?]", 64)
+local rule_name_buf   = ffi.new("char[?]", 128)
+local threat_type_len = ffi.new("size_t[1]")
+local rule_name_len   = ffi.new("size_t[1]")
+local score           = ffi.new("double[1]")
 
--- BAD: free 미호출 → 메모리 누수
-local result = lib.luagate_scan_http(...)
-return result.threat_score  -- result free 안됨
+local rc = lib.luagate_scan_http(
+    path_raw, #path_raw,
+    path_normalized, #path_normalized,
+    query_raw, #query_raw,
+    query_normalized, #query_normalized,
+    body, body_len,
+    threat_type_buf, 64, threat_type_len,
+    rule_name_buf, 128, rule_name_len,
+    score
+)
+-- rc가 int 반환 → 버퍼에서 Lua 문자열로 복사
+if rc == 0 and threat_type_len[0] > 0 then
+    local threat_type = ffi.string(threat_type_buf, threat_type_len[0])
+end
 ```
 
-### 규칙 2: C 포인터를 Lua 테이블에 장기 저장 금지
-
-```lua
--- BAD: C 포인터 저장 후 나중에 접근 (Rust free 이후 dangling pointer)
-ngx.ctx.scan_ptr = result  -- 절대 금지
-
--- GOOD: 즉시 복사 후 C 포인터 해제
-ngx.ctx.luagate.threat_type = ffi.string(result.threat_type)
-lib.luagate_scan_result_free(result)
-```
-
-### 규칙 3: Lua 문자열 → C 포인터 수명 관리
+### 규칙 2: Lua 문자열 → C 포인터 수명 관리
 
 ```lua
 -- ffi.cast는 Lua 문자열을 복사하지 않음 — GC 전까지 참조 유지 필수
 local path = ngx.ctx.luagate.path_raw  -- Lua 변수로 참조 유지
-local result = lib.luagate_scan_http(
+local rc = lib.luagate_scan_http(
     ffi.cast("const char*", path), #path,  -- path 변수가 GC되지 않도록
     ...
 )
 -- FFI 호출 완료 후 path 참조 소멸 가능
 ```
 
-### 규칙 4: ffi.gc를 사용한 자동 해제 (권장 패턴)
+### 규칙 3: Rust 할당 리소스는 Rust free 함수로 해제
+
+radix tree 등 Rust가 소유하는 장기 리소스는 반드시 대응하는 free 함수로 해제한다.
 
 ```lua
--- 자동 해제 등록으로 누수 방지
-local result = ffi.gc(lib.luagate_scan_http(...), lib.luagate_scan_result_free)
--- result가 GC되면 자동으로 luagate_scan_result_free 호출
-local threat_type = (result.threat_type ~= nil) and ffi.string(result.threat_type) or nil
--- 명시적 해제도 가능: lib.luagate_scan_result_free(ffi.gc(result, nil))
+-- radix tree: Rust가 할당, Lua가 포인터를 보관
+local tree = lib.luagate_radix_build(...)
+-- 사용 완료 후 반드시 해제
+lib.luagate_radix_free(tree)
+```
+
+### 규칙 4: C 포인터를 Lua 테이블에 장기 저장 주의
+
+```lua
+-- BAD: ngx.ctx에 FFI 포인터 저장 (요청 종료 시 dangling)
+ngx.ctx.scan_ptr = result  -- 절대 금지
+
+-- GOOD: 즉시 Lua 값으로 변환
+ngx.ctx.luagate.threat_type = ffi.string(threat_type_buf, threat_type_len[0])
 ```
 
 ## Return Code 처리 vs Native Crash 경계
 
-| 상황 | 반환 | Lua 처리 |
-|------|------|---------|
-| 정상 처리, 위협 없음 | `ScanResult*` (threat_type=NULL) | threat_score=0.0으로 처리 |
-| 패턴 매칭 오류 | `ScanResult*` (threat_score=0.0) | 스캔 생략, warn 로그 |
-| NULL 반환 | `NULL` | fail-closed: deny 처리 |
-| Rust panic | worker abort | Nginx master가 재시작 (복구 불가) |
-| segfault / abort | process abort | Nginx master가 재시작 (복구 불가) |
+| 상황 | 반환값 (int) | Lua 처리 |
+|------|-------------|---------|
+| 정상, 위협 없음 | `0` (threat_type_len=0) | allow 진행 |
+| 위협 탐지 | `0` (threat_type_len>0) | deny 또는 정책 판정 |
+| 예산 초과 | `LUAGATE_BUDGET_EXCEEDED(-3)` | fail-closed |
+| 타임아웃 | `LUAGATE_TIMEOUT(-5)` | fail-closed |
+| 에러 | 음수 에러 코드 | fail-closed: deny + ERR 로그 |
+| Rust panic (`panic=abort`) | 프로세스 abort | Nginx master가 재시작 (복구 불가) |
 
 ```lua
-local result = lib.luagate_scan_http(...)
-if result == nil then
-    -- NULL 반환 = 초기화 실패 또는 심각한 에러
-    ngx.log(ngx.ERR, "scanner returned NULL, applying fail-closed")
+local rc = lib.luagate_scan_http(...)
+if rc ~= 0 then
+    ngx.log(ngx.ERR, "scanner failed with rc=", rc, ", applying fail-closed")
     return "deny", "scanner-error"
 end
 ```
@@ -123,24 +136,25 @@ end
 모든 FFI export 함수:
 - `#[no_mangle]` + `extern "C"` 선언
 - 함수 명명: `luagate_<module>_<action>`
-- 문자열 반환: `CString::into_raw()` (Lua에서 반드시 `luagate_*_free()` 호출)
-- Nullable 포인터: NULL 의미를 항상 명시 (NULL = 없음 vs NULL = 에러 구분)
+- **caller-allocated buffer 패턴**: 결과는 caller가 미리 할당한 버퍼에 기록, `*_len` out 파라미터로 실제 길이 반환
+- 장기 리소스 (radix tree 등): Rust가 할당, 대응 `free` 함수 제공
 - 최대 길이 계약: `path_raw_len`, `query_len` 등 명시적 길이 인수 전달 (NULL-terminated에 의존하지 않음)
 
-## 에러 코드 맵 (scanner)
+## 에러 코드 맵
 
 | 반환값 | 의미 | Lua 처리 |
 |--------|------|---------|
-| `result != NULL, threat_type == NULL` | 위협 없음 | allow 진행 |
-| `result != NULL, threat_type != NULL` | 위협 탐지 | deny 또는 정책 판정 |
-| `result == NULL` | 초기화 실패 또는 OOM | fail-closed |
+| `0` | 성공 | threat_type_len 확인 후 allow/deny |
+| `LUAGATE_BUDGET_EXCEEDED(-3)` | 시간 예산 초과 | fail-closed |
+| `LUAGATE_TIMEOUT(-5)` | 하드 타임아웃 | fail-closed |
+| 기타 음수 | 내부 에러 | fail-closed |
 | Rust panic (`panic=abort`) | 프로세스 abort | Nginx master 재시작 |
 
 ## 빌드 파이프라인
 
 ```bash
 make build-ffi
-# = cargo build --release (src/scanner, src/decoder)
+# = cargo build --release (src/scanner, src/decoder, src/stream)
 # + cp *.so lib/
 ```
 
@@ -161,7 +175,7 @@ describe("Scanner FFI", function()
         local result = scanner.scan({
             path_raw = "/search",
             path_normalized = "/search",
-            query_string = "id=1' OR '1'='1",
+            query_raw = "id=1' OR '1'='1",
         })
         assert.equals("sqli", result.threat_type)
         assert.truthy(result.threat_score > 0.7)

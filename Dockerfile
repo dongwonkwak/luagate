@@ -1,22 +1,4 @@
-# ── Stage 1a: C extensions build ──────────────────────────────────────────
-FROM alpine:3.19 AS c-builder
-
-RUN apk add --no-cache \
-    cmake \
-    make \
-    gcc \
-    musl-dev \
-    linux-headers
-
-WORKDIR /build/csrc
-COPY csrc/ .
-
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
- && cmake --build build \
- && mkdir -p /build/artifacts \
- && find build \( -type f -o -type l \) -name '*.so*' -exec cp -L {} /build/artifacts/ \;
-
-# ── Stage 1b: Rust FFI build ─────────────────────────────────────────────
+# ── Stage 1: Rust FFI build ──────────────────────────────────────────────
 FROM rust:1.83 AS rust-builder
 
 WORKDIR /build
@@ -58,9 +40,6 @@ RUN apk add --no-cache \
  && luarocks-5.1 install lyaml YAML_DIR=/usr \
       LUA_INCDIR=/usr/local/openresty/luajit/include/luajit-2.1 \
  && apk del .build-deps
-
-# Copy C shared libraries from builder
-COPY --from=c-builder /build/artifacts/ /usr/local/openresty/lualib/
 
 # Copy Rust FFI shared libraries
 COPY --from=rust-builder /build/artifacts/ /usr/local/openresty/lualib/

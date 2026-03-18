@@ -34,7 +34,7 @@
 |------|----------|
 | **권장 (Nix)** | [Nix](https://nixos.org/download) + [direnv](https://direnv.net/) |
 | Docker (데모) | Docker 24+ + Docker Compose v2 |
-| 수동 | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, CMake 3.20+, Node.js 20+ |
+| 수동 | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, Node.js 20+ |
 
 ### 1) 데모 실행 (Docker)
 
@@ -131,7 +131,7 @@ graph TB
 ```
 luagate/
 ├── lua/            # Lua 핸들러 및 정책 엔진 모듈
-├── csrc/           # Rust FFI 소스 (scanner, decoder)
+├── src/            # Rust FFI 소스 (scanner, decoder, stream)
 ├── conf/           # nginx.conf 및 정책 YAML
 ├── docs/
 │   ├── design/adr/ # 아키텍처 결정 기록 (ADR 001~004)
@@ -173,7 +173,7 @@ luagate/
 | [Admin API](docs/spec/admin-api.md) | REST API 명세 |
 | [Log Schema](docs/spec/log-schema.md) | 감사 로그 필드 |
 | [Security Scanner](docs/spec/security-scanner.md) | FFI 스캐너 |
-| [C/FFI Modules](docs/spec/c-ffi-modules.md) | Rust FFI ABI |
+| [Rust FFI Modules](docs/spec/rust-ffi-modules.md) | Rust FFI ABI |
 | [Test Strategy](docs/spec/test-strategy.md) | 테스트 전략 |
 | [Doc Strategy](docs/spec/doc-strategy.md) | 문서화 전략 |
 

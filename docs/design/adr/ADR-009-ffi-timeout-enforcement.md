@@ -229,13 +229,13 @@ Steady-state에서 hang된 detached thread 누적을 감지하기 위해 외부 
 
 ### radix_build hot reload 시 timeout 동작 (ADR-003 연동)
 
-`luagate_stream.so`의 `radix_build`는 init 단계 1회성 호출이 **아니다**. `c-ffi-modules.md` §6.4 및 `stream-pipeline.md` §2.2에 따라, `active_version` 변경 시 각 worker가 독립적으로 radix tree를 rebuild한다. 따라서 hot reload 이후 첫 stream 요청에서 `radix_build`가 호출될 수 있으며, 이때 Layer 2 hard timeout(1000ms)이 적용된다.
+`luagate_stream.so`의 `radix_build`는 init 단계 1회성 호출이 **아니다**. `rust-ffi-modules.md` §6.4 및 `stream-pipeline.md` §2.2에 따라, `active_version` 변경 시 각 worker가 독립적으로 radix tree를 rebuild한다. 따라서 hot reload 이후 첫 stream 요청에서 `radix_build`가 호출될 수 있으며, 이때 Layer 2 hard timeout(1000ms)이 적용된다.
 
 **rebuild timeout 시 동작 정의:**
 
 | 단계 | 동작 |
 |------|------|
-| radix_build 정상 완료 | new tree로 교체 (c-ffi-modules.md §6.4 atomic swap) |
+| radix_build 정상 완료 | new tree로 교체 (rust-ffi-modules.md §6.4 atomic swap) |
 | radix_build Layer 1 timeout (100ms) | `LUAGATE_BUDGET_EXCEEDED(-3)` 반환 |
 | radix_build Layer 2 timeout (1000ms) | `LUAGATE_TIMEOUT(-5)` 반환 |
 | timeout 후 fallback | **old tree(LKG) 유지**: 현재 worker의 module-level upvalue에 저장된 이전 radix tree 포인터를 계속 사용. `_cached_stream_version`을 갱신하지 않으므로 다음 요청에서 rebuild를 재시도한다. |
@@ -439,7 +439,7 @@ thread pool 후보: `crossbeam` scoped thread pool 또는 Rust `std::thread::sco
 
 - [ADR-001](./ADR-001-execution-shared-state-model.md) -- 실행 모델, FFI 통합 방식, 실패 정책 (이 ADR이 해결하는 "향후 고려" 항목)
 - [ADR-003](./ADR-003-policy-storage-hot-reload.md) -- 정책 저장소 + Hot Reload (radix_build timeout 시 LKG 동작 연동)
-- [spec/c-ffi-modules.md](../../spec/c-ffi-modules.md) -- FFI ABI 계약, 에러 코드 정의, timeout budget
+- [spec/rust-ffi-modules.md](../../spec/rust-ffi-modules.md) -- FFI ABI 계약, 에러 코드 정의, timeout budget
 - [spec/http-pipeline.md](../../spec/http-pipeline.md) -- HTTP 파이프라인 타임아웃 설정
 - [spec/architecture.md](../../spec/architecture.md) -- 전체 아키텍처, 실패 정책 표
-- [knowledge/c-ffi-guide.md](../../../.claude/knowledge/c-ffi-guide.md) -- FFI 메모리 관리 규칙
+- [knowledge/rust-ffi-guide.md](../../../.claude/knowledge/rust-ffi-guide.md) -- FFI 메모리 관리 규칙
