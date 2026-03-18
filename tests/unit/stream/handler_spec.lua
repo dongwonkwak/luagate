@@ -40,11 +40,26 @@ end
 -- ---------------------------------------------------------------------------
 local _stream_ffi_stub = {
   detect_result = nil, -- { protocol, err, need_more }
+  detect_results = nil, -- array of results for retry loop testing
+  detect_call_count = 0,
   sni_result = nil, -- { sni, err, need_more }
+  radix_build_result = nil, -- { tree, err }
+  radix_lookup_result = nil, -- { idx, err }
+  radix_free_calls = {},
 }
+
+local MOCK_RADIX_TREE = { _type = "mock_radix_tree" }
 
 local _stream_ffi_module = {
   detect_protocol = function(_data)
+    _stream_ffi_stub.detect_call_count = _stream_ffi_stub.detect_call_count + 1
+    -- Support sequential results for retry loop testing
+    if _stream_ffi_stub.detect_results then
+      local idx = _stream_ffi_stub.detect_call_count
+      local r = _stream_ffi_stub.detect_results[idx]
+        or _stream_ffi_stub.detect_results[#_stream_ffi_stub.detect_results]
+      return r[1], r[2], r[3]
+    end
     if _stream_ffi_stub.detect_result then
       local r = _stream_ffi_stub.detect_result
       return r[1], r[2], r[3]
@@ -57,6 +72,21 @@ local _stream_ffi_module = {
       return r[1], r[2], r[3]
     end
     return "", nil, false
+  end,
+  radix_build = function(_cidr_list)
+    if _stream_ffi_stub.radix_build_result then
+      return _stream_ffi_stub.radix_build_result[1], _stream_ffi_stub.radix_build_result[2]
+    end
+    return MOCK_RADIX_TREE, nil
+  end,
+  radix_lookup = function(_tree, _ip)
+    if _stream_ffi_stub.radix_lookup_result then
+      return _stream_ffi_stub.radix_lookup_result[1], _stream_ffi_stub.radix_lookup_result[2]
+    end
+    return nil, nil -- no match
+  end,
+  radix_free = function(tree)
+    table.insert(_stream_ffi_stub.radix_free_calls, { tree = tree })
   end,
 }
 
@@ -189,7 +219,12 @@ local function reset_stubs()
   _evaluator_stub.evaluate_stream_result = nil
   _evaluator_stub.get_policy_error = nil
   _stream_ffi_stub.detect_result = nil
+  _stream_ffi_stub.detect_results = nil
+  _stream_ffi_stub.detect_call_count = 0
   _stream_ffi_stub.sni_result = nil
+  _stream_ffi_stub.radix_build_result = nil
+  _stream_ffi_stub.radix_lookup_result = nil
+  _stream_ffi_stub.radix_free_calls = {}
   package.loaded["luagate.stream.ffi"] = _stream_ffi_module
   package.loaded["luagate.policy.evaluator"] = nil
 end
@@ -420,10 +455,10 @@ describe("handler.preread - detect_protocol 실패 -> fail-closed", function()
 end)
 
 -- ===========================================================================
--- NEED_MORE_DATA -> fail-closed
+-- NEED_MORE_DATA -> retry loop -> fail-closed if still insufficient
 -- ===========================================================================
 
-describe("handler.preread - NEED_MORE_DATA -> fail-closed", function()
+describe("handler.preread - NEED_MORE_DATA retry loop", function()
   local ngx_mock
 
   before_each(function()
@@ -432,8 +467,60 @@ describe("handler.preread - NEED_MORE_DATA -> fail-closed", function()
     _G.ngx = ngx_mock
   end)
 
-  it("detect_protocol NEED_MORE_DATA -> fail-closed", function()
+  it("detect_protocol NEED_MORE_DATA -> retries exhaust -> fail-closed", function()
+    -- All calls return NEED_MORE_DATA
     _stream_ffi_stub.detect_result = { nil, nil, true }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("detect_need_more_data", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+    -- Should have retried (1 initial + up to 3 retries = 4 total calls)
+    assert.is_true(_stream_ffi_stub.detect_call_count > 1)
+  end)
+
+  it("detect_protocol NEED_MORE_DATA -> succeeds on retry -> protocol detected", function()
+    -- First call: NEED_MORE_DATA, second call: success with "tls"
+    _stream_ffi_stub.detect_results = {
+      { nil, nil, true },
+      { "tls", nil, false },
+    }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-retry-ok",
+      decision_source = "rule",
+      upstream = "up:443",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("tls", ctx.detected_protocol)
+    assert.equals("proxy", ctx.action)
+    assert.equals("proxied", ctx.request_state)
+    assert.equals(2, _stream_ffi_stub.detect_call_count)
+    assert.is_nil(ngx_mock._get_exited())
+  end)
+
+  it("detect_protocol NEED_MORE_DATA + socket timeout on retry -> fail-closed", function()
+    _stream_ffi_stub.detect_result = { nil, nil, true }
+    -- Socket returns timeout with no data on retry
+    ngx_mock.req.socket = function()
+      local call_count = 0
+      return {
+        receive = function(_, _bytes)
+          call_count = call_count + 1
+          if call_count == 1 then
+            return "\x16\x03" -- initial partial data
+          end
+          return nil, "timeout" -- retry: timeout with no more data
+        end,
+      }
+    end
 
     handler.preread()
 
@@ -445,10 +532,10 @@ describe("handler.preread - NEED_MORE_DATA -> fail-closed", function()
 end)
 
 -- ===========================================================================
--- SNI 추출 실패 -> 계속 진행 (graceful degradation)
+-- SNI 추출 실패 -> fail-closed (malformed TLS / fragmented ClientHello)
 -- ===========================================================================
 
-describe("handler.preread - SNI 추출 실패 -> graceful degradation", function()
+describe("handler.preread - SNI 추출 실패 -> fail-closed", function()
   local ngx_mock
 
   before_each(function()
@@ -457,35 +544,39 @@ describe("handler.preread - SNI 추출 실패 -> graceful degradation", function
     _G.ngx = ngx_mock
   end)
 
-  it("SNI 에러 -> sni = nil로 설정하고 계속 진행", function()
+  it("SNI INVALID_INPUT (malformed TLS) -> fail-closed", function()
     _stream_ffi_stub.detect_result = { "tls", nil, false }
     _stream_ffi_stub.sni_result = { nil, "invalid_input", false }
-    _evaluator_stub.get_policy_result = make_proxy_policy()
-    _evaluator_stub.evaluate_stream_result = {
-      action = "proxy",
-      matched_rule = "rule-fallback",
-      decision_source = "rule",
-      upstream = "fallback:443",
-    }
 
     handler.preread()
 
     local ctx = ngx_mock.ctx.luagate_stream
-    assert.is_nil(ctx.sni)
-    assert.equals("tls", ctx.detected_protocol)
-    assert.equals("proxy", ctx.action)
-    assert.equals("proxied", ctx.request_state)
-    -- Should NOT have called ngx.exit
-    assert.is_nil(ngx_mock._get_exited())
+    assert.equals("malformed_tls:invalid_input", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+    assert.equals("deny", ngx_mock.var.luagate_stream_action)
   end)
 
-  it("SNI NEED_MORE_DATA -> sni = nil로 설정하고 계속 진행", function()
+  it("SNI NEED_MORE_DATA (fragmented ClientHello) -> fail-closed", function()
     _stream_ffi_stub.detect_result = { "tls", nil, false }
     _stream_ffi_stub.sni_result = { nil, nil, true }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("sni_need_more_data", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+    assert.equals("deny", ngx_mock.var.luagate_stream_action)
+  end)
+
+  it("SNI empty string (no SNI extension) -> continue normally", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "", nil, false }
     _evaluator_stub.get_policy_result = make_proxy_policy()
     _evaluator_stub.evaluate_stream_result = {
       action = "proxy",
-      matched_rule = "rule-x",
+      matched_rule = "rule-no-sni",
       decision_source = "rule",
       upstream = "backend:443",
     }
@@ -493,8 +584,11 @@ describe("handler.preread - SNI 추출 실패 -> graceful degradation", function
     handler.preread()
 
     local ctx = ngx_mock.ctx.luagate_stream
-    assert.is_nil(ctx.sni)
+    assert.is_nil(ctx.sni) -- empty string -> nil
+    assert.equals("tls", ctx.detected_protocol)
+    assert.equals("proxy", ctx.action)
     assert.equals("proxied", ctx.request_state)
+    assert.is_nil(ngx_mock._get_exited())
   end)
 end)
 
@@ -840,6 +934,9 @@ describe("handler.preread - non-TLS protocol skips SNI extraction", function()
         sni_called = true
         return "should-not-be-called", nil, false
       end,
+      radix_build = _stream_ffi_module.radix_build,
+      radix_lookup = _stream_ffi_module.radix_lookup,
+      radix_free = _stream_ffi_module.radix_free,
     }
 
     _evaluator_stub.get_policy_result = make_proxy_policy()
@@ -854,6 +951,163 @@ describe("handler.preread - non-TLS protocol skips SNI extraction", function()
 
     assert.is_false(sni_called)
     assert.is_nil(ngx_mock.ctx.luagate_stream.sni)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+end)
+
+-- ===========================================================================
+-- Radix tree rebuild on version change (Fix 3)
+-- ===========================================================================
+
+describe("handler.preread - radix tree CIDR integration", function()
+  local ngx_mock
+  -- Use unique version strings per test to force radix rebuild
+  -- (module-level _radix_version persists across tests)
+  local test_version_counter = 100
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    -- Each test gets a unique version to trigger radix rebuild
+    test_version_counter = test_version_counter + 1
+    local ver = "v-radix-" .. test_version_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver
+      end
+      return nil
+    end
+  end)
+
+  it("정책에 src_ip_cidr 규칙이 있으면 radix_build 호출", function()
+    local build_called = false
+    local build_cidr = nil
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = _stream_ffi_module.detect_protocol,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function(cidr_list)
+        build_called = true
+        build_cidr = cidr_list
+        return MOCK_RADIX_TREE, nil
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    _stream_ffi_stub.detect_result = { "raw", nil, false }
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "allow-internal", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+        { id = "allow-vpn", scope = { src_ip_cidr = "172.16.0.0/12" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
+    assert.is_true(build_called)
+    assert.truthy(build_cidr and build_cidr:find("10.0.0.0/8"))
+    assert.truthy(build_cidr and build_cidr:find("172.16.0.0/12"))
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("radix_lookup 결과가 request_ctx.radix_match_index에 전달된다", function()
+    local captured_ctx = nil
+    local saved_preload = package.preload["luagate.policy.evaluator"]
+    package.preload["luagate.policy.evaluator"] = function()
+      return {
+        get_policy = function()
+          return {
+            global = { default_action = "deny" },
+            rules = {},
+            stream_rules = {
+              { id = "allow-cidr", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+            },
+            _compiled_stream = {},
+          }
+        end,
+        evaluate_stream = function(_rules, rctx)
+          captured_ctx = rctx
+          return { action = "proxy", matched_rule = "allow-cidr", decision_source = "rule", upstream = "up:80" }
+        end,
+      }
+    end
+    package.loaded["luagate.policy.evaluator"] = nil
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return MOCK_RADIX_TREE, nil
+      end,
+      radix_lookup = function()
+        return 0, nil
+      end, -- matched rule index 0
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    handler.preread()
+
+    assert.is_not_nil(captured_ctx)
+    assert.equals(0, captured_ctx.radix_match_index)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+    package.preload["luagate.policy.evaluator"] = saved_preload
+    package.loaded["luagate.policy.evaluator"] = nil
+  end)
+
+  it("radix_build 실패 시 WARN 로그만, 처리 계속", function()
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return nil, "radix_build_fail:-1"
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
+    -- Should have continued to evaluation (deny via default)
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("deny", ctx.action)
+    assert.equals("denied", ctx.request_state)
 
     -- Restore
     package.loaded["luagate.stream.ffi"] = _stream_ffi_module

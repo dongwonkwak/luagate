@@ -44,6 +44,8 @@ unsafe fn write_output(
 // ---------------------------------------------------------------------------
 
 /// Known HTTP method prefixes for detection.
+/// Note: CONNECT is excluded per spec — MVP does not support CONNECT method.
+/// CONNECT-prefixed data will be classified as "raw".
 const HTTP_METHODS: &[&[u8]] = &[
     b"GET ",
     b"POST ",
@@ -52,7 +54,6 @@ const HTTP_METHODS: &[&[u8]] = &[
     b"HEAD ",
     b"OPTIONS ",
     b"PATCH ",
-    b"CONNECT ",
 ];
 
 /// Detect the application-layer protocol from the first bytes of a connection.
@@ -327,21 +328,28 @@ fn parse_sni(data: &[u8]) -> SniResult<'_> {
 // CIDR Radix Tree
 // ---------------------------------------------------------------------------
 
-/// Entry in the radix tree: a network prefix + associated rule index.
-struct RadixEntry {
-    /// Network address as 32-bit integer
-    network: u32,
-    /// Prefix length (0..32)
-    prefix_len: u8,
-    /// Mask computed from prefix_len
-    mask: u32,
-    /// Index of the matching rule (from cidr_list input)
-    rule_index: u32,
+/// Node in the binary radix trie (bit-level).
+/// Each node represents a single bit position in a 32-bit IPv4 address.
+/// Children[0] = left (bit 0), Children[1] = right (bit 1).
+struct RadixNode {
+    children: [Option<Box<RadixNode>>; 2],
+    /// If Some, this node marks the end of an inserted prefix.
+    rule_index: Option<u32>,
 }
 
-/// Opaque radix tree handle exposed to C callers.
+impl RadixNode {
+    fn new() -> Self {
+        RadixNode {
+            children: [None, None],
+            rule_index: None,
+        }
+    }
+}
+
+/// Opaque radix trie handle exposed to C callers.
+/// Uses a binary trie for O(32) = O(1) longest-prefix-match lookups.
 pub struct LuagateRadix {
-    entries: Vec<RadixEntry>,
+    root: RadixNode,
 }
 
 /// Build a radix tree from a newline-separated CIDR list.
@@ -365,7 +373,7 @@ pub extern "C" fn luagate_radix_build(
     if cidr_list.is_null() || cidr_list_len == 0 {
         // Empty list — build an empty tree (valid, matches nothing)
         let tree = Box::new(LuagateRadix {
-            entries: Vec::new(),
+            root: RadixNode::new(),
         });
         unsafe { *tree_out = Box::into_raw(tree); }
         return LUAGATE_OK;
@@ -377,7 +385,7 @@ pub extern "C" fn luagate_radix_build(
         Err(_) => return LUAGATE_INVALID_INPUT,
     };
 
-    let mut entries = Vec::new();
+    let mut root = RadixNode::new();
 
     for line in input.lines() {
         let line = line.trim();
@@ -414,24 +422,20 @@ pub extern "C" fn luagate_radix_build(
         };
 
         let network = u32::from(addr);
-        let mask = if prefix_len == 0 {
-            0
-        } else {
-            !0u32 << (32 - prefix_len)
-        };
 
-        entries.push(RadixEntry {
-            network: network & mask,
-            prefix_len,
-            mask,
-            rule_index,
-        });
+        // Insert into trie: walk prefix_len bits from MSB
+        let mut node = &mut root;
+        for bit_pos in 0..prefix_len {
+            let bit = ((network >> (31 - bit_pos)) & 1) as usize;
+            node = node.children[bit].get_or_insert_with(|| Box::new(RadixNode::new()));
+        }
+        // Longer prefix wins: always overwrite (last insert at same prefix wins,
+        // but typically each CIDR is unique). For overlapping prefixes, the trie
+        // naturally provides longest-prefix-match during lookup.
+        node.rule_index = Some(rule_index);
     }
 
-    // Sort by prefix_len descending for longest-prefix-match
-    entries.sort_by(|a, b| b.prefix_len.cmp(&a.prefix_len));
-
-    let tree = Box::new(LuagateRadix { entries });
+    let tree = Box::new(LuagateRadix { root });
     unsafe { *tree_out = Box::into_raw(tree); }
     LUAGATE_OK
 }
@@ -475,15 +479,28 @@ pub extern "C" fn luagate_radix_lookup(
     let ip_u32 = u32::from(addr);
     let tree_ref = unsafe { &*tree };
 
-    // Entries are sorted longest prefix first, so first match is longest
-    for entry in &tree_ref.entries {
-        if (ip_u32 & entry.mask) == entry.network {
-            unsafe { *matched_rule_index_out = entry.rule_index; }
-            return LUAGATE_OK;
+    // Walk the trie bit-by-bit (MSB first), tracking the last seen rule_index.
+    // This gives longest-prefix-match in O(32) steps.
+    let mut best_match: Option<u32> = tree_ref.root.rule_index;
+    let mut node = &tree_ref.root;
+
+    for bit_pos in 0..32u8 {
+        let bit = ((ip_u32 >> (31 - bit_pos)) & 1) as usize;
+        match &node.children[bit] {
+            Some(child) => {
+                node = child;
+                if let Some(idx) = node.rule_index {
+                    best_match = Some(idx);
+                }
+            }
+            None => break,
         }
     }
 
-    // No match
+    if let Some(idx) = best_match {
+        unsafe { *matched_rule_index_out = idx; }
+    }
+
     LUAGATE_OK
 }
 
@@ -574,11 +591,13 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_http_connect() {
+    fn test_detect_connect_classified_as_raw() {
+        // CONNECT is excluded from HTTP methods per spec (MVP does not support CONNECT).
+        // CONNECT-prefixed data is classified as "raw".
         let data = b"CONNECT example.com:443 HTTP/1.1\r\n";
         let (rc, proto) = detect(data);
         assert_eq!(rc, LUAGATE_OK);
-        assert_eq!(proto, "http");
+        assert_eq!(proto, "raw");
     }
 
     #[test]

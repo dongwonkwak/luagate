@@ -21,12 +21,14 @@ local _M = {}
 
 -- Module-level radix tree cache (worker-local upvalue).
 -- Rebuilt when policy active_version changes.
--- luacheck: ignore 211 _radix_tree _radix_version
-local _radix_tree = nil -- reserved for CIDR radix hot reload (DON-XXX)
-local _radix_version = nil -- reserved for CIDR radix hot reload (DON-XXX)
+local _radix_tree = nil -- CIDR radix tree (FFI opaque pointer)
+local _radix_version = nil -- active_version at which _radix_tree was built
 
 -- Bytes to read on each peek attempt
 local PEEK_BYTES = 1024
+
+-- Maximum retry attempts for NEED_MORE_DATA from detect_protocol
+local MAX_DETECT_RETRIES = 3
 
 --- Generate a connection UUID.
 -- Uses ngx.var.connection as base with worker_id prefix for uniqueness.
@@ -100,7 +102,10 @@ function _M.preread()
   ngx.var.luagate_active_version = stream_ver
 
   -- 3. Peek preread buffer
-  local ok_sock, sock = pcall(ngx.req.socket)
+  -- In stream preread_by_lua, data read via ngx.req.socket(true) is automatically
+  -- preserved in the Nginx stream preread buffer. proxy_pass forwards this data
+  -- to upstream — the read does NOT consume data from the client stream.
+  local ok_sock, sock = pcall(ngx.req.socket, true)
   if not ok_sock or not sock then
     ngx.log(ngx.ERR, "[luagate-stream] failed to get request socket: ", tostring(sock))
     ctx.deny_reason = "socket_error"
@@ -146,14 +151,34 @@ function _M.preread()
     return ngx.exit(ngx.ERROR)
   end
 
+  -- NEED_MORE_DATA retry loop (stream-pipeline.md §2.1, c-ffi-modules.md §2):
+  -- If detect_protocol returns NEED_MORE_DATA, read more bytes from the socket
+  -- and retry up to MAX_DETECT_RETRIES times (within preread_timeout).
   local protocol, detect_err, need_more = stream_ffi.detect_protocol(preread_data)
+  local retry_count = 0
 
-  -- NEED_MORE_DATA handling (stream-pipeline.md §2.1)
-  -- In the preread phase, the initial receive should provide enough bytes.
-  -- If detect_protocol still needs more data, fail-closed rather than
-  -- attempting additional socket reads that may not be available.
+  while need_more and retry_count < MAX_DETECT_RETRIES do
+    retry_count = retry_count + 1
+    local ok_more, more_data, more_err = pcall(sock.receive, sock, PEEK_BYTES)
+    if ok_more and more_data then
+      preread_data = preread_data .. more_data
+    elseif ok_more and more_err == "timeout" then
+      if more_data then
+        preread_data = preread_data .. more_data
+      end
+      -- timeout with no new data -> break and fail-closed below
+      if not more_data or #more_data == 0 then
+        break
+      end
+    else
+      -- I/O error during retry -> break and fail-closed below
+      break
+    end
+    protocol, detect_err, need_more = stream_ffi.detect_protocol(preread_data)
+  end
+
   if need_more then
-    ngx.log(ngx.ERR, "[luagate-stream] protocol detection needs more data, fail-closed")
+    ngx.log(ngx.ERR, "[luagate-stream] protocol detection needs more data after ", retry_count, " retries, fail-closed")
     ctx.deny_reason = "detect_need_more_data"
     ctx.request_state = "denied"
     ngx.var.luagate_stream_action = "deny"
@@ -174,17 +199,31 @@ function _M.preread()
   ngx.var.luagate_protocol = ctx.detected_protocol
 
   -- 5. TLS SNI extraction
+  -- Failure taxonomy (stream-pipeline.md §9.1):
+  --   INVALID_INPUT = malformed TLS -> fail-closed (not raw fallback)
+  --   NEED_MORE_DATA = fragmented ClientHello -> fail-closed (timeout assumed)
+  --   empty SNI (no SNI extension) = valid TLS without SNI -> continue normally
   if ctx.detected_protocol == "tls" then
     local sni, sni_err, sni_need_more = stream_ffi.extract_sni(preread_data)
 
     if sni_need_more then
-      -- Fragmented ClientHello — fail-closed (MVP: no retry for SNI)
-      ngx.log(ngx.WARN, "[luagate-stream] SNI extraction needs more data, continuing without SNI")
-      ctx.sni = nil
+      -- Fragmented ClientHello — fail-closed (stream-pipeline.md §9.1)
+      ngx.log(ngx.ERR, "[luagate-stream] SNI extraction needs more data (fragmented ClientHello), fail-closed")
+      ctx.deny_reason = "sni_need_more_data"
+      ctx.request_state = "denied"
+      ngx.var.luagate_stream_action = "deny"
+      ngx.var.luagate_request_state = "denied"
+      return ngx.exit(ngx.ERROR)
     elseif sni_err then
-      ngx.log(ngx.WARN, "[luagate-stream] SNI extraction error: ", sni_err, ", continuing without SNI")
-      ctx.sni = nil
+      -- malformed TLS -> fail-closed (not raw fallback)
+      ngx.log(ngx.ERR, "[luagate-stream] SNI extraction error (malformed TLS): ", sni_err, ", fail-closed")
+      ctx.deny_reason = "malformed_tls:" .. sni_err
+      ctx.request_state = "denied"
+      ngx.var.luagate_stream_action = "deny"
+      ngx.var.luagate_request_state = "denied"
+      return ngx.exit(ngx.ERROR)
     else
+      -- Valid TLS: SNI may be empty (no SNI extension) or a hostname
       ctx.sni = (sni and sni ~= "") and sni or nil
     end
 
@@ -227,16 +266,62 @@ function _M.preread()
     return ngx.exit(ngx.ERROR)
   end
 
+  -- Radix tree rebuild on version change (c-ffi-modules.md §6.4)
+  -- Each worker independently rebuilds when active_version changes.
+  local stream_rules = policy._compiled_stream or {}
+  if stream_ver ~= _radix_version then
+    -- Build CIDR list from stream_rules that have src_ip_cidr scope
+    local cidr_lines = {}
+    for i, rule in ipairs(policy.stream_rules or {}) do
+      if rule.scope and rule.scope.src_ip_cidr then
+        cidr_lines[#cidr_lines + 1] = rule.scope.src_ip_cidr .. "," .. (i - 1)
+      end
+    end
+
+    local old_tree = _radix_tree
+
+    if #cidr_lines > 0 then
+      local cidr_str = table.concat(cidr_lines, "\n") .. "\n"
+      local new_tree, build_err = stream_ffi.radix_build(cidr_str)
+      if new_tree then
+        _radix_tree = new_tree
+      else
+        ngx.log(ngx.WARN, "[luagate-stream] radix_build failed: ", tostring(build_err), ", clearing radix tree")
+        _radix_tree = nil
+      end
+    else
+      _radix_tree = nil
+    end
+
+    -- Free old tree after swap (FFI free obligation)
+    if old_tree then
+      stream_ffi.radix_free(old_tree)
+    end
+
+    _radix_version = stream_ver
+  end
+
+  -- Radix lookup: pre-filter by src_ip if tree is available
+  local radix_match_index = nil
+  if _radix_tree then
+    local idx, lookup_err = stream_ffi.radix_lookup(_radix_tree, ctx.src_ip)
+    if lookup_err then
+      ngx.log(ngx.WARN, "[luagate-stream] radix_lookup error: ", lookup_err)
+    else
+      radix_match_index = idx -- nil if no match, number if matched
+    end
+  end
+
   -- Build stream request context for evaluator
   local request_ctx = {
     src_ip = ctx.src_ip,
     dst_port = ctx.dst_port,
     detected_protocol = ctx.detected_protocol,
     sni = ctx.sni,
+    radix_match_index = radix_match_index,
   }
 
   -- Evaluate against compiled stream rules (ADR-002 first-match-wins)
-  local stream_rules = policy._compiled_stream or {}
   local result = evaluator.evaluate_stream(stream_rules, request_ctx)
 
   ctx.action = result.action
