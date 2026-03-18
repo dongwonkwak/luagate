@@ -197,7 +197,8 @@ Client TCP Connect
 | 정책 compile 에러 | fail-closed (all-or-nothing) | |
 | 정책 commit 에러 | partial (서브시스템별 독립) | 실패 서브시스템만 LKG 유지 |
 | upstream 연결 실패 | 502 반환 | |
-| rate limit counter eviction | fail-open | shared_dict 용량 초과 시 |
+| rate limit counter eviction | fail-open | shared_dict 용량 초과 시 카운터 소실 |
+| Admin API rate limit error | **fail-closed** | dict 접근 에러 시 503 반환 |
 | logging 실패 | fail-closed (감사 로그) | ADR-004: 감사 로그 드롭 금지 |
 | FFI .so 로드 실패 | fail-closed | 기동 거부 |
 | FFI Layer 1 budget 초과 | **fail-closed** | `LUAGATE_BUDGET_EXCEEDED(-3)` → deny (ADR-009) |

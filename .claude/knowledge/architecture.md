@@ -25,7 +25,8 @@ OS Process: nginx (OpenResty)
          └── ngx.shared.DICT (mmap, 모든 worker 공유)
               ├── luagate_policy   — 정책 blob + active pointer
               ├── luagate_metrics  — 카운터/게이지
-              └── luagate_connections — 활성 연결 수
+              ├── luagate_connections — 활성 연결 수
+              └── luagate_admin_ratelimit — Admin API rate limit 카운터
 ```
 
 ## Shared Dict Zone 상세
@@ -35,6 +36,7 @@ OS Process: nginx (OpenResty)
 | `luagate_policy` | admin API / init_by_lua | 모든 worker | access/preread | fail-closed (LKG 유지) | 공통 | 높음 |
 | `luagate_metrics` | log_by_lua (모든 worker) | metrics exporter | log | fail-open (warn) | HTTP | 낮음 |
 | `luagate_connections` | preread/log_by_lua | metrics | log | fail-open (warn) | Stream | 낮음 |
+| `luagate_admin_ratelimit` | admin content_by_lua | admin content_by_lua | content (admin) | fail-closed (503) | HTTP (admin) | 낮음 |
 
 **원자성**: versioned keyspace + active pointer 방식
 - 정책 업로드: `policy:<sha256>:blob` 키에 새 데이터 저장

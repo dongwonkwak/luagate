@@ -135,7 +135,7 @@ ngx.shared.luagate_admin_ratelimit:incr("rl:127.0.0.1:28335", 1, 0, 120)
 - Window: 60s, 최대 30 req/IP
 - weighted_count = prev_window * (1 - elapsed_fraction) + curr_window
 - 초과 시: 429 + Retry-After 헤더
-- /health 엔드포인트 제외
+- `GET /health`만 exempt (다른 메서드/엔드포인트는 rate limit 적용)
 
 ---
 
