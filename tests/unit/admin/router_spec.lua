@@ -403,6 +403,30 @@ describe("router.dispatch", function()
 
       assert.are.equal(204, _G.ngx.status)
     end)
+
+    it("OPTIONS 요청도 rate limit 적용 후 204 처리", function()
+      _G.ngx = make_ngx()
+      local now = _G.ngx.now()
+      local current_slot = math.floor(now / 60)
+      local key = "rl:10.0.0.1:" .. tostring(current_slot)
+      _G.ngx.shared.luagate_admin_ratelimit._data[key] = 30
+
+      _G.ngx.var.uri = "/metrics"
+      _G.ngx.req.get_method = function()
+        return "OPTIONS"
+      end
+
+      local saved_exit = _G.ngx.exit
+      _G.ngx.exit = function(code)
+        saved_exit(code)
+        error("ngx.exit(" .. tostring(code) .. ")")
+      end
+
+      router = load_router(make_auth_pass())
+      local ok, _ = pcall(router.dispatch)
+      assert.is_false(ok, "rate limit 초과 시 OPTIONS도 coroutine abort되어야 한다")
+      assert.are.equal(429, _G.ngx.status)
+    end)
   end)
 
   -- =========================================================================

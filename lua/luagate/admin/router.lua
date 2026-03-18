@@ -280,8 +280,8 @@ local ROUTES = {
 --- Dispatch the current request to the appropriate handler.
 -- Called from content_by_lua_block in the admin server block.
 -- Flow:
---   0. OPTIONS preflight → 204 (admin-auth-contract.md)
---   1. ratelimit.check() — sliding window IP rate limit (/health exempt)
+--   0. ratelimit.check() — sliding window IP rate limit (/health exempt)
+--   1. OPTIONS preflight → 204 (admin-auth-contract.md)
 --   2. auth.verify() — handles /health exemption internally
 --   3. Route lookup by URI path
 --   4. Method check
@@ -294,16 +294,16 @@ local ROUTES = {
 function _M.dispatch()
   local method = ngx.req.get_method()
 
-  -- 0. OPTIONS preflight: 204 (CORS, admin-auth-contract.md)
+  -- 0. Rate limiting (check handles /health exemption)
+  -- ratelimit.check() calls ngx.exit(429) on exceeded, aborting the coroutine.
+  ratelimit.check()
+
+  -- 1. OPTIONS preflight: 204 (CORS, admin-auth-contract.md)
   if method == "OPTIONS" then
     ngx.status = 204
     ngx.exit(204)
     return
   end
-
-  -- 1. Rate limiting (check handles /health exemption)
-  -- ratelimit.check() calls ngx.exit(429) on exceeded, aborting the coroutine.
-  ratelimit.check()
 
   -- 2. Authentication (verify handles /health exemption)
   -- auth.verify() calls ngx.exit(401) on failure, aborting the coroutine.
