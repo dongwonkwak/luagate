@@ -299,3 +299,5 @@ COMPLETED_REVIEW: DON-168-code (2026-03-18)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-18 | DON-168 | ui-review-checklist.md 지식 파일 생성 | `.claude/knowledge/ui-review-checklist.md`, `AGENTS.md` | 5섹션(TS/React, 보안, API, Playwright, 접근성). Codex 리뷰 1건 수정(헤더 개수), 2건 DON-169 범위 |
+
+PENDING_REVIEW: DON-199-code
