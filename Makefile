@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-c test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean
+.PHONY: build test test-unit test-unit-lua test-unit-c test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -16,11 +16,20 @@ build:
 # ── Test ───────────────────────────────────────────────────────────────────
 test: test-unit test-integration-http test-integration-stream test-reload
 
-test-unit: test-unit-lua test-unit-c
+test-unit: test-unit-lua test-unit-c test-unit-rust
 
 test-unit-lua:
 	@echo "==> Running Lua unit tests (busted)..."
 	busted --config-file=.busted tests/unit
+
+test-unit-rust:
+	@echo "==> Running Rust unit tests (cargo test)..."
+	@for crate_dir in src/decoder src/scanner src/stream; do \
+	  if [ -f "$$crate_dir/Cargo.toml" ]; then \
+	    echo "  -> $$crate_dir"; \
+	    (cd "$$crate_dir" && cargo test) || exit 1; \
+	  fi; \
+	done
 
 test-unit-c:
 	@echo "==> Running C unit tests (CMocka)..."
@@ -122,10 +131,12 @@ build-ffi:
 	@echo "==> Building Rust FFI modules..."
 	cd src/decoder && cargo build --release
 	cd src/scanner && cargo build --release 2>/dev/null || echo "  (scanner not yet built)"
+	cd src/stream && cargo build --release
 	@mkdir -p lib
 	cp src/decoder/target/release/libluagate_decoder.so lib/luagate_decoder.so
 	@[ -f src/scanner/target/release/libluagate_scanner.so ] && \
 	  cp src/scanner/target/release/libluagate_scanner.so lib/luagate_scanner.so || true
+	cp src/stream/target/release/libluagate_stream.so lib/luagate_stream.so
 
 fuzz-regression:
 	@echo "==> Running fuzz regression..."

@@ -223,3 +223,15 @@ COMPLETED_REVIEW: DON-145-code (2026-03-17)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-17 | DON-145 | lua/luagate/admin/auth.lua — Bearer token 인증 모듈 | `lua/luagate/admin/auth.lua`, `tests/unit/admin/auth_spec.lua`, `.claude/knowledge/security-patterns.md` | 497 tests 통과. Codex 4건 반영 (startup-fatal error(), OPTIONS preflight, audit ERR 레벨, TEST 25 wiring → DON-146 범위). 보안 리뷰 PASS |
+
+## Phase 1-Stream: luagate_stream.so Rust FFI + Lua 바인딩 (DON-143)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-143 | luagate_stream.so Rust FFI + Lua 바인딩 + stream handler | `src/stream/Cargo.toml`, `src/stream/src/lib.rs`, `lua/luagate/stream/ffi.lua`, `lua/luagate/stream/handler.lua`, `tests/unit/stream/ffi_spec.lua`, `tests/unit/stream/handler_spec.lua`, `Makefile`, `conf/nginx.conf` | Rust 23 + Lua 66 테스트 (총 564 busted). 설계 리뷰 대기 |
+| 2026-03-18 | DON-143 | 설계 리뷰 피드백 5건 수정 | `src/stream/src/lib.rs`, `lua/luagate/stream/handler.lua`, `tests/unit/stream/handler_spec.lua` | Rust 23 + Lua 570 테스트 통과. 피드백: (1) preread 주석 추가 + raw=true, (2) NEED_MORE_DATA 재시도 루프 + malformed TLS fail-closed, (3) radix tree 실제 연결, (4) Vec→trie, (5) CONNECT 제거 |
+| 2026-03-18 | DON-143 | 코드 리뷰 피드백 5건 + 보안 리뷰 M-1/R-2 수정 | `src/stream/src/lib.rs`, `lua/luagate/stream/handler.lua`, `tests/unit/stream/handler_spec.lua`, `conf/nginx.conf`, `Makefile` | Rust 27 + Lua 577 테스트. 코드: (1) fragmented ClientHello reassembly, (2) decision_source 매핑, (3) off-by-one, (4) resolver, (5) cargo test. 보안: 64KB cap + upstream nil 검사. 보안 리뷰 PASS |
+
+COMPLETED_REVIEW: DON-143-design (2026-03-18)
+
+COMPLETED_REVIEW: DON-143-code (2026-03-18)
