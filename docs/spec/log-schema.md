@@ -424,6 +424,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `luagate_stream_protocol_detected_total` | counter | `protocol` | 탐지된 프로토콜별 카운터 |
 | `luagate_policy_reload_total` | counter | — | reload 시도 횟수 |
 | `luagate_policy_reload_failures_total` | counter | — | reload 실패 횟수 |
+| `luagate_policy_version_info` | gauge | `source`, `http`, `stream` | 정책 버전 정보 (값=1, 라벨로 버전 전달). [ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.2 |
 | `luagate_shared_dict_capacity_bytes` | gauge | `zone` | shared_dict 용량 (zone별) |
 | `luagate_shared_dict_free_bytes` | gauge | `zone` | shared_dict 여유 공간 (zone별) |
 

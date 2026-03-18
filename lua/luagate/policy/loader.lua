@@ -626,6 +626,8 @@ function _M.load_policy(filepath, opts)
     -- prevent ETag / If-Match mismatch on subsequent PUT requests.
     if commit_result.http_ok and commit_result.stream_ok then
       local _, _ = dict:set("source_version", new_version)
+      -- ADR-008 §8.2: record policy load timestamp for /health version reporting
+      local _, _ = dict:set("policy_loaded_at", ngx.now())
     end
   else
     -- No shared dict (init context without dict, or unit tests without dict stub).
