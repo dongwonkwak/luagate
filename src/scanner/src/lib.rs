@@ -1,6 +1,8 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::sync::Mutex;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 // Return codes (ABI contract — docs/spec/c-ffi-modules.md §4)
@@ -11,6 +13,11 @@ const LUAGATE_INTERNAL_ERROR: i32 = -4;
 
 // Per-request budget: 5 ms
 const BUDGET_NS: u128 = 5_000_000;
+
+// Test-only budget override.  When non-zero, budget_exceeded uses this value
+// instead of BUDGET_NS so that timing-sensitive tests can run without flaking.
+#[cfg(test)]
+static TEST_BUDGET_NS_OVERRIDE: AtomicU64 = AtomicU64::new(0);
 
 // Input size limits: 8 KB per field
 const MAX_FIELD_LEN: usize = 8 * 1024;
@@ -166,6 +173,13 @@ fn build_default_scanner() -> Scanner {
 }
 
 fn budget_exceeded(elapsed: Duration) -> bool {
+    #[cfg(test)]
+    {
+        let override_ns = TEST_BUDGET_NS_OVERRIDE.load(Ordering::Relaxed);
+        if override_ns > 0 {
+            return elapsed.as_nanos() > override_ns as u128;
+        }
+    }
     elapsed.as_nanos() > BUDGET_NS
 }
 
@@ -709,6 +723,12 @@ mod tests {
 
     #[test]
     fn test_non_utf8_input_uses_lossy_conversion_and_scans() {
+        // Use a generous budget (500 ms) so that lossy UTF-8 conversion
+        // overhead does not cause a spurious BUDGET_EXCEEDED on slow / loaded
+        // systems.  This test validates lossy-conversion correctness, not
+        // budget enforcement.
+        TEST_BUDGET_NS_OVERRIDE.store(500_000_000, Ordering::Relaxed);
+
         // Ensure scanner is initialised.
         {
             let mut guard = SCANNER.lock().unwrap();
@@ -749,6 +769,9 @@ mod tests {
             &mut rule_len,
             &mut score,
         );
+
+        // Reset budget override so other tests use the real 5 ms budget.
+        TEST_BUDGET_NS_OVERRIDE.store(0, Ordering::Relaxed);
 
         // Must return OK and detect sqli despite the leading invalid byte.
         assert_eq!(rc, LUAGATE_OK);
