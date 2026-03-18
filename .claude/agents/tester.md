@@ -66,22 +66,26 @@ end)
 ## 필수 테스트 케이스 패턴
 
 ### 정책 평가
+
 - first-match-wins 동작 확인
 - stable sort (동률 priority 시 YAML 순서 유지)
 - 기본 정책 deny 적용
 - conflict/shadow 경고 발생
 
 ### FFI (스캐너/디코더)
+
 - 각 OWASP 위협 유형 탐지 (sqli, xss, path-traversal, cmd-injection)
 - NULL body 처리
 - 멀티레이어 인코딩 우회 탐지
 
 ### Admin API
+
 - 인증 성공/실패 (Bearer 토큰)
 - 정책 validation 오류
 - Hot Reload 성공/실패 (LKG 유지 확인)
 
 ### Stream 파이프라인
+
 - TLS/HTTP/SSH/unknown 프로토콜 탐지
 - deny 시 연결 종료 확인
 - `luagate_connections` 증감 확인

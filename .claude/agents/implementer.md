@@ -20,20 +20,24 @@ reads_memory_from: [architect, security-reviewer]
 ## 구현 범위
 
 ### Admin API
+
 - `GET /health`, `GET /api/v1/policies`, `PUT /api/v1/policies`
 - `POST /api/v1/policies/reload`, `GET /api/v1/policies/status`
 - `GET /metrics`, `GET /api/v1/audit`
 
 ### HTTP 파이프라인
+
 - `rewrite_by_lua`: URL 정규화 (path_raw → path_normalized)
 - `access_by_lua`: 정책 평가 + 스캐너 호출
 - `log_by_lua`: JSON 로그 + 메트릭 갱신
 
 ### Stream 파이프라인
+
 - `preread_by_lua`: 프로토콜 탐지 + 정책 판정 (action: proxy/deny)
 - `log_by_lua`: 세션 로그 + 연결 수 갱신
 
 ### Rust FFI
+
 - Rust 라이브러리 바인딩 (`lua/luagate/ffi/scanner.lua` 등)
 - ABI 규칙 준수, 메모리 관리 (free 함수 호출 의무)
 - `pcall` 래핑 필수

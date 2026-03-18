@@ -49,7 +49,7 @@ DON-103(GitHub Actions 범용 체크리스트)과의 차이:
 | `docs/design/adr/**` | — | doc-strategy | — |
 | `docs/spec/**` | — | doc-strategy | — |
 
-**파일 경로 매핑표**
+### 파일 경로 매핑표
 
 | 이름 | 실제 경로 |
 |---|---|

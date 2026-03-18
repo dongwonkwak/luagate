@@ -3,6 +3,7 @@
 ## 코딩 컨벤션
 
 ### Lua
+
 - 포매터: **StyLua** (`stylua --indent-type Spaces --indent-width 4`)
 - 린터: **luacheck** (`.luacheckrc` 설정 기준)
 - 모듈 구조: `lua/luagate/<subsystem>/` 아래 기능별 분리
@@ -11,12 +12,14 @@
 - `ngx.ctx` 사용 범위: 요청 단위(request-scoped) 데이터만 저장. 정책 캐시는 module-level upvalue 사용
 
 ### C / Rust
+
 - 포매터: **clang-format** (`.clang-format` 기준, C 헤더가 있는 경우)
 - Rust: `cargo fmt` + `cargo clippy --deny warnings`
 - FFI 함수 명명: `luagate_<module>_<action>` (예: `luagate_scan_http`)
 - Panic 전략: `panic = "abort"` — Rust panic 시 worker 즉시 abort (UB 방지)
 
 ### 테스트
+
 - Lua 단위 테스트: **busted** 프레임워크, 한국어 서술형 BDD 스타일
 - 통합 테스트: **Test::Nginx** (Docker 기반)
 - Rust 단위 테스트: **cargo test**
@@ -51,6 +54,7 @@ end)
 ```
 
 ### type 종류
+
 | type | 설명 |
 |------|------|
 | `feat` | 새 기능 |
@@ -62,9 +66,11 @@ end)
 | `perf` | 성능 개선 |
 
 ### scope 예시
+
 `lua`, `ffi`, `policy`, `scanner`, `admin`, `stream`, `docker`, `claude`, `spec`
 
 ### 예시
+
 ```
 feat(policy): add conflict detection for stream rules [DON-42]
 fix(scanner): handle NULL body in luagate_scan_http [DON-55]
@@ -135,6 +141,7 @@ type(scope): description [DON-XX]
 ## PR 컨벤션
 
 ### PR 제목
+
 형식: `type(scope): 설명 [DON-XX]`
 커밋 메시지와 동일한 Conventional Commits 형식.
 
@@ -145,20 +152,24 @@ docs(readme): revamp quick start and port table [DON-108]
 ```
 
 ### PR 본문
+
 `.github/pull_request_template.md` 자동 적용.
 
 ### 리뷰 프로세스
+
 1. CI (lint + test) 자동 실행
 2. `request-codex-review` 스킬로 Codex 리뷰 요청 (보안/설계 변경 시)
 3. 보안 관련 변경: `security-reviewer` 에이전트 호출 권장
 4. 최소 1개 승인 필요
 
 ### 머지 전략
+
 - **Squash merge** (epic → main): 깔끔한 main 히스토리
 - **Merge commit** (issue → epic): 이슈별 히스토리 보존
 - 머지 후 브랜치 자동 삭제
 
 ### 브랜치 보호 규칙
+
 - main 직접 푸시 금지 (PR 필수)
 - CI(lint + test) 통과 필수
 - 최소 1개 리뷰 승인

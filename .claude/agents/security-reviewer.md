@@ -24,6 +24,7 @@ reads_memory_from: [architect, implementer]
 ## 보안 리뷰 체크리스트
 
 ### FFI 코드
+
 - [ ] `pcall` 래핑 여부
 - [ ] Rust free 함수 호출 여부 (메모리 누수 방지)
 - [ ] C 포인터 Lua 테이블 장기 저장 여부 (dangling pointer 위험)
@@ -31,17 +32,20 @@ reads_memory_from: [architect, implementer]
 - [ ] `ffi.cast` 수명 관리
 
 ### 인증/인가
+
 - [ ] Admin API 타이밍 안전 토큰 비교 (constant-time compare)
 - [ ] 127.0.0.1 바인딩 확인 (외부 노출 없음)
 - [ ] 인증 실패 감사 로그 기록
 - [ ] Bearer 토큰 로그 미포함 (PII)
 
 ### 정책 평가
+
 - [ ] 보안 결정 행렬 준수 (decode error → block 최우선)
 - [ ] fail-closed 원칙 (에러 시 deny)
 - [ ] 스캐너 hit + 정책 allow 시에도 deny
 
 ### 로그/메트릭
+
 - [ ] PII 필드 redaction (Authorization, Cookie, 민감 쿼리 파라미터)
 - [ ] log phase에서 외부 I/O 없음
 - [ ] 감사 로그 완전성 (인증 실패, 정책 변경, reload)
