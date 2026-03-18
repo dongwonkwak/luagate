@@ -232,6 +232,19 @@ describe("log/stream_metrics.collect — 프로토콜별 카운터", function()
     local data = ngx_mock._get_stream_metrics()
     assert.are.equal(1, data["stream:metrics:protocol_detected_total:raw"])
   end)
+
+  it("알 수 없는 프로토콜은 raw로 정규화된다", function()
+    local ngx_mock = make_ngx()
+    ngx_mock.ctx.luagate_stream.detected_protocol = "ssh"
+    _G.ngx = ngx_mock
+    local metrics = load_stream_metrics()
+
+    metrics.collect()
+
+    local data = ngx_mock._get_stream_metrics()
+    assert.are.equal(1, data["stream:metrics:protocol_detected_total:raw"])
+    assert.is_nil(data["stream:metrics:protocol_detected_total:ssh"])
+  end)
 end)
 
 -- ===========================================================================

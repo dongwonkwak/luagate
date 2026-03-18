@@ -12,6 +12,11 @@
 -- Tests: tests/unit/log/stream_metrics_spec.lua
 
 local _M = {}
+local ALLOWED_PROTOCOLS = {
+  tls = true,
+  http = true,
+  raw = true,
+}
 
 --- Collect stream metrics from the current session context.
 -- Called from log_by_lua (via pcall in nginx.conf stream block).
@@ -47,6 +52,7 @@ function _M.collect()
 
   -- 4. Protocol detection counter
   local protocol = ctx.detected_protocol or ngx.var.luagate_protocol or "raw"
+  protocol = ALLOWED_PROTOCOLS[protocol] and protocol or "raw"
   dict:incr("stream:metrics:protocol_detected_total:" .. protocol, 1, 0)
 end
 
