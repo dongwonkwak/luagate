@@ -277,3 +277,11 @@ COMPLETED_REVIEW: DON-173-code (2026-03-18)
 | 2026-03-18 | DON-165 | ui/ 디렉토리 초기 설정 — Vite + React + TypeScript + Tailwind | `ui/`, `conf/nginx.conf`, `Makefile`, `Dockerfile`, `README.md` | YAML/ETag API 클라이언트, nginx /dashboard 서빙, Dockerfile COPY 추가. Codex code 리뷰 3건 + PR 리뷰 2건 반영. PR #39 |
 
 COMPLETED_REVIEW: DON-165-code (2026-03-18)
+
+## Phase 2-Sync: ADR-008 멀티 인스턴스 정책 동기화 (DON-154)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-154 | ADR-008: 멀티 인스턴스 정책 동기화 모델 설계 | `docs/design/adr/ADR-008-multi-instance-policy-sync.md` | CI/CD 주도 배포 유지 + 가드레일 (버전 헬스체크, PUT split-brain 방지). Codex design 리뷰 3건 + PR 리뷰 2건 반영. PR #38 |
+
+COMPLETED_REVIEW: DON-154-design (2026-03-18)
