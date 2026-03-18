@@ -26,6 +26,14 @@ local function make_shared_dict(data)
     get = function(_, key)
       return data[key]
     end,
+    incr = function(_, key, value, init, _ttl)
+      if data[key] then
+        data[key] = data[key] + value
+      else
+        data[key] = (init or 0) + value
+      end
+      return data[key], nil
+    end,
     capacity = function()
       return 10485760
     end, -- 10MB
@@ -70,7 +78,16 @@ local function make_ngx(overrides)
       luagate_metrics = make_shared_dict(),
       luagate_stream_metrics = make_shared_dict(),
       luagate_connections = make_shared_dict(),
+      luagate_admin_ratelimit = make_shared_dict(),
     },
+    worker = {
+      id = function()
+        return 0
+      end,
+    },
+    now = function()
+      return 1700000100.5
+    end,
     log = function(level, ...)
       local parts = {}
       for _, v in ipairs({ ... }) do
@@ -188,6 +205,7 @@ local router -- 테스트마다 fresh require
 local function load_router(auth_mock)
   package.loaded["luagate.admin.router"] = nil
   package.loaded["luagate.admin.auth"] = nil
+  package.loaded["luagate.admin.ratelimit"] = nil
   package.preload["luagate.admin.auth"] = function()
     return auth_mock or make_auth_pass()
   end
@@ -203,6 +221,7 @@ teardown(function()
   package.preload["luagate.admin.auth"] = nil
   package.loaded["cjson.safe"] = nil
   package.loaded["luagate.admin.auth"] = nil
+  package.loaded["luagate.admin.ratelimit"] = nil
   package.loaded["luagate.admin.router"] = nil
 end)
 
@@ -373,6 +392,7 @@ describe("router.dispatch", function()
           luagate_metrics = make_shared_dict(metrics_data or {}),
           luagate_stream_metrics = make_shared_dict(stream_data or {}),
           luagate_connections = make_shared_dict(connections_data or {}),
+          luagate_admin_ratelimit = make_shared_dict(),
         },
       })
       _G.ngx.req.get_method = function()
@@ -475,18 +495,19 @@ describe("router.dispatch", function()
       assert.truthy(output:find('luagate_active_connections{type="stream"} 8'), "stream active가 8이어야 한다")
     end)
 
-    it("shared dict capacity/free gauges 포함 (5개 zone)", function()
+    it("shared dict capacity/free gauges 포함 (6개 zone)", function()
       output = get_metrics_output()
 
       assert.truthy(output:find("luagate_shared_dict_capacity_bytes"), "capacity 메트릭이 있어야 한다")
       assert.truthy(output:find("luagate_shared_dict_free_bytes"), "free 메트릭이 있어야 한다")
-      -- 5개 zone 모두 존재 확인
+      -- 6개 zone 모두 존재 확인
       local zones = {
         "luagate_policy",
         "luagate_state",
         "luagate_metrics",
         "luagate_stream_metrics",
         "luagate_connections",
+        "luagate_admin_ratelimit",
       }
       for _, zone in ipairs(zones) do
         assert.truthy(
@@ -567,6 +588,7 @@ describe("router.dispatch", function()
           luagate_metrics = nil,
           luagate_stream_metrics = nil,
           luagate_connections = nil,
+          luagate_admin_ratelimit = make_shared_dict(),
         },
       })
       _G.ngx.req.get_method = function()
