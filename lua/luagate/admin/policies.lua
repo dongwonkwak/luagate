@@ -9,8 +9,11 @@
 --   - cjson.safe for all JSON encoding (pcall-safe).
 --   - Error responses follow admin-api.md §3 shape.
 --   - Audit log: all mutations log success/failure via [luagate:audit] prefix.
+--     Audit write failure => reject mutation/reload (admin-api.md §3/§7).
 --   - fail-closed: any error aborts and returns error response.
 --   - PUT canonical file write only when BOTH subsystem swaps succeed (ADR-005 §1).
+--   - Worker-unique temp file paths to prevent TOCTOU race (Codex review #1).
+--   - conflict_detected → 422 per admin-api.md §3 (Codex review #2).
 --
 -- Implementation: lua/luagate/admin/policies.lua
 -- Tests: tests/unit/admin/policies_spec.lua
@@ -84,7 +87,7 @@ end
 
 --- Write structured audit log entry.
 -- Uses [luagate:audit] prefix for log routing (ADR-004 §6.3).
--- @param event  string  Event name (e.g. "policy_reload_success")
+-- @param event  string  Event name (e.g. "policy_update_success")
 -- @param fields table   Additional fields to include
 -- @return boolean  true if audit write succeeded
 local function audit_log(event, fields)
@@ -99,6 +102,20 @@ local function audit_log(event, fields)
   end
 
   ngx.log(ngx.ERR, "[luagate:audit] ", json)
+  return true
+end
+
+--- Audit-or-reject helper: write audit log, send 500 on failure.
+-- Returns true if audit succeeded, false if rejected (response already sent).
+-- @param event  string  Event name
+-- @param fields table   Additional fields
+-- @return boolean  true if audit write succeeded
+local function audit_or_reject(event, fields)
+  local ok = audit_log(event, fields)
+  if not ok then
+    send_error(500, "audit_write_failed", "audit", "failed to write audit log; mutation rejected")
+    return false
+  end
   return true
 end
 
@@ -117,19 +134,12 @@ local function read_policy_file()
   return content, nil
 end
 
---- Build conflict warnings array for response.
--- @param conflicts table  From conflict.detect()
--- @return table  Array of warning objects
-local function build_warnings(conflicts)
-  local warnings = {}
-  for _, c in ipairs(conflicts or {}) do
-    warnings[#warnings + 1] = {
-      type = "conflict",
-      rule_ids = c.rule_ids or {},
-      message = c.message or "conflicting rules detected",
-    }
-  end
-  return warnings
+--- Generate a worker-unique temp file path to prevent TOCTOU race.
+-- Two concurrent PUTs will write to different temp files.
+-- @return string  Unique temp file path
+local function make_tmp_path()
+  local worker_id = (ngx.worker and ngx.worker.id()) or 0
+  return POLICY_FILE .. ".tmp." .. tostring(worker_id) .. "." .. tostring(ngx.now())
 end
 
 -- ---------------------------------------------------------------------------
@@ -229,7 +239,7 @@ function _M.handle_put_policies()
     return
   end
 
-  -- [4] Conflict detection (WARN only — included in response warnings)
+  -- [4] Conflict detection — fail-closed per admin-api.md §3 (422 conflict_detected)
   local http_enabled = conflict.filter_enabled(policy.rules or {})
   local stream_enabled = conflict.filter_enabled(policy.stream_rules or {})
   local all_enabled = {}
@@ -241,6 +251,16 @@ function _M.handle_put_policies()
   end
   local conflicts, _ = conflict.detect(all_enabled)
 
+  if #conflicts > 0 then
+    local details = {}
+    for _, c in ipairs(conflicts) do
+      local ids = table.concat(c.rule_ids or {}, ", ")
+      details[#details + 1] = ids .. ": " .. (c.message or "conflicting rules detected")
+    end
+    send_error(422, "conflict_detected", "conflict_detect", table.concat(details, "; "))
+    return
+  end
+
   -- [5] Hash
   local new_version, hash_err = sha256_hex(body)
   if not new_version then
@@ -248,14 +268,9 @@ function _M.handle_put_policies()
     return
   end
 
-  -- [6] Reload via loader (stages [5]-[7] of 7-stage pipeline: blob store + commit)
-  -- loader.load_policy reads from file, but we need to write the file first for
-  -- the loader to pick up. However, ADR-005 §1 says canonical file write is stage [8c]
-  -- and happens AFTER pointer swaps. So we need a different approach:
-  -- We write a temp file, let loader load from it, then rename to canonical on success.
-
-  -- Write to temp file for loader to process
-  local tmp_path = POLICY_FILE .. ".tmp"
+  -- [6] Write to worker-unique temp file (prevents TOCTOU race between
+  -- concurrent PUTs — each request gets its own temp path)
+  local tmp_path = make_tmp_path()
   local wf, write_err = io.open(tmp_path, "w")
   if not wf then
     send_error(500, "internal_error", "internal", "cannot write temp policy file: " .. tostring(write_err))
@@ -265,14 +280,14 @@ function _M.handle_put_policies()
   wf:close()
 
   -- [7] Audit write (pre-commit — ADR-004 droppable-audit prohibition)
-  local audit_ok = audit_log("policy_update_attempt", {
-    trigger = "api",
-    new_version = new_version,
-    previous_version = current_source,
-  })
-  if not audit_ok then
+  if
+    not audit_or_reject("policy_update_attempt", {
+      trigger = "api",
+      new_version = new_version,
+      previous_version = current_source,
+    })
+  then
     os.remove(tmp_path)
-    send_error(500, "audit_write_failed", "audit", "failed to write audit log; mutation rejected")
     return
   end
 
@@ -285,22 +300,30 @@ function _M.handle_put_policies()
 
     -- Determine error type
     if result.err == "reload_in_progress" then
-      audit_log("policy_reload_failure", {
-        trigger = "api",
-        stage = "reload",
-        reason = result.err,
-        current_version = current_source,
-      })
+      if
+        not audit_or_reject("policy_update_failure", {
+          trigger = "api",
+          stage = "reload",
+          reason = result.err,
+          current_version = current_source,
+        })
+      then
+        return
+      end
       send_error(409, "reload_in_progress", "reload", "another reload is already in progress")
       return
     end
 
-    audit_log("policy_reload_failure", {
-      trigger = "api",
-      stage = "commit",
-      reason = result.err,
-      current_version = current_source,
-    })
+    if
+      not audit_or_reject("policy_update_failure", {
+        trigger = "api",
+        stage = "commit",
+        reason = result.err,
+        current_version = current_source,
+      })
+    then
+      return
+    end
     send_error(500, "commit_failed", "commit", result.err)
     return
   end
@@ -310,11 +333,15 @@ function _M.handle_put_policies()
     -- Same hash — no change needed, cleanup temp
     os.remove(tmp_path)
 
-    audit_log("policy_reload_success", {
-      trigger = "api",
-      previous_version = current_source,
-      new_version = new_version,
-    })
+    if
+      not audit_or_reject("policy_update_success", {
+        trigger = "api",
+        previous_version = current_source,
+        new_version = new_version,
+      })
+    then
+      return
+    end
 
     send_json(200, {
       previous_http_version = result.previous_http_version,
@@ -323,7 +350,7 @@ function _M.handle_put_policies()
       new_stream_version = new_version,
       http_result = "committed",
       stream_result = "committed",
-      warnings = build_warnings(conflicts),
+      warnings = {},
     })
     return
   end
@@ -344,11 +371,15 @@ function _M.handle_put_policies()
     -- Best-effort rollback: loader already keeps LKG for failed subsystems
     local cur_versions = loader.get_active_versions()
 
-    audit_log("policy_reload_partial", {
-      trigger = "api",
-      http_result = result.http_ok and "committed" or "lkg_retained",
-      stream_result = result.stream_ok and "committed" or "lkg_retained",
-    })
+    if
+      not audit_or_reject("policy_update_partial", {
+        trigger = "api",
+        http_result = result.http_ok and "committed" or "lkg_retained",
+        stream_result = result.stream_ok and "committed" or "lkg_retained",
+      })
+    then
+      return
+    end
 
     ngx.status = 500
     ngx.header["Content-Type"] = "application/json"
@@ -368,15 +399,18 @@ function _M.handle_put_policies()
   local rename_ok, rename_err = os.rename(tmp_path, POLICY_FILE)
   if not rename_ok then
     -- Rollback: best-effort (pointers already swapped, but canonical file unchanged)
-    -- This is the ADR-005 §1 edge case — active versions may differ from canonical file
     os.remove(tmp_path)
 
-    audit_log("policy_reload_failure", {
-      trigger = "api",
-      stage = "commit",
-      reason = "canonical file write failed: " .. tostring(rename_err),
-      current_version = new_version,
-    })
+    if
+      not audit_or_reject("policy_update_failure", {
+        trigger = "api",
+        stage = "commit",
+        reason = "canonical file write failed: " .. tostring(rename_err),
+        current_version = new_version,
+      })
+    then
+      return
+    end
 
     local cur_versions = loader.get_active_versions()
     ngx.status = 500
@@ -397,11 +431,15 @@ function _M.handle_put_policies()
   end
 
   -- Full success
-  audit_log("policy_reload_success", {
-    trigger = "api",
-    previous_version = result.previous_http_version,
-    new_version = new_version,
-  })
+  if
+    not audit_or_reject("policy_update_success", {
+      trigger = "api",
+      previous_version = result.previous_http_version,
+      new_version = new_version,
+    })
+  then
+    return
+  end
 
   send_json(200, {
     previous_http_version = result.previous_http_version,
@@ -410,7 +448,7 @@ function _M.handle_put_policies()
     new_stream_version = new_version,
     http_result = "committed",
     stream_result = "committed",
-    warnings = build_warnings(conflicts),
+    warnings = {},
   })
 end
 
@@ -435,12 +473,12 @@ function _M.handle_post_reload()
 
   -- Audit pre-reload
   local pre_versions = loader.get_active_versions()
-  local audit_ok = audit_log("policy_reload_attempt", {
-    trigger = "api",
-    current_version = pre_versions.source_version,
-  })
-  if not audit_ok then
-    send_error(500, "audit_write_failed", "audit", "failed to write audit log; reload rejected")
+  if
+    not audit_or_reject("policy_reload_attempt", {
+      trigger = "api",
+      current_version = pre_versions.source_version,
+    })
+  then
     return
   end
 
@@ -449,22 +487,30 @@ function _M.handle_post_reload()
 
   if result.err then
     if result.err == "reload_in_progress" then
-      audit_log("policy_reload_failure", {
+      if
+        not audit_or_reject("policy_reload_failure", {
+          trigger = "api",
+          stage = "reload",
+          reason = result.err,
+          current_version = pre_versions.source_version,
+        })
+      then
+        return
+      end
+      send_error(409, "reload_in_progress", "reload", "another reload is already in progress")
+      return
+    end
+
+    if
+      not audit_or_reject("policy_reload_failure", {
         trigger = "api",
         stage = "reload",
         reason = result.err,
         current_version = pre_versions.source_version,
       })
-      send_error(409, "reload_in_progress", "reload", "another reload is already in progress")
+    then
       return
     end
-
-    audit_log("policy_reload_failure", {
-      trigger = "api",
-      stage = "reload",
-      reason = result.err,
-      current_version = pre_versions.source_version,
-    })
 
     local cur_versions = loader.get_active_versions()
     ngx.status = 500
@@ -486,17 +532,26 @@ function _M.handle_post_reload()
   local stream_result_str = result.stream_ok and "committed" or "lkg_retained"
 
   if result.http_ok and result.stream_ok then
-    audit_log("policy_reload_success", {
-      trigger = "api",
-      previous_version = result.previous_http_version,
-      new_version = result.new_version,
-    })
+    if
+      not audit_or_reject("policy_reload_success", {
+        trigger = "api",
+        previous_version = result.previous_http_version,
+        new_version = result.new_version,
+        subsystem = "all",
+      })
+    then
+      return
+    end
   else
-    audit_log("policy_reload_partial", {
-      trigger = "api",
-      http_result = http_result_str,
-      stream_result = stream_result_str,
-    })
+    if
+      not audit_or_reject("policy_reload_partial", {
+        trigger = "api",
+        http_result = http_result_str,
+        stream_result = stream_result_str,
+      })
+    then
+      return
+    end
   end
 
   -- Build error list for response

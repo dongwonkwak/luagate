@@ -243,3 +243,11 @@ COMPLETED_REVIEW: DON-143-code (2026-03-18)
 | 2026-03-18 | DON-146 | Admin API 라우터 + /health + /metrics 엔드포인트 | `lua/luagate/admin/router.lua`, `conf/nginx.conf`, `tests/unit/admin/router_spec.lua` | 602 Lua 테스트 통과. Codex 5건 반영: (1) pcall 제거, (2) stage 파라미터, (3) ADR-006 키 정렬, (4) OPTIONS 204, (5) collector.lua 키 동기화. 코드 리뷰 PASS |
 
 COMPLETED_REVIEW: DON-146-code (2026-03-18)
+
+## Phase 1-Admin: Admin API 정책 관리 엔드포인트 (DON-147)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-147 | Admin API 정책 관리 엔드포인트 — GET/PUT /api/v1/policies + POST /reload | `lua/luagate/admin/policies.lua`, `lua/luagate/admin/router.lua`, `tests/unit/admin/policies_spec.lua` | 26 tests 통과. Codex 리뷰 대기 |
+
+COMPLETED_REVIEW: DON-147-code (2026-03-18)

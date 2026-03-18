@@ -220,6 +220,14 @@ local function make_ngx(overrides)
     utctime = function()
       return "2026-03-18 06:00:00"
     end,
+    now = function()
+      return 1742284800.0
+    end,
+    worker = {
+      id = function()
+        return 0
+      end,
+    },
     req = {
       get_headers = function()
         return {}
@@ -606,7 +614,7 @@ describe("PUT /api/v1/policies", function()
     assert.truthy(body.details[1]:find("canonical file write failed"))
   end)
 
-  it("includes conflict warnings in 200 response", function()
+  it("returns 422 conflict_detected when conflicts found (admin-api.md §3)", function()
     _conflict_conflicts = {
       { rule_ids = { "rule-a", "rule-b" }, message = "same scope, priority, opposing action" },
     }
@@ -614,29 +622,30 @@ describe("PUT /api/v1/policies", function()
 
     policies.handle_put_policies()
 
-    assert.are.equal(200, _G.ngx.status)
+    assert.are.equal(422, _G.ngx.status)
     local said = _G.ngx._get_said()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
-    assert.are.equal(1, #body.warnings)
-    assert.are.equal("conflict", body.warnings[1].type)
+    assert.are.equal("conflict_detected", body.error)
+    assert.are.equal("conflict_detect", body.stage)
+    assert.truthy(body.details[1]:find("rule%-a"))
   end)
 
-  it("writes audit log on success", function()
+  it("writes policy_update_success audit log on success", function()
     policies.handle_put_policies()
 
     local logged = _G.ngx._get_logged()
     local has_audit = false
     for _, entry in ipairs(logged) do
-      if entry:find("%[luagate:audit%]") and entry:find("policy_reload_success") then
+      if entry:find("%[luagate:audit%]") and entry:find("policy_update_success") then
         has_audit = true
         break
       end
     end
-    assert.is_true(has_audit, "audit log for policy_reload_success should be written")
+    assert.is_true(has_audit, "audit log for policy_update_success should be written")
   end)
 
-  it("writes audit log on failure", function()
+  it("writes policy_update_failure audit log on failure", function()
     _loader_result = {
       ok = false,
       skipped = false,
@@ -653,12 +662,12 @@ describe("PUT /api/v1/policies", function()
     local logged = _G.ngx._get_logged()
     local has_audit = false
     for _, entry in ipairs(logged) do
-      if entry:find("%[luagate:audit%]") and entry:find("policy_reload_failure") then
+      if entry:find("%[luagate:audit%]") and entry:find("policy_update_failure") then
         has_audit = true
         break
       end
     end
-    assert.is_true(has_audit, "audit log for policy_reload_failure should be written")
+    assert.is_true(has_audit, "audit log for policy_update_failure should be written")
   end)
 
   it("rejects Content-Encoding header", function()
@@ -833,18 +842,23 @@ describe("POST /api/v1/policies/reload", function()
     assert.truthy(body.errors[1]:find("stream"))
   end)
 
-  it("writes audit log on reload success", function()
+  it("writes audit log with subsystem on reload success", function()
     policies.handle_post_reload()
 
     local logged = _G.ngx._get_logged()
     local has_audit = false
+    local has_subsystem = false
     for _, entry in ipairs(logged) do
       if entry:find("%[luagate:audit%]") and entry:find("policy_reload_success") then
         has_audit = true
+        if entry:find('"subsystem"') then
+          has_subsystem = true
+        end
         break
       end
     end
     assert.is_true(has_audit, "audit log for reload success should be written")
+    assert.is_true(has_subsystem, "reload success audit must include subsystem field")
   end)
 
   it("writes audit log on reload failure", function()
