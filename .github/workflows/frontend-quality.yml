@@ -2,9 +2,6 @@ name: Frontend Quality
 
 on:
   pull_request:
-    paths:
-      - 'ui/**'
-      - '.github/workflows/frontend-*.yml'
 
 jobs:
   detect-changes:
