@@ -2,6 +2,9 @@ name: Frontend Quality
 
 on:
   pull_request:
+    paths:
+      - 'ui/**'
+      - '.github/workflows/frontend-*.yml'
 
 jobs:
   detect-changes:
@@ -45,6 +48,11 @@ jobs:
     steps:
       - name: Check results
         run: |
-          if [[ "${{ needs.quality.result }}" == "failure" ]]; then
+          if [[ "${{ needs.detect-changes.result }}" == "failure" ]]; then
+            echo "detect-changes failed"
+            exit 1
+          fi
+          if [[ "${{ needs.quality.result }}" == "failure" || "${{ needs.quality.result }}" == "cancelled" ]]; then
+            echo "quality check failed or cancelled"
             exit 1
           fi
