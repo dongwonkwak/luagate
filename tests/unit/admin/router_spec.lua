@@ -158,18 +158,16 @@ local function make_auth_pass()
   }
 end
 
---- auth mock: verify()가 401을 설정하는 버전.
+--- auth mock: verify()가 401을 설정하고 coroutine abort를 시뮬레이션하는 버전.
 -- 실제 OpenResty에서 ngx.exit()는 coroutine yield로 실행을 중단한다.
--- mock에서는 ngx.exit()가 error()를 throw하여 pcall 경계를 넘기도록 설정해야
--- 동일한 동작을 재현할 수 있다.
+-- mock에서는 error()를 throw하여 동일한 abort 동작을 재현한다.
 local function make_auth_fail()
   return {
     verify = function()
       ngx.status = 401
       ngx.header["Content-Type"] = "application/json"
       ngx.say('{"error":"Unauthorized","message":"Invalid or missing Bearer token"}')
-      -- ngx.exit가 error()를 throw하므로 여기서 실행 중단됨
-      ngx.exit(401)
+      error("ngx.exit(401)")
     end,
     init = function()
       return true
@@ -331,57 +329,31 @@ describe("router.dispatch", function()
       _G.ngx.req.get_method = function()
         return "GET"
       end
-      -- ngx.exit 호출 이력 추적 + 첫 호출 시 error()로 coroutine abort 시뮬레이션
-      local exit_calls = {}
-      _G.ngx.exit = function(code)
-        exit_calls[#exit_calls + 1] = code
-        if #exit_calls == 1 then
-          -- 첫 호출(auth)만 abort 시뮬레이션 — 이후 호출(send_error)은 정상 진행
-          error("ngx.exit(" .. code .. ")")
-        end
-      end
       router = load_router(make_auth_fail())
 
-      router.dispatch()
+      -- auth.verify()가 error()로 coroutine abort를 시뮬레이션하므로
+      -- dispatch()에서 에러가 전파된다 (실제 OpenResty에서는 ngx.exit가 yield)
+      local ok, _ = pcall(router.dispatch)
+      assert.is_false(ok, "auth 실패 시 coroutine abort(error)가 전파되어야 한다")
 
-      -- auth.verify()가 ngx.exit(401)을 첫 번째로 호출했음을 확인
-      assert.are.equal(401, exit_calls[1])
-      -- auth가 설정한 JSON 에러 본문이 전송됨
+      -- auth가 설정한 401 상태와 JSON 에러 본문 확인
+      assert.are.equal(401, _G.ngx.status)
       local said = _G.ngx._get_said()
       assert.is_true(#said >= 1, "auth 에러 응답이 전송되어야 한다")
       assert.truthy(said[1]:find("Unauthorized"), "401 응답에 Unauthorized가 포함되어야 한다")
     end)
 
-    it("auth.verify() 에러 발생 시 500 + fail-closed", function()
+    it("OPTIONS 요청 -> 204 (CORS preflight)", function()
       _G.ngx = make_ngx()
       _G.ngx.var.uri = "/metrics"
-      local auth_error = {
-        verify = function()
-          error("unexpected auth failure")
-        end,
-        init = function()
-          return true
-        end,
-      }
-      router = load_router(auth_error)
+      _G.ngx.req.get_method = function()
+        return "OPTIONS"
+      end
+      router = load_router(make_auth_pass())
 
       router.dispatch()
 
-      assert.are.equal(500, _G.ngx.status)
-      local said = _G.ngx._get_said()
-      local dkjson = require("dkjson")
-      local body = dkjson.decode(said[1])
-      assert.are.equal("internal_error", body.error)
-      -- ERR 로그 확인
-      local logged = _G.ngx._get_logged()
-      local found_err = false
-      for _, entry in ipairs(logged) do
-        if entry.level == _G.ngx.ERR and entry.msg:find("auth.verify") then
-          found_err = true
-          break
-        end
-      end
-      assert.is_true(found_err, "ERR 로그에 auth.verify 에러가 기록되어야 한다")
+      assert.are.equal(204, _G.ngx.status)
     end)
   end)
 
@@ -420,8 +392,8 @@ describe("router.dispatch", function()
 
     it("HTTP request counters (luagate_http_requests_total) 포함", function()
       output = get_metrics_output({
-        ["metrics:http:requests:allow"] = 100,
-        ["metrics:http:requests:deny"] = 5,
+        ["metrics:http_requests_total:allow"] = 100,
+        ["metrics:http_requests_total:deny"] = 5,
       })
 
       assert.truthy(
@@ -437,7 +409,7 @@ describe("router.dispatch", function()
 
     it("luagate_http_requests_denied_total 포함", function()
       output = get_metrics_output({
-        ["metrics:http:requests:deny"] = 42,
+        ["metrics:http_requests_denied_total"] = 42,
       })
 
       assert.truthy(output:find("luagate_http_requests_denied_total"), "denied total 메트릭이 있어야 한다")
@@ -446,9 +418,9 @@ describe("router.dispatch", function()
 
     it("latency histogram bucket 포함", function()
       output = get_metrics_output({
-        ["metrics:http:latency:bucket:0.1"] = 10,
-        ["metrics:http:latency:bucket:1"] = 50,
-        ["metrics:http:latency:bucket:inf"] = 100,
+        ["latency:bucket:0.1"] = 10,
+        ["latency:bucket:1"] = 50,
+        ["latency:bucket:+Inf"] = 100,
         ["latency:sum"] = 5000,
         ["latency:count"] = 100,
       })
@@ -568,7 +540,7 @@ describe("router.dispatch", function()
 
     it("upstream error counter 포함", function()
       output = get_metrics_output({
-        ["metrics:http:upstream_errors:total"] = 17,
+        ["metrics:http_upstream_errors_total"] = 17,
       })
 
       assert.truthy(output:find("luagate_http_upstream_errors_total"), "upstream errors가 있어야 한다")
@@ -639,45 +611,25 @@ describe("router.dispatch", function()
   end)
 
   -- =========================================================================
-  -- 핸들러 에러 방어 테스트
+  -- 핸들러 에러 전파 테스트
   -- =========================================================================
-  describe("핸들러 에러 방어", function()
-    it("핸들러 내부 에러 시 500 + ERR 로그 (headers_sent=false)", function()
+  describe("핸들러 에러 전파", function()
+    it("핸들러 내부 에러는 nginx error handler로 전파된다 (pcall 없음)", function()
       _G.ngx = make_ngx()
       _G.ngx.var.uri = "/health"
       _G.ngx.req.get_method = function()
         return "GET"
       end
-      -- 첫 ngx.say 호출(핸들러 내부)에서만 에러, 두 번째(에러 응답)는 정상
-      local say_call_count = 0
-      local said = {}
-      _G.ngx.say = function(s)
-        say_call_count = say_call_count + 1
-        if say_call_count == 1 then
-          error("say failed: broken pipe")
-        end
-        said[#said + 1] = s
-      end
-      -- _get_said를 오버라이드하여 로컬 said 참조
-      _G.ngx._get_said = function()
-        return said
+      -- ngx.say에서 에러 발생 시뮬레이션
+      _G.ngx.say = function()
+        error("say failed: broken pipe")
       end
       router = load_router(make_auth_pass())
 
-      router.dispatch()
-
-      -- pcall이 핸들러 에러를 잡고 ERR 로그 기록
-      local logged = _G.ngx._get_logged()
-      local found_handler_err = false
-      for _, entry in ipairs(logged) do
-        if entry.level == _G.ngx.ERR and entry.msg:find("handler error") then
-          found_handler_err = true
-          break
-        end
-      end
-      assert.is_true(found_handler_err, "핸들러 에러가 ERR 로그에 기록되어야 한다")
-      -- 에러 응답으로 500 설정
-      assert.are.equal(500, _G.ngx.status)
+      -- pcall 없이 에러가 전파됨 (실제 OpenResty에서는 nginx가 500 반환)
+      local ok, err = pcall(router.dispatch)
+      assert.is_false(ok, "핸들러 에러가 전파되어야 한다")
+      assert.truthy(tostring(err):find("broken pipe"), "원본 에러 메시지가 보존되어야 한다")
     end)
   end)
 end)

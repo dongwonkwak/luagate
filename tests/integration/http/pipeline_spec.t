@@ -653,7 +653,7 @@ GET /admin-guard-test/
 
 
 
-=== TEST 16: metrics 카운터 증가 — allow 요청 후 metrics:http:requests:total 확인
+=== TEST 16: metrics 카운터 증가 — allow 요청 후 metrics:http_requests_total:allow 확인
 --- http_config eval: $::http_config
 --- config
     set $luagate_decision_source '';
@@ -677,7 +677,7 @@ GET /admin-guard-test/
             local policy_json = '{"global":{"default_action":"allow"},"rules":[],"stream_rules":[]}'
             ngx.shared.luagate_policy:set("policy:v-metrics:blob", policy_json)
             ngx.shared.luagate_policy:set("http:active_version", "v-metrics")
-            ngx.shared.luagate_metrics:set("metrics:http:requests:total", 0)
+            ngx.shared.luagate_metrics:set("metrics:http_requests_total:allow", 0)
             ngx.say("ok")
         }
     }
@@ -699,7 +699,7 @@ GET /admin-guard-test/
 
     location /check-metrics/ {
         content_by_lua_block {
-            local total = ngx.shared.luagate_metrics:get("metrics:http:requests:total") or 0
+            local total = ngx.shared.luagate_metrics:get("metrics:http_requests_total:allow") or 0
             ngx.header["Content-Type"] = "application/json"
             ngx.say('{"total":' .. total .. '}')
         }

@@ -61,16 +61,17 @@ local STREAM_PROTOCOLS = { "tls", "http", "raw" }
 --- Send a JSON error response.
 -- @param status  number  HTTP status code
 -- @param code    string  Error code (e.g. "not_found")
+-- @param stage   string  Pipeline stage (admin-api.md ss3)
 -- @param message string  Human-readable detail message
-local function send_error(status, code, message)
+local function send_error(status, code, stage, message)
   ngx.status = status
   ngx.header["Content-Type"] = "application/json"
   local body = cjson.encode({
     error = code,
-    stage = "routing",
+    stage = stage,
     details = { message },
   })
-  ngx.say(body or '{"error":"encode_failed","stage":"routing","details":["JSON encode error"]}')
+  ngx.say(body or '{"error":"encode_failed","stage":"internal","details":["JSON encode error"]}')
   ngx.exit(status)
 end
 
@@ -143,14 +144,24 @@ local function handle_metrics()
 
   local buf = {}
 
-  -- ── HTTP request counters ──────────────────────────────────────────
+  -- ── HTTP request counters (ADR-006 ss3.2) ────────────────────────
   prom_header(buf, "luagate_http_requests_total", "counter", "Total HTTP requests by action.")
-  prom_line(buf, "luagate_http_requests_total", '{action="allow"}', get_counter(metrics, "metrics:http:requests:allow"))
-  prom_line(buf, "luagate_http_requests_total", '{action="deny"}', get_counter(metrics, "metrics:http:requests:deny"))
+  prom_line(
+    buf,
+    "luagate_http_requests_total",
+    '{action="allow"}',
+    get_counter(metrics, "metrics:http_requests_total:allow")
+  )
+  prom_line(
+    buf,
+    "luagate_http_requests_total",
+    '{action="deny"}',
+    get_counter(metrics, "metrics:http_requests_total:deny")
+  )
 
   -- ── HTTP denied counter (label-less, ADR-006 ss1.2) ───────────────
   prom_header(buf, "luagate_http_requests_denied_total", "counter", "Total denied HTTP requests.")
-  prom_line(buf, "luagate_http_requests_denied_total", "", get_counter(metrics, "metrics:http:requests:deny"))
+  prom_line(buf, "luagate_http_requests_denied_total", "", get_counter(metrics, "metrics:http_requests_denied_total"))
 
   -- ── Scanner threat counters ────────────────────────────────────────
   prom_header(buf, "luagate_http_scanner_threats_total", "counter", "Total scanner threat detections by type.")
@@ -163,18 +174,18 @@ local function handle_metrics()
 
   -- ── Upstream error counter ─────────────────────────────────────────
   prom_header(buf, "luagate_http_upstream_errors_total", "counter", "Total upstream 5xx errors.")
-  prom_line(buf, "luagate_http_upstream_errors_total", "", get_counter(metrics, "metrics:http:upstream_errors:total"))
+  prom_line(buf, "luagate_http_upstream_errors_total", "", get_counter(metrics, "metrics:http_upstream_errors_total"))
 
   -- ── HTTP latency histogram ─────────────────────────────────────────
   prom_header(buf, "luagate_http_response_time_ms", "histogram", "HTTP response time in milliseconds.")
   local hist_name = "luagate_http_response_time_ms"
   for _, b in ipairs(LATENCY_BUCKETS) do
     local le = tostring(b)
-    local val = get_counter(metrics, "metrics:http:latency:bucket:" .. le)
+    local val = get_counter(metrics, "latency:bucket:" .. le)
     prom_line(buf, hist_name .. "_bucket", '{le="' .. le .. '"}', val)
   end
-  -- +Inf bucket (sum of all requests that completed)
-  local inf_val = get_counter(metrics, "metrics:http:latency:bucket:inf")
+  -- +Inf bucket (ADR-006 ss3.1: latency:bucket:+Inf)
+  local inf_val = get_counter(metrics, "latency:bucket:+Inf")
   prom_line(buf, hist_name .. "_bucket", '{le="+Inf"}', inf_val)
   prom_line(buf, hist_name .. "_sum", "", get_counter(metrics, "latency:sum"))
   prom_line(buf, hist_name .. "_count", "", get_counter(metrics, "latency:count"))
@@ -256,48 +267,48 @@ local ROUTES = {
 --- Dispatch the current request to the appropriate handler.
 -- Called from content_by_lua_block in the admin server block.
 -- Flow:
---   1. auth.verify() — handles /health exemption and OPTIONS preflight internally
+--   0. OPTIONS preflight → 204 (admin-auth-contract.md)
+--   1. auth.verify() — handles /health exemption internally
 --   2. Route lookup by URI path
 --   3. Method check
 --   4. Handler invocation
+--
+-- Note: no pcall around auth.verify() or handlers. In OpenResty,
+-- ngx.exit() throws a Lua error to abort the coroutine — wrapping
+-- in pcall would intercept that control flow and break 401/200/503
+-- responses. Direct call is the correct pattern.
 function _M.dispatch()
-  -- 1. Authentication (verify handles /health exemption + OPTIONS preflight)
-  -- auth.verify() calls ngx.exit(401) on failure, so we only reach here if
-  -- the request is authenticated or exempted.
-  local ok, err = pcall(auth.verify)
-  if not ok then
-    -- auth module threw an error — fail-closed
-    ngx.log(ngx.ERR, "[luagate:admin] auth.verify() error: ", tostring(err))
-    send_error(500, "internal_error", "authentication check failed")
+  local method = ngx.req.get_method()
+
+  -- 0. OPTIONS preflight: 204 (CORS, admin-auth-contract.md)
+  if method == "OPTIONS" then
+    ngx.status = 204
+    ngx.exit(204)
     return
   end
 
+  -- 1. Authentication (verify handles /health exemption)
+  -- auth.verify() calls ngx.exit(401) on failure, aborting the coroutine.
+  auth.verify()
+
   -- 2. Route lookup
-  local method = ngx.req.get_method()
   local uri = ngx.var.uri
 
   local route = ROUTES[uri]
   if not route then
-    send_error(404, "not_found", method .. " " .. uri .. " not found")
+    send_error(404, "not_found", "routing", method .. " " .. uri .. " not found")
     return
   end
 
   -- 3. Method check
   local handler = route[method]
   if not handler then
-    send_error(405, "method_not_allowed", method .. " not allowed for " .. uri)
+    send_error(405, "method_not_allowed", "routing", method .. " not allowed for " .. uri)
     return
   end
 
-  -- 4. Invoke handler (pcall for fail-closed safety)
-  local handler_ok, handler_err = pcall(handler)
-  if not handler_ok then
-    ngx.log(ngx.ERR, "[luagate:admin] handler error for ", method, " ", uri, ": ", tostring(handler_err))
-    -- Only send error if response not yet committed
-    if not ngx.headers_sent then
-      send_error(500, "internal_error", "handler execution failed")
-    end
-  end
+  -- 4. Invoke handler
+  handler()
 end
 
 return _M

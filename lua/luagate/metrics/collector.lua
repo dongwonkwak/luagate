@@ -2,13 +2,14 @@
 -- Updates luagate_metrics shared dict counters after each HTTP request.
 -- Called from log_by_lua (via handler.log_phase) — after upstream response.
 --
--- Counter key schema (ADR-001 §1.1, ADR-004 §4.3, log-schema.md §7):
---   metrics:http:requests:total          — total HTTP requests
---   metrics:http:requests:allow          — allow decisions
---   metrics:http:requests:deny           — deny decisions
---   metrics:http:upstream_errors:total   — upstream 5xx responses
---   metrics:http:status:<code>           — per-status-code counter
---   metrics:http:latency:bucket:<ms>     — latency histogram bucket
+-- Counter key schema (ADR-006 §3.2):
+--   metrics:http_requests_total:allow       — allow decisions
+--   metrics:http_requests_total:deny        — deny decisions
+--   metrics:http_requests_denied_total      — total deny count (label-less)
+--   metrics:http_upstream_errors_total      — upstream 5xx responses
+--   metrics:http:status:<code>              — per-status-code counter
+--   latency:bucket:<ms>                     — latency histogram bucket
+--   latency:bucket:+Inf                     — +Inf bucket
 --
 -- Design rules:
 --   - No blocking I/O.
@@ -58,7 +59,8 @@ local function safe_incr(dict, key, delta)
 end
 
 --- Find the smallest histogram bucket >= latency_ms.
--- Returns the bucket boundary string or "inf" if all buckets exceeded.
+-- Returns the bucket boundary string or "+Inf" if all buckets exceeded.
+-- ADR-006 ss3.1: +Inf bucket key is "latency:bucket:+Inf"
 -- @param latency_ms number
 -- @return string
 local function latency_bucket(latency_ms)
@@ -67,7 +69,7 @@ local function latency_bucket(latency_ms)
       return tostring(b)
     end
   end
-  return "inf"
+  return "+Inf"
 end
 
 -- ---------------------------------------------------------------------------
@@ -83,15 +85,13 @@ function _M.record(ctx)
     return
   end
 
-  -- Total request counter
-  safe_incr(dict, "metrics:http:requests:total")
-
-  -- Action counter (allow / deny)
+  -- Action counter (allow / deny) — ADR-006 ss3.2 key schema
   local action = (ctx and ctx.action) or ngx.var.luagate_action or "allow"
   if action == "deny" then
-    safe_incr(dict, "metrics:http:requests:deny")
+    safe_incr(dict, "metrics:http_requests_total:deny")
+    safe_incr(dict, "metrics:http_requests_denied_total")
   else
-    safe_incr(dict, "metrics:http:requests:allow")
+    safe_incr(dict, "metrics:http_requests_total:allow")
   end
 
   -- Per-status-code counter
@@ -100,7 +100,7 @@ function _M.record(ctx)
 
   -- Upstream error counter (5xx responses on allow-path)
   if status >= 500 and action ~= "deny" then
-    safe_incr(dict, "metrics:http:upstream_errors:total")
+    safe_incr(dict, "metrics:http_upstream_errors_total")
   end
 
   -- Scanner threat counter (ADR-006 §3: per-threat_type counter)
@@ -115,7 +115,7 @@ function _M.record(ctx)
   local request_time_s = tonumber(ngx.var.request_time) or 0
   local latency_ms = request_time_s * 1000
   local bucket = latency_bucket(latency_ms)
-  safe_incr(dict, "metrics:http:latency:bucket:" .. bucket)
+  safe_incr(dict, "latency:bucket:" .. bucket)
 end
 
 return _M
