@@ -1,0 +1,524 @@
+--- Admin API policy management handlers for LuaGate.
+-- Implements GET/PUT /api/v1/policies, GET /api/v1/policies/version,
+-- POST /api/v1/policies/reload per admin-api.md §6.3–6.6.
+--
+-- Design rules:
+--   - No blocking I/O except in PUT (canonical file write) and POST reload
+--     (delegated to loader.load_policy which uses io.open).
+--   - ngx.ctx MUST NOT store policy cache.
+--   - cjson.safe for all JSON encoding (pcall-safe).
+--   - Error responses follow admin-api.md §3 shape.
+--   - Audit log: all mutations log success/failure via [luagate:audit] prefix.
+--   - fail-closed: any error aborts and returns error response.
+--   - PUT canonical file write only when BOTH subsystem swaps succeed (ADR-005 §1).
+--
+-- Implementation: lua/luagate/admin/policies.lua
+-- Tests: tests/unit/admin/policies_spec.lua
+
+local cjson = require("cjson.safe")
+local loader = require("luagate.policy.loader")
+local parser = require("luagate.policy.parser")
+local validator = require("luagate.policy.validator")
+local conflict = require("luagate.policy.conflict")
+
+local _M = {}
+
+-- ---------------------------------------------------------------------------
+-- Constants
+-- ---------------------------------------------------------------------------
+
+local POLICY_FILE = "conf/policies.yaml"
+local MAX_BODY_SIZE = 1048576 -- 1MB
+
+-- ---------------------------------------------------------------------------
+-- Internal helpers
+-- ---------------------------------------------------------------------------
+
+--- Send a JSON error response (admin-api.md §3).
+-- @param status  number  HTTP status code
+-- @param code    string  Error code
+-- @param stage   string  Pipeline stage
+-- @param message string  Detail message
+local function send_error(status, code, stage, message)
+  ngx.status = status
+  ngx.header["Content-Type"] = "application/json"
+  local body = cjson.encode({
+    error = code,
+    stage = stage,
+    details = { message },
+  })
+  ngx.say(body or '{"error":"encode_failed","stage":"internal","details":["JSON encode error"]}')
+  ngx.exit(status)
+end
+
+--- Send a JSON success response.
+-- @param status number  HTTP status code
+-- @param data   table   Response body table
+local function send_json(status, data)
+  ngx.status = status
+  ngx.header["Content-Type"] = "application/json"
+  local body = cjson.encode(data)
+  ngx.say(body or '{"error":"encode_failed"}')
+  ngx.exit(status)
+end
+
+--- Compute SHA256 hex of a string using resty.sha256.
+-- @param s string
+-- @return string|nil  64-char lowercase hex
+-- @return string|nil  error
+local function sha256_hex(s)
+  local sha256_mod = require("resty.sha256")
+  local str_mod = require("resty.string")
+
+  local sha = sha256_mod:new()
+  if not sha then
+    return nil, "failed to create resty.sha256 instance"
+  end
+  sha:update(s)
+  local digest = sha:final()
+  if not digest then
+    return nil, "resty.sha256:final() returned nil"
+  end
+  return str_mod.to_hex(digest), nil
+end
+
+--- Write structured audit log entry.
+-- Uses [luagate:audit] prefix for log routing (ADR-004 §6.3).
+-- @param event  string  Event name (e.g. "policy_reload_success")
+-- @param fields table   Additional fields to include
+-- @return boolean  true if audit write succeeded
+local function audit_log(event, fields)
+  fields = fields or {}
+  fields.timestamp = ngx.utctime()
+  fields.event = event
+  fields.actor_ip = ngx.var.remote_addr or "unknown"
+
+  local json = cjson.encode(fields)
+  if not json then
+    return false
+  end
+
+  ngx.log(ngx.ERR, "[luagate:audit] ", json)
+  return true
+end
+
+--- Read the canonical policy file content.
+-- @return string|nil content, string|nil error
+local function read_policy_file()
+  local f, err = io.open(POLICY_FILE, "r")
+  if not f then
+    return nil, "cannot open policy file: " .. tostring(err)
+  end
+  local content = f:read("*all")
+  f:close()
+  if not content or #content == 0 then
+    return nil, "policy file is empty"
+  end
+  return content, nil
+end
+
+--- Build conflict warnings array for response.
+-- @param conflicts table  From conflict.detect()
+-- @return table  Array of warning objects
+local function build_warnings(conflicts)
+  local warnings = {}
+  for _, c in ipairs(conflicts or {}) do
+    warnings[#warnings + 1] = {
+      type = "conflict",
+      rule_ids = c.rule_ids or {},
+      message = c.message or "conflicting rules detected",
+    }
+  end
+  return warnings
+end
+
+-- ---------------------------------------------------------------------------
+-- Endpoint handlers
+-- ---------------------------------------------------------------------------
+
+--- GET /api/v1/policies — return canonical YAML + ETag.
+function _M.handle_get_policies()
+  local content, read_err = read_policy_file()
+  if not content then
+    send_error(500, "internal_error", "internal", read_err)
+    return
+  end
+
+  local versions = loader.get_active_versions()
+  local etag = versions.source_version
+
+  -- If source_version not yet in shared dict, compute from file content
+  if not etag then
+    local hex, hash_err = sha256_hex(content)
+    if not hex then
+      send_error(500, "internal_error", "internal", "SHA256 failed: " .. tostring(hash_err))
+      return
+    end
+    etag = hex
+  end
+
+  ngx.status = 200
+  ngx.header["Content-Type"] = "application/x-yaml"
+  ngx.header["ETag"] = '"' .. etag .. '"'
+  ngx.say(content)
+  ngx.exit(200)
+end
+
+--- GET /api/v1/policies/version — return version triplet.
+function _M.handle_get_version()
+  local versions = loader.get_active_versions()
+
+  send_json(200, {
+    source_version = versions.source_version,
+    active_http_version = versions.http_version,
+    active_stream_version = versions.stream_version,
+    etag = versions.source_version,
+  })
+end
+
+--- PUT /api/v1/policies — full pipeline: If-Match → parse → validate →
+--- conflict → hash → audit → commit + canonical file write.
+function _M.handle_put_policies()
+  -- [0] Content-Encoding check (compression not allowed)
+  local content_encoding = ngx.req.get_headers()["Content-Encoding"]
+  if content_encoding then
+    send_error(422, "validation_failed", "request", "Content-Encoding not supported")
+    return
+  end
+
+  -- [0] Read request body
+  ngx.req.read_body()
+  local body = ngx.req.get_body_data()
+  if not body then
+    send_error(413, "payload_too_large", "request", "body missing or exceeds buffer limit")
+    return
+  end
+  if #body > MAX_BODY_SIZE then
+    send_error(413, "payload_too_large", "request", "body exceeds 1MB limit")
+    return
+  end
+
+  -- [1] If-Match check (ADR-005: optimistic lock on source_version)
+  local if_match = ngx.req.get_headers()["If-Match"]
+  if not if_match then
+    send_error(428, "version_mismatch", "reload", "If-Match header is required")
+    return
+  end
+  -- Strip surrounding quotes if present
+  if_match = if_match:gsub('^"', ""):gsub('"$', "")
+
+  local versions = loader.get_active_versions()
+  local current_source = versions.source_version
+  if current_source and if_match ~= current_source then
+    local msg = "If-Match version mismatch: expected " .. current_source .. ", got " .. if_match
+    send_error(409, "version_mismatch", "reload", msg)
+    return
+  end
+
+  -- [2] Parse
+  local policy, parse_err = parser.parse_string(body)
+  if not policy then
+    send_error(422, "validation_failed", "validate", "parse error: " .. tostring(parse_err))
+    return
+  end
+
+  -- [3] Validate
+  local _, validate_err = validator.validate(policy)
+  if validate_err then
+    send_error(422, "validation_failed", "validate", tostring(validate_err))
+    return
+  end
+
+  -- [4] Conflict detection (WARN only — included in response warnings)
+  local http_enabled = conflict.filter_enabled(policy.rules or {})
+  local stream_enabled = conflict.filter_enabled(policy.stream_rules or {})
+  local all_enabled = {}
+  for _, r in ipairs(http_enabled) do
+    all_enabled[#all_enabled + 1] = r
+  end
+  for _, r in ipairs(stream_enabled) do
+    all_enabled[#all_enabled + 1] = r
+  end
+  local conflicts, _ = conflict.detect(all_enabled)
+
+  -- [5] Hash
+  local new_version, hash_err = sha256_hex(body)
+  if not new_version then
+    send_error(500, "internal_error", "internal", "SHA256 failed: " .. tostring(hash_err))
+    return
+  end
+
+  -- [6] Reload via loader (stages [5]-[7] of 7-stage pipeline: blob store + commit)
+  -- loader.load_policy reads from file, but we need to write the file first for
+  -- the loader to pick up. However, ADR-005 §1 says canonical file write is stage [8c]
+  -- and happens AFTER pointer swaps. So we need a different approach:
+  -- We write a temp file, let loader load from it, then rename to canonical on success.
+
+  -- Write to temp file for loader to process
+  local tmp_path = POLICY_FILE .. ".tmp"
+  local wf, write_err = io.open(tmp_path, "w")
+  if not wf then
+    send_error(500, "internal_error", "internal", "cannot write temp policy file: " .. tostring(write_err))
+    return
+  end
+  wf:write(body)
+  wf:close()
+
+  -- [7] Audit write (pre-commit — ADR-004 droppable-audit prohibition)
+  local audit_ok = audit_log("policy_update_attempt", {
+    trigger = "api",
+    new_version = new_version,
+    previous_version = current_source,
+  })
+  if not audit_ok then
+    os.remove(tmp_path)
+    send_error(500, "audit_write_failed", "audit", "failed to write audit log; mutation rejected")
+    return
+  end
+
+  -- Load from temp file (stages [1]-[7] of loader pipeline)
+  local result = loader.load_policy(tmp_path)
+
+  if result.err then
+    -- Cleanup temp file
+    os.remove(tmp_path)
+
+    -- Determine error type
+    if result.err == "reload_in_progress" then
+      audit_log("policy_reload_failure", {
+        trigger = "api",
+        stage = "reload",
+        reason = result.err,
+        current_version = current_source,
+      })
+      send_error(409, "reload_in_progress", "reload", "another reload is already in progress")
+      return
+    end
+
+    audit_log("policy_reload_failure", {
+      trigger = "api",
+      stage = "commit",
+      reason = result.err,
+      current_version = current_source,
+    })
+    send_error(500, "commit_failed", "commit", result.err)
+    return
+  end
+
+  -- [8] Commit result evaluation + canonical file write
+  if result.skipped then
+    -- Same hash — no change needed, cleanup temp
+    os.remove(tmp_path)
+
+    audit_log("policy_reload_success", {
+      trigger = "api",
+      previous_version = current_source,
+      new_version = new_version,
+    })
+
+    send_json(200, {
+      previous_http_version = result.previous_http_version,
+      previous_stream_version = result.previous_stream_version,
+      new_http_version = new_version,
+      new_stream_version = new_version,
+      http_result = "committed",
+      stream_result = "committed",
+      warnings = build_warnings(conflicts),
+    })
+    return
+  end
+
+  -- Check partial commit
+  if not result.http_ok or not result.stream_ok then
+    -- Partial commit or full failure — do NOT write canonical file (ADR-005 §1)
+    os.remove(tmp_path)
+
+    local details = {}
+    if result.http_err then
+      details[#details + 1] = result.http_err
+    end
+    if result.stream_err then
+      details[#details + 1] = result.stream_err
+    end
+
+    -- Best-effort rollback: loader already keeps LKG for failed subsystems
+    local cur_versions = loader.get_active_versions()
+
+    audit_log("policy_reload_partial", {
+      trigger = "api",
+      http_result = result.http_ok and "committed" or "lkg_retained",
+      stream_result = result.stream_ok and "committed" or "lkg_retained",
+    })
+
+    ngx.status = 500
+    ngx.header["Content-Type"] = "application/json"
+    local err_body = cjson.encode({
+      error = "commit_failed",
+      stage = "commit",
+      details = details,
+      current_http_version = cur_versions.http_version,
+      current_stream_version = cur_versions.stream_version,
+    })
+    ngx.say(err_body or '{"error":"commit_failed","stage":"commit","details":["encode error"]}')
+    ngx.exit(500)
+    return
+  end
+
+  -- Both subsystems committed — write canonical file (stage [8c])
+  local rename_ok, rename_err = os.rename(tmp_path, POLICY_FILE)
+  if not rename_ok then
+    -- Rollback: best-effort (pointers already swapped, but canonical file unchanged)
+    -- This is the ADR-005 §1 edge case — active versions may differ from canonical file
+    os.remove(tmp_path)
+
+    audit_log("policy_reload_failure", {
+      trigger = "api",
+      stage = "commit",
+      reason = "canonical file write failed: " .. tostring(rename_err),
+      current_version = new_version,
+    })
+
+    local cur_versions = loader.get_active_versions()
+    ngx.status = 500
+    ngx.header["Content-Type"] = "application/json"
+    local err_body = cjson.encode({
+      error = "commit_failed",
+      stage = "commit",
+      details = {
+        "pointer swaps succeeded but canonical file write failed: " .. tostring(rename_err),
+        "active versions may be inconsistent with canonical file",
+      },
+      current_http_version = cur_versions.http_version,
+      current_stream_version = cur_versions.stream_version,
+    })
+    ngx.say(err_body or '{"error":"commit_failed","stage":"commit","details":["file write error"]}')
+    ngx.exit(500)
+    return
+  end
+
+  -- Full success
+  audit_log("policy_reload_success", {
+    trigger = "api",
+    previous_version = result.previous_http_version,
+    new_version = new_version,
+  })
+
+  send_json(200, {
+    previous_http_version = result.previous_http_version,
+    previous_stream_version = result.previous_stream_version,
+    new_http_version = new_version,
+    new_stream_version = new_version,
+    http_result = "committed",
+    stream_result = "committed",
+    warnings = build_warnings(conflicts),
+  })
+end
+
+--- POST /api/v1/policies/reload — reload from current canonical file.
+function _M.handle_post_reload()
+  -- Optional If-Match check against http:active_version
+  local if_match = ngx.req.get_headers()["If-Match"]
+  if if_match then
+    if_match = if_match:gsub('^"', ""):gsub('"$', "")
+    local versions = loader.get_active_versions()
+    local current_http = versions.http_version
+    if current_http and if_match ~= current_http then
+      send_error(
+        409,
+        "version_mismatch",
+        "reload",
+        "If-Match version mismatch: expected " .. tostring(current_http) .. ", got " .. if_match
+      )
+      return
+    end
+  end
+
+  -- Audit pre-reload
+  local pre_versions = loader.get_active_versions()
+  local audit_ok = audit_log("policy_reload_attempt", {
+    trigger = "api",
+    current_version = pre_versions.source_version,
+  })
+  if not audit_ok then
+    send_error(500, "audit_write_failed", "audit", "failed to write audit log; reload rejected")
+    return
+  end
+
+  -- Execute 7-stage pipeline
+  local result = loader.load_policy(POLICY_FILE)
+
+  if result.err then
+    if result.err == "reload_in_progress" then
+      audit_log("policy_reload_failure", {
+        trigger = "api",
+        stage = "reload",
+        reason = result.err,
+        current_version = pre_versions.source_version,
+      })
+      send_error(409, "reload_in_progress", "reload", "another reload is already in progress")
+      return
+    end
+
+    audit_log("policy_reload_failure", {
+      trigger = "api",
+      stage = "reload",
+      reason = result.err,
+      current_version = pre_versions.source_version,
+    })
+
+    local cur_versions = loader.get_active_versions()
+    ngx.status = 500
+    ngx.header["Content-Type"] = "application/json"
+    local err_body = cjson.encode({
+      error = "reload_failed",
+      stage = "reload",
+      details = { result.err },
+      current_http_version = cur_versions.http_version,
+      current_stream_version = cur_versions.stream_version,
+    })
+    ngx.say(err_body or '{"error":"reload_failed","stage":"reload","details":["unknown error"]}')
+    ngx.exit(500)
+    return
+  end
+
+  -- Partial commit handling
+  local http_result_str = result.http_ok and "committed" or "lkg_retained"
+  local stream_result_str = result.stream_ok and "committed" or "lkg_retained"
+
+  if result.http_ok and result.stream_ok then
+    audit_log("policy_reload_success", {
+      trigger = "api",
+      previous_version = result.previous_http_version,
+      new_version = result.new_version,
+    })
+  else
+    audit_log("policy_reload_partial", {
+      trigger = "api",
+      http_result = http_result_str,
+      stream_result = stream_result_str,
+    })
+  end
+
+  -- Build error list for response
+  local errors = {}
+  if result.http_err then
+    errors[#errors + 1] = result.http_err
+  end
+  if result.stream_err then
+    errors[#errors + 1] = result.stream_err
+  end
+
+  send_json(200, {
+    previous_http_version = result.previous_http_version,
+    previous_stream_version = result.previous_stream_version,
+    new_http_version = result.new_version,
+    new_stream_version = result.new_version,
+    http_result = http_result_str,
+    stream_result = stream_result_str,
+    reloaded_at = ngx.utctime(),
+    warnings_count = #(result.conflicts or {}),
+    errors = errors,
+  })
+end
+
+return _M
