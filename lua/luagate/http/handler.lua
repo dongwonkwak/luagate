@@ -156,6 +156,7 @@ function _M.rewrite()
   local path_normalized = path_raw
   local query_normalized = query_raw
   local decoder_error = nil
+  local decoder_ffi_timeout = false
 
   local ok_dec, decoder = pcall(require, "luagate.decoder.ffi")
   if ok_dec then
@@ -166,6 +167,7 @@ function _M.rewrite()
       decoder_error = "decoder_path_exception"
     elseif perr then
       ngx.log(ngx.ERR, "[luagate] decoder path error: ", perr)
+      decoder_ffi_timeout = decoder_ffi_timeout or (perr == "ffi_timeout")
       decoder_error = perr
     else
       path_normalized = pn or path_raw
@@ -180,6 +182,7 @@ function _M.rewrite()
       decoder_error = decoder_error or "decoder_query_exception"
     elseif qerr then
       ngx.log(ngx.ERR, "[luagate] decoder query error: ", qerr)
+      decoder_ffi_timeout = decoder_ffi_timeout or (qerr == "ffi_timeout")
       decoder_error = decoder_error or qerr
     else
       query_normalized = qn or query_raw
@@ -217,6 +220,7 @@ function _M.rewrite()
     start_time_ms = ngx.now() * 1000,
     -- decoder error flag: non-nil triggers fail-closed in access phase
     decoder_error = decoder_error,
+    decoder_ffi_timeout = decoder_ffi_timeout,
   }
 end
 
@@ -324,11 +328,14 @@ function _M.access()
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = ctx.decoder_error
+    -- ADR-009: propagate ffi_timeout flag for decoder Layer 2 timeout
+    ctx.ffi_timeout = ctx.decoder_ffi_timeout or (ctx.decoder_error == "ffi_timeout")
+    local log_threat_type = ctx.ffi_timeout and "ffi_timeout" or "decode_error"
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = ctx.decoder_error
-    ngx.var.luagate_threat_type = "decode_error"
+    ngx.var.luagate_threat_type = log_threat_type
     do_deny(ctx.decoder_error, ctx.request_id or "")
     return
   end
@@ -383,9 +390,15 @@ function _M.access()
   end
 
   if scan_err then
-    -- Distinguish budget_exceeded vs internal_error (security-scanner.md §2b)
+    -- ADR-009: ffi_timeout is an operational timeout, not a threat detection.
+    -- Use distinct deny_reason and threat_type so it does not pollute scanner
+    -- threat metrics (ADR-006). Log ffi_timeout field for observability.
     local deny_reason = "scanner_internal_error"
-    if scan_err:find("%-3") then
+    local log_threat_type = "scanner_error"
+    if scan_err == "ffi_timeout" then
+      deny_reason = "ffi_timeout"
+      log_threat_type = "ffi_timeout"
+    elseif scan_err:find("%-3") then
       deny_reason = "budget_exceeded"
     end
     ngx.log(ngx.ERR, "[luagate] scanner error: ", scan_err)
@@ -393,11 +406,12 @@ function _M.access()
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = deny_reason
+    ctx.ffi_timeout = (scan_err == "ffi_timeout")
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = deny_reason
-    ngx.var.luagate_threat_type = "scanner_error"
+    ngx.var.luagate_threat_type = log_threat_type
     do_deny(deny_reason, ctx.request_id or "")
     return
   end

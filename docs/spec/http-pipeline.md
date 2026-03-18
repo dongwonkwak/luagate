@@ -125,7 +125,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 ### 2.5 log_by_lua (요청 완료 후 비동기 로그)
 
 - Nginx 응답 후 처리 (클라이언트 응답에 영향 없음)
-- **27개 필드** JSON 레코드 생성 — 상세 필드 목록: [log-schema.md](./log-schema.md)
+- **28개 필드** JSON 레코드 생성 — 상세 필드 목록: [log-schema.md](./log-schema.md)
 - `luagate_metrics` shared dict 카운터 증가 (ADR-001)
 - `luagate_connections` active count 갱신
 - **active_version 기록 규칙**: 요청 시작 시 스냅샷한 active_version만 기록. log 시점의 버전 변경은 반영하지 않는다.
@@ -147,7 +147,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 
 > **기본값 선할당**: `rewrite_by_lua` 진입 시 아래 기본값으로 초기화.
 > `access_by_lua`에서 실제 판정 결과로 override, `log_by_lua`에서 finalize.
-> 이를 통해 nginx_core early short-circuit(malformed request, 400/413/414) 시에도 27필드가 채워진다.
+> 이를 통해 nginx_core early short-circuit(malformed request, 400/413/414) 시에도 28필드가 채워진다.
 > **Null 표현**: Nginx 기본 `-` 대신 JSON `null`을 사용한다 (log-schema.md §2 참조).
 
 | 변수 | 기본값 |
@@ -307,5 +307,5 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 - [spec/security-scanner.md](./security-scanner.md) — 보안 스캐너 상세
 - [spec/policy-engine.md](./policy-engine.md) — 정책 평가 엔진 상세
-- [spec/log-schema.md](./log-schema.md) — 로그 스키마 상세 (HTTP 27필드)
+- [spec/log-schema.md](./log-schema.md) — 로그 스키마 상세 (HTTP 28필드)
 - [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — Rust FFI 모듈 인터페이스

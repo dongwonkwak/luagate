@@ -1306,6 +1306,19 @@ describe("handler.access — decoder error (from rewrite) → fail-closed", func
     assert.are.equal("decode_error", ngx_mock.var.luagate_threat_type)
   end)
 
+  it(
+    "path decoder error가 먼저 기록돼도 query ffi_timeout이 있으면 ffi_timeout flag를 남긴다",
+    function()
+      _decoder_stub.normalize_path_result = { nil, "ffi_fail:-4", false }
+      _decoder_stub.normalize_query_result = { nil, "ffi_timeout", false }
+      handler.rewrite()
+      handler.access()
+      assert.are.equal("ffi_fail:-4", ngx_mock.ctx.luagate.deny_reason)
+      assert.is_true(ngx_mock.ctx.luagate.ffi_timeout)
+      assert.are.equal("ffi_timeout", ngx_mock.var.luagate_threat_type)
+    end
+  )
+
   it("decoder_load_error from rewrite → fail-closed in access with decode_error in var", function()
     package.loaded["luagate.decoder.ffi"] = nil
     local saved_preload = package.preload["luagate.decoder.ffi"]

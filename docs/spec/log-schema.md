@@ -37,7 +37,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `matched_rule_id` | `null` |
 | `deny_reason` | `null` |
 
-## 3. HTTP 요청 로그 (`access.log`) — 27개 필드
+## 3. HTTP 요청 로그 (`access.log`) — 28개 필드
 
 ### 3.1 필드 정의 (ADR-004 §4.1)
 
@@ -70,6 +70,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `bytes_sent` | integer | NOT NULL | `$bytes_sent` | log_by_lua | 헤더 포함 total bytes (클라이언트로 전송) |
 | `active_version` | string | NOT NULL | `$luagate_active_version` | rewrite_by_lua | **요청 시작 시 스냅샷** (decision 시점 아님) |
 | `worker_id` | integer | NOT NULL | `$luagate_worker_id` | rewrite_by_lua | ngx.worker.id() |
+| `ffi_timeout` | boolean | NOT NULL | ctx.ffi_timeout | access_by_lua | FFI Layer 2 watchdog timeout 여부. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md). 기본값 `false` |
 
 > **path_raw 정의**: `$request_uri`(query 포함)가 아니라, `?` 이전만 잘라낸 Lua 계산값.
 > ```lua

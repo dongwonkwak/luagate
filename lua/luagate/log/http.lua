@@ -205,6 +205,8 @@ function _M.finalize()
     bytes_sent = tonumber(ngx.var.bytes_sent) or 0,
     active_version = ngx.var.luagate_active_version or ctx.active_version or "none",
     worker_id = tonumber(ngx.var.luagate_worker_id) or ngx.worker.id(),
+    -- ADR-009: ffi_timeout flag for operational timeout observability
+    ffi_timeout = ctx.ffi_timeout or false,
   }
 
   local json, err = cjson.encode(record)

@@ -17,6 +17,27 @@ local radix_build_calls = {}
 local radix_lookup_calls = {}
 local radix_free_calls = {}
 local mock_lib = {}
+local ngx_log_calls = {}
+local ngx_shared_metrics = {}
+
+-- Mock ngx global for timeout leak counter tests
+_G.ngx = _G.ngx or {}
+ngx.ERR = 0
+ngx.log = function(level, ...)
+  table.insert(ngx_log_calls, { level = level, args = { ... } })
+end
+ngx.worker = {
+  id = function()
+    return 0
+  end,
+}
+ngx.shared = {
+  luagate_metrics = {
+    incr = function(_, key, val, init)
+      ngx_shared_metrics[key] = (ngx_shared_metrics[key] or init or 0) + val
+    end,
+  },
+}
 
 -- Fake radix tree opaque pointer (table acting as userdata stand-in)
 local MOCK_TREE_SENTINEL = { _type = "mock_radix_tree" }
@@ -123,6 +144,8 @@ local function reset_state()
   radix_lookup_calls = {}
   radix_free_calls = {}
   mock_lib = {}
+  ngx_log_calls = {}
+  ngx_shared_metrics = {}
   package.loaded["luagate.stream.ffi"] = nil
   package.loaded["_luagate_stream_lib"] = nil
 end
@@ -488,7 +511,7 @@ describe("luagate.stream.ffi", function()
     end)
 
     it("non-OK return code -> radix_lookup_fail", function()
-      local m = load_module_with({ radix_lookup_rc = -5 })
+      local m = load_module_with({ radix_lookup_rc = -99 })
       local tree = m.radix_build("10.0.0.0/8,0\n")
       local idx, err = m.radix_lookup(tree, "10.0.0.1")
       assert.is_nil(idx)
@@ -519,6 +542,74 @@ describe("luagate.stream.ffi", function()
       m.radix_free(tree)
       -- Second call should not raise
       m.radix_free(tree)
+    end)
+  end)
+
+  -- ===========================================================================
+  -- LUAGATE_TIMEOUT (-5) — ADR-009 Layer 2
+  -- ===========================================================================
+
+  describe("LUAGATE_TIMEOUT (-5)", function()
+    it("detect_protocol returns nil + ffi_timeout on timeout", function()
+      local m = load_module_with({ detect_rc = -5 })
+      local proto, err = m.detect_protocol("data")
+      assert.is_nil(proto)
+      assert.equals("ffi_timeout", err)
+    end)
+
+    it("detect_protocol increments stream_detect leak counter", function()
+      local m = load_module_with({ detect_rc = -5 })
+      m.detect_protocol("data")
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:leak:0"])
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:stream_detect:0"])
+    end)
+
+    it("extract_sni returns nil + ffi_timeout on timeout", function()
+      local m = load_module_with({ sni_rc = -5 })
+      local sni, err = m.extract_sni("data")
+      assert.is_nil(sni)
+      assert.equals("ffi_timeout", err)
+    end)
+
+    it("extract_sni increments stream_sni leak counter", function()
+      local m = load_module_with({ sni_rc = -5 })
+      m.extract_sni("data")
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:stream_sni:0"])
+    end)
+
+    it("radix_build returns nil + ffi_timeout on timeout", function()
+      local m = load_module_with({ radix_build_rc = -5 })
+      local tree, err = m.radix_build("10.0.0.0/8,0\n")
+      assert.is_nil(tree)
+      assert.equals("ffi_timeout", err)
+    end)
+
+    it("radix_build increments stream_radix_build leak counter", function()
+      local m = load_module_with({ radix_build_rc = -5 })
+      m.radix_build("10.0.0.0/8,0\n")
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:stream_radix_build:0"])
+    end)
+
+    it("radix_lookup returns nil + ffi_timeout on timeout", function()
+      local m = load_module_with({ radix_lookup_rc = -5 })
+      local tree = m.radix_build("10.0.0.0/8,0\n")
+      local idx, err = m.radix_lookup(tree, "10.0.0.1")
+      assert.is_nil(idx)
+      assert.equals("ffi_timeout", err)
+    end)
+
+    it("radix_lookup increments stream_radix_lookup leak counter", function()
+      local m = load_module_with({ radix_lookup_rc = -5 })
+      local tree = m.radix_build("10.0.0.0/8,0\n")
+      m.radix_lookup(tree, "10.0.0.1")
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:stream_radix_lookup:0"])
+    end)
+
+    it("logs ERR on timeout", function()
+      local m = load_module_with({ detect_rc = -5 })
+      m.detect_protocol("data")
+      assert.is_true(#ngx_log_calls > 0)
+      assert.equals(ngx.ERR, ngx_log_calls[1].level)
     end)
   end)
 
