@@ -124,16 +124,50 @@ end
 -- Endpoint handlers
 -- ---------------------------------------------------------------------------
 
+--- Format epoch timestamp as ISO-8601 UTC string.
+-- @param epoch number  ngx.now() epoch seconds
+-- @return string ISO-8601 formatted datetime
+local function format_iso8601(epoch)
+  if not epoch or epoch == 0 then
+    return nil
+  end
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", math.floor(epoch))
+end
+
 --- GET /health — health check (auth exempted, handled by auth.verify).
 -- Returns 200 if policy loaded, 503 if not.
+-- ADR-008 §8.2: includes source_version, active_http_version,
+-- active_stream_version, policy_loaded_at for multi-instance monitoring.
 local function handle_health()
   local policy_dict = ngx.shared.luagate_policy
-  local version = policy_dict and policy_dict:get("http:active_version")
+  local http_version = policy_dict and policy_dict:get("http:active_version")
+  local stream_version = policy_dict and policy_dict:get("stream:active_version")
+  local source_version = policy_dict and policy_dict:get("source_version")
+  local loaded_at_epoch = policy_dict and policy_dict:get("policy_loaded_at")
 
-  if version and version ~= "none" then
-    send_json(200, { status = "ok" })
+  -- ADR-009: per-worker FFI watchdog leak counter for health degradation
+  local metrics_dict = ngx.shared.luagate_metrics
+  local ffi_leak_count = 0
+  if metrics_dict then
+    local wid = ngx.worker.id()
+    ffi_leak_count = tonumber(metrics_dict:get("ffi:timeout:leak:" .. wid)) or 0
+  end
+
+  local body = {
+    source_version = source_version,
+    active_http_version = http_version,
+    active_stream_version = stream_version,
+    policy_loaded_at = format_iso8601(loaded_at_epoch),
+    ffi_watchdog_leak_count = ffi_leak_count,
+  }
+
+  if http_version and http_version ~= "none" then
+    body.status = "ok"
+    send_json(200, body)
   else
-    send_json(503, { status = "unhealthy", reason = "policy not loaded" })
+    body.status = "unhealthy"
+    body.reason = "policy not loaded"
+    send_json(503, body)
   end
 end
 
@@ -239,6 +273,21 @@ local function handle_metrics()
       prom_line(buf, "luagate_shared_dict_capacity_bytes", '{zone="' .. zone_name .. '"}', zone:capacity())
       prom_line(buf, "luagate_shared_dict_free_bytes", '{zone="' .. zone_name .. '"}', zone:free_space())
     end
+  end
+
+  -- ── Policy loaded gauge (ADR-008 §8.2) ────────────────────────────
+  -- Version hashes are exposed only via /health (not as Prometheus labels)
+  -- to comply with ADR-006 cardinality rules. This gauge tracks whether
+  -- policy is loaded (1) or not (0).
+  prom_header(buf, "luagate_policy_loaded", "gauge", "Whether policy is loaded (1=loaded, 0=not loaded).")
+  local policy_dict = ngx.shared.luagate_policy
+  if policy_dict then
+    local http_ver = policy_dict:get("http:active_version")
+    local stream_ver = policy_dict:get("stream:active_version")
+    local loaded = (http_ver and http_ver ~= "none" and stream_ver and stream_ver ~= "none") and 1 or 0
+    prom_line(buf, "luagate_policy_loaded", "", loaded)
+  else
+    prom_line(buf, "luagate_policy_loaded", "", 0)
   end
 
   -- ── Send response ──────────────────────────────────────────────────
