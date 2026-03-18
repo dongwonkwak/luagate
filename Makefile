@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-c test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean
+.PHONY: build test test-unit test-unit-lua test-unit-c test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -147,8 +147,18 @@ fuzz-regression:
 	cd src/decoder && cargo +nightly fuzz run fuzz_normalize_path -- -max_total_time=10 2>/dev/null || \
 	  echo "  (fuzz target not available — install cargo-fuzz)"
 
+# ── UI (Dashboard) ────────────────────────────────────────────────────
+ui-dev:
+	@echo "==> Starting UI dev server..."
+	cd ui && npm run dev
+
+ui-build:
+	@echo "==> Building UI for production..."
+	@echo "    Output: ui/dist/ (Docker COPY maps to /etc/luagate/ui/dist)"
+	cd ui && npm run build
+
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean:
 	rm -rf csrc/build
-	rm -rf frontend/dist
+	rm -rf ui/dist
 	find lua -name '*.so' -delete

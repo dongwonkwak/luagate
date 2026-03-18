@@ -21,6 +21,9 @@ luacov.report.out
 node_modules/
 frontend/dist/
 frontend/.vite/
+ui/node_modules/
+ui/dist/
+ui/.vite/
 
 # Nix
 .direnv/
