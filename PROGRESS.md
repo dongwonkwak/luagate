@@ -251,3 +251,11 @@ COMPLETED_REVIEW: DON-146-code (2026-03-18)
 | 2026-03-18 | DON-147 | Admin API 정책 관리 엔드포인트 — GET/PUT /api/v1/policies + POST /reload | `lua/luagate/admin/policies.lua`, `lua/luagate/admin/router.lua`, `tests/unit/admin/policies_spec.lua` | 26 tests 통과. Codex 리뷰 대기 |
 
 COMPLETED_REVIEW: DON-147-code (2026-03-18)
+
+## Phase 1-Stream: Stream 파이프라인 로그 + 메트릭 통합 (DON-144)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-144 | Stream 파이프라인 통합 — 18필드 JSON 로그 + 메트릭 수집 | `lua/luagate/log/stream.lua`, `lua/luagate/log/stream_metrics.lua`, `conf/nginx.conf`, `tests/unit/log/stream_spec.lua`, `tests/unit/log/stream_metrics_spec.lua` | 662 tests 통과. Codex 1건 수정 (pcall 클로저 래핑), 4건 비범위 |
+
+COMPLETED_REVIEW: DON-144-code (2026-03-18)
