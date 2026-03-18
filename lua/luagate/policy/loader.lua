@@ -262,6 +262,71 @@ local function commit_pointers(dict, new_version)
   return result
 end
 
+--- Restore active/source version pointers to their previous values.
+-- Used by PUT /api/v1/policies best-effort rollback on commit failure.
+--
+-- @param versions table {
+--   http_version = string|nil,
+--   stream_version = string|nil,
+--   source_version = string|nil,
+-- }
+-- @return table {
+--   ok = boolean,
+--   http_ok = boolean,
+--   stream_ok = boolean,
+--   source_ok = boolean,
+--   errors = string[],
+-- }
+function _M.rollback_active_versions(versions)
+  local dict = get_dict()
+  local result = {
+    ok = true,
+    http_ok = false,
+    stream_ok = false,
+    source_ok = false,
+    errors = {},
+  }
+
+  if not dict then
+    result.ok = false
+    result.errors[#result.errors + 1] = "policy shared dict unavailable during rollback"
+    log_err(result.errors[#result.errors])
+    return result
+  end
+
+  local function restore(key, value, result_key)
+    if value == nil then
+      if not dict.delete then
+        result.ok = false
+        result.errors[#result.errors + 1] = "delete " .. key .. " failed: delete not supported"
+        return
+      end
+      dict:delete(key)
+      result[result_key] = true
+      return
+    end
+
+    local ok, err = dict:set(key, value)
+    if ok then
+      result[result_key] = true
+      return
+    end
+
+    result.ok = false
+    result.errors[#result.errors + 1] = "set " .. key .. " rollback failed: " .. tostring(err)
+  end
+
+  restore("http:active_version", versions.http_version, "http_ok")
+  restore("stream:active_version", versions.stream_version, "stream_ok")
+  restore("source_version", versions.source_version, "source_ok")
+
+  if not result.ok then
+    log_err("rollback failed: " .. table.concat(result.errors, "; "))
+  end
+
+  return result
+end
+
 --- Build the compiled blob table that will be JSON-serialised and stored in
 -- shared dict.  The blob stores both http and stream compiled rule lists so
 -- workers can decode a single key and get a ready-to-use policy.

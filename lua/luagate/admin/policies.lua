@@ -188,6 +188,19 @@ local function validate_source_if_match(if_match)
   return current_source, nil
 end
 
+--- Best-effort rollback for PUT commit failures per ADR-005 §1.
+-- @param previous_http_version string|nil
+-- @param previous_stream_version string|nil
+-- @param previous_source_version string|nil
+-- @return table rollback result
+local function rollback_put_commit(previous_http_version, previous_stream_version, previous_source_version)
+  return loader.rollback_active_versions({
+    http_version = previous_http_version,
+    stream_version = previous_stream_version,
+    source_version = previous_source_version,
+  })
+end
+
 -- ---------------------------------------------------------------------------
 -- Endpoint handlers
 -- ---------------------------------------------------------------------------
@@ -436,7 +449,13 @@ function _M.handle_put_policies()
       details[#details + 1] = result.stream_err
     end
 
-    -- Best-effort rollback: loader already keeps LKG for failed subsystems
+    local rollback_result =
+      rollback_put_commit(result.previous_http_version, result.previous_stream_version, current_source)
+    if not rollback_result.ok then
+      details[#details + 1] = "rollback failed: " .. table.concat(rollback_result.errors, "; ")
+      ngx.log(ngx.CRIT, "[luagate:admin] PUT commit rollback failed: ", table.concat(rollback_result.errors, "; "))
+    end
+
     local cur_versions = loader.get_active_versions()
 
     if
@@ -444,6 +463,7 @@ function _M.handle_put_policies()
         trigger = "api",
         http_result = result.http_ok and "committed" or "lkg_retained",
         stream_result = result.stream_ok and "committed" or "lkg_retained",
+        rollback_result = rollback_result.ok and "restored" or "failed",
       })
     then
       return
@@ -469,11 +489,19 @@ function _M.handle_put_policies()
     -- Rollback: best-effort (pointers already swapped, but canonical file unchanged)
     os.remove(tmp_path)
 
+    local rollback_result =
+      rollback_put_commit(result.previous_http_version, result.previous_stream_version, current_source)
+    local failure_reason = "canonical file write failed: " .. tostring(rename_err)
+    if not rollback_result.ok then
+      failure_reason = failure_reason .. "; rollback failed: " .. table.concat(rollback_result.errors, "; ")
+      ngx.log(ngx.CRIT, "[luagate:admin] PUT file-write rollback failed: ", table.concat(rollback_result.errors, "; "))
+    end
+
     if
       not audit_or_reject("policy_update_failure", {
         trigger = "api",
         stage = "commit",
-        reason = "canonical file write failed: " .. tostring(rename_err),
+        reason = failure_reason,
         current_version = new_version,
       })
     then
@@ -488,11 +516,23 @@ function _M.handle_put_policies()
       stage = "commit",
       details = {
         "pointer swaps succeeded but canonical file write failed: " .. tostring(rename_err),
-        "active versions may be inconsistent with canonical file",
       },
       current_http_version = cur_versions.http_version,
       current_stream_version = cur_versions.stream_version,
     })
+    if not rollback_result.ok then
+      err_body = cjson.encode({
+        error = "commit_failed",
+        stage = "commit",
+        details = {
+          "pointer swaps succeeded but canonical file write failed: " .. tostring(rename_err),
+          "rollback failed: " .. table.concat(rollback_result.errors, "; "),
+          "active versions may be inconsistent with canonical file",
+        },
+        current_http_version = cur_versions.http_version,
+        current_stream_version = cur_versions.stream_version,
+      })
+    end
     ngx.say(err_body or '{"error":"commit_failed","stage":"commit","details":["file write error"]}')
     ngx.exit(500)
     return

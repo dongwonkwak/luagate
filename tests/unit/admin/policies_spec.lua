@@ -55,6 +55,8 @@ end
 local _loader_result = {}
 local _loader_versions = { http_version = nil, stream_version = nil, source_version = nil }
 local _loader_before_lock_hook = nil
+local _loader_rollback_result = nil
+local _loader_rollback_calls = {}
 local _parser_result = nil
 local _parser_err = nil
 local _validator_ok = true
@@ -89,7 +91,32 @@ package.preload["luagate.policy.loader"] = function()
           }
         end
       end
+      if _loader_result.ok and not _loader_result.skipped and _loader_result.new_version then
+        if _loader_result.http_ok then
+          _loader_versions.http_version = _loader_result.new_version
+        end
+        if _loader_result.stream_ok then
+          _loader_versions.stream_version = _loader_result.new_version
+        end
+        if _loader_result.http_ok and _loader_result.stream_ok then
+          _loader_versions.source_version = _loader_result.new_version
+        end
+      end
       return _loader_result
+    end,
+    rollback_active_versions = function(versions)
+      _loader_rollback_calls[#_loader_rollback_calls + 1] = versions
+      _loader_versions.http_version = versions.http_version
+      _loader_versions.stream_version = versions.stream_version
+      _loader_versions.source_version = versions.source_version
+      return _loader_rollback_result
+        or {
+          ok = true,
+          http_ok = true,
+          stream_ok = true,
+          source_ok = true,
+          errors = {},
+        }
     end,
     get_active_versions = function()
       return _loader_versions
@@ -351,6 +378,8 @@ local function reset_stubs()
   _validator_ok = true
   _validator_err = nil
   _loader_before_lock_hook = nil
+  _loader_rollback_result = nil
+  _loader_rollback_calls = {}
   _conflict_conflicts = {}
   _conflict_shadowed = {}
   _file_registry = {}
@@ -672,17 +701,30 @@ describe("PUT /api/v1/policies", function()
       shadowed = {},
       err = nil,
     }
+    _loader_versions.http_version = "new_sha"
+    _loader_versions.stream_version = "old_sha"
+    _loader_versions.source_version = "abc123"
     policies = load_policies()
 
     policies.handle_put_policies()
 
     assert.are.equal(500, _G.ngx.status)
+    assert.are.equal(1, #_loader_rollback_calls)
+    assert.are.same({
+      http_version = "old_sha",
+      stream_version = "old_sha",
+      source_version = "abc123",
+    }, _loader_rollback_calls[1])
+    assert.are.equal("old_sha", _loader_versions.http_version)
+    assert.are.equal("old_sha", _loader_versions.stream_version)
     local said = _G.ngx._get_said()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
     assert.are.equal("commit_failed", body.error)
     assert.are.equal("commit", body.stage)
     assert.truthy(body.details[1]:find("stream"))
+    assert.are.equal("old_sha", body.current_http_version)
+    assert.are.equal("old_sha", body.current_stream_version)
   end)
 
   it("returns 500 when canonical file rename fails", function()
@@ -693,11 +735,20 @@ describe("PUT /api/v1/policies", function()
     policies.handle_put_policies()
 
     assert.are.equal(500, _G.ngx.status)
+    assert.are.equal(1, #_loader_rollback_calls)
+    assert.are.same({
+      http_version = "old_sha256_hash",
+      stream_version = "old_sha256_hash",
+      source_version = "abc123",
+    }, _loader_rollback_calls[1])
     local said = _G.ngx._get_said()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
     assert.are.equal("commit_failed", body.error)
     assert.truthy(body.details[1]:find("canonical file write failed"))
+    assert.falsy(body.details[2], "successful rollback should not report active/canonical inconsistency")
+    assert.are.equal("old_sha256_hash", body.current_http_version)
+    assert.are.equal("old_sha256_hash", body.current_stream_version)
   end)
 
   it("returns 422 conflict_detected when conflicts found (admin-api.md §3)", function()
