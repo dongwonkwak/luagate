@@ -156,6 +156,7 @@ function _M.rewrite()
   local path_normalized = path_raw
   local query_normalized = query_raw
   local decoder_error = nil
+  local decoder_ffi_timeout = false
 
   local ok_dec, decoder = pcall(require, "luagate.decoder.ffi")
   if ok_dec then
@@ -166,6 +167,7 @@ function _M.rewrite()
       decoder_error = "decoder_path_exception"
     elseif perr then
       ngx.log(ngx.ERR, "[luagate] decoder path error: ", perr)
+      decoder_ffi_timeout = decoder_ffi_timeout or (perr == "ffi_timeout")
       decoder_error = perr
     else
       path_normalized = pn or path_raw
@@ -180,6 +182,7 @@ function _M.rewrite()
       decoder_error = decoder_error or "decoder_query_exception"
     elseif qerr then
       ngx.log(ngx.ERR, "[luagate] decoder query error: ", qerr)
+      decoder_ffi_timeout = decoder_ffi_timeout or (qerr == "ffi_timeout")
       decoder_error = decoder_error or qerr
     else
       query_normalized = qn or query_raw
@@ -217,6 +220,7 @@ function _M.rewrite()
     start_time_ms = ngx.now() * 1000,
     -- decoder error flag: non-nil triggers fail-closed in access phase
     decoder_error = decoder_error,
+    decoder_ffi_timeout = decoder_ffi_timeout,
   }
 end
 
@@ -325,7 +329,7 @@ function _M.access()
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = ctx.decoder_error
     -- ADR-009: propagate ffi_timeout flag for decoder Layer 2 timeout
-    ctx.ffi_timeout = (ctx.decoder_error == "ffi_timeout")
+    ctx.ffi_timeout = ctx.decoder_ffi_timeout or (ctx.decoder_error == "ffi_timeout")
     local log_threat_type = ctx.ffi_timeout and "ffi_timeout" or "decode_error"
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
