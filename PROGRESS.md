@@ -260,10 +260,10 @@ COMPLETED_REVIEW: DON-147-code (2026-03-18)
 
 COMPLETED_REVIEW: DON-144-code (2026-03-18)
 
-## Phase 0-A: ADR-009 FFI 타임아웃 강제 메커니즘 (DON-156)
+## Phase 2-Security: Admin API Rate Limiting — Sliding Window (DON-173)
 
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
-| 2026-03-18 | DON-156 | ADR-009: FFI .so 타임아웃 강제 메커니즘 | `docs/design/adr/ADR-009-ffi-timeout-enforcement.md` | 설계 리뷰 대기 |
+| 2026-03-18 | DON-173 | Admin API rate limiting (sliding window) | `lua/luagate/admin/ratelimit.lua`, `lua/luagate/admin/router.lua`, `conf/nginx.conf`, `.claude/knowledge/zone-registry.md`, `docs/spec/admin-api.md`, `docs/spec/architecture.md`, `tests/unit/admin/ratelimit_spec.lua`, `tests/unit/admin/router_spec.lua`, `CLAUDE.md` | Codex code 리뷰 완료 (1차 4건 + 재리뷰 1건 해결). PR #37 |
 
-PENDING_REVIEW: DON-156-design (2026-03-18)
+COMPLETED_REVIEW: DON-173-code (2026-03-18)
