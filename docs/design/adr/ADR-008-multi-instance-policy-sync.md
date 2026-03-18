@@ -47,15 +47,20 @@ ADR-003은 정책의 canonical source를 파일시스템 YAML로 확정하고, �
 
 ### §8.2 가드레일: 정책 버전 헬스체크 연동
 
-각 인스턴스의 `/health` 엔드포인트에 정책 버전 정보를 포함한다:
+각 인스턴스의 `/health` 엔드포인트에 정책 버전 정보를 포함한다.
+ADR-003 §3.4에서 정의한 버전 모델에 따라 `source_version`, `active_http_version`, `active_stream_version`을 분리하여 노출한다:
 
 ```json
 {
   "status": "healthy",
-  "policy_version": "a3f2c1d4e5b6...",
+  "source_version": "a3f2c1d4e5b6...",
+  "active_http_version": "a3f2c1d4e5b6...",
+  "active_stream_version": "a3f2c1d4e5b6...",
   "policy_loaded_at": "2026-03-18T10:30:00Z"
 }
 ```
+
+> **ADR-003 정합성**: ADR-003은 `source_version` (canonical file SHA256), `http:active_version`, `stream:active_version`을 독립적으로 관리한다. Partial commit 시 HTTP와 Stream의 active version이 다를 수 있으므로 (ADR-003 §3.4 Partial commit 표 참조), 단일 `policy_version`으로는 이 상태를 정확히 표현할 수 없다. 따라서 세 버전을 모두 노출하며, 외부 모니터링은 `source_version`을 기준으로 인스턴스 간 일관성을 비교해야 한다.
 
 외부 모니터링 시스템(Prometheus, 로드밸런서 헬스체크)이 인스턴스 간 정책 버전 불일치를 감지할 수 있다.
 
@@ -66,17 +71,30 @@ CI/CD 파이프라인은 다음 순서를 따를 것을 권장한다:
 ```text
 [1] policies.yaml 파일을 모든 인스턴스에 배포 (rsync, ConfigMap, S3 등)
 [2] 각 인스턴스에 POST /api/v1/policies/reload 호출 (병렬)
-[3] 각 인스턴스의 GET /health 응답에서 policy_version 확인
-[4] 모든 인스턴스가 동일 버전 → 배포 완료
+[3] 각 인스턴스의 GET /health 응답에서 source_version 확인
+[4] 모든 인스턴스가 동일 source_version → 배포 완료
 [5] 일부 인스턴스 불일치 → 재시도 또는 알림
 ```
+
+### §8.3.1 `PUT /api/v1/policies` 직접 호출 금지 (멀티 인스턴스 환경)
+
+멀티 인스턴스 환경에서 개별 인스턴스에 `PUT /api/v1/policies`를 직접 호출하면 **영구적 split-brain**이 발생한다. PUT은 canonical source(YAML 파일)를 해당 인스턴스의 로컬 파일시스템에만 기록하므로, 다른 인스턴스에는 전파되지 않는다.
+
+**운영 규칙:**
+
+- 멀티 인스턴스 환경에서 `PUT /api/v1/policies`를 개별 인스턴스에 직접 호출해서는 **안 된다**.
+- 정책 변경의 canonical source는 CI/CD 파이프라인(git 저장소 + 배포 자동화)이어야 한다.
+- `PUT /api/v1/policies`는 단일 인스턴스 환경 또는 개발/테스트 환경에서만 사용을 권장한다.
+- `POST /api/v1/policies/reload`는 이미 배포된 파일을 reload하는 것이므로 멀티 인스턴스에서 안전하다 (§8.3 패턴 참조).
+
+> **근거**: PUT은 인스턴스 로컬 파일을 직접 수정한다. CI/CD 배포 없이 한 인스턴스에만 PUT을 호출하면 해당 인스턴스의 canonical source가 다른 인스턴스와 영구적으로 분기된다. 이후 CI/CD 배포가 이 변경을 덮어쓸 때까지 split-brain 상태가 지속되며, 덮어쓰기 시 PUT으로 적용한 변경이 유실될 수 있다.
 
 ### §8.4 일관성 모델: Eventually Consistent
 
 - 인스턴스 간 정책 일관성은 **eventually consistent**로 정의한다.
 - 배포 과정에서 일시적 버전 불일치는 허용한다.
 - 불일치 허용 시간은 배포 파이프라인의 SLA로 정의하며, LuaGate 자체가 강제하지 않는다.
-- 각 요청 로그에 `policy_version` 필드가 포함되므로 (ADR-004), 불일치 기간 동안 어떤 정책으로 처리되었는지 감사 추적이 가능하다.
+- 각 요청 로그에 `policy_version` 필드가 포함되므로 (ADR-004), 불일치 기간 동안 어떤 정책으로 처리되었는지 감사 추적이 가능하다. 여기서 `policy_version`은 해당 요청을 처리한 서브시스템의 active version을 의미한다 (HTTP 요청이면 `active_http_version`, Stream이면 `active_stream_version`).
 
 ### §8.5 롤백 전략
 
@@ -85,7 +103,7 @@ CI/CD 파이프라인은 다음 순서를 따를 것을 권장한다:
 ```text
 [1] 이전 정책 파일을 모든 인스턴스에 배포 (git revert 또는 artifact 저장소에서 복원)
 [2] 각 인스턴스에 POST /api/v1/policies/reload 호출
-[3] GET /health로 롤백 완료 확인
+[3] GET /health 응답의 source_version으로 롤백 완료 확인
 ```
 
 - LuaGate 자체에는 "이전 N개 버전 보관" 기능을 두지 않는다.
@@ -166,11 +184,21 @@ etcd에 정책을 저장하고, 각 인스턴스가 watch로 변경을 감지.
 - **수동 확인 필요**: 배포 후 모든 인스턴스의 정책 버전 일치 여부를 외부에서 확인해야 함
 - **실시간 정책 변경 불가**: Admin API를 통한 정책 변경이 해당 인스턴스에만 적용됨. 클러스터 전체 반영을 위해서는 canonical source(YAML 파일)를 수정하고 CI/CD 재배포 필요
 
+### 구현 범위와 향후 작업
+
+이 ADR은 **아키텍처 결정과 운영 규칙**을 정의하며, 아래 항목의 구현은 별도 이슈에서 수행한다:
+
+| 항목 | 범위 | 추적 |
+|------|------|------|
+| `/health` 응답에 `source_version`, `active_http_version`, `active_stream_version`, `policy_loaded_at` 필드 추가 | 별도 구현 이슈 | admin-api.md §6.1에 반영 필요 |
+| `luagate_policy_version` Prometheus 메트릭 노출 | 별도 구현 이슈 | log-schema.md 메트릭 목록에 반영 필요 |
+| 멀티 인스턴스 PUT 금지 운영 가이드 문서화 | 운영 가이드 | §8.3.1 규칙 기반 |
+
+> **same-PR 정합성 참고**: 위 구현 이슈에서 코드를 작성할 때, 해당 PR에서 관련 spec(admin-api.md, log-schema.md)도 함께 업데이트해야 한다 (AGENTS.md same-PR 불변식).
+
 ### 향후 고려
 
 - 정책 변경 빈도가 높아지거나 불일치 허용 시간이 매우 짧아야 하는 요구사항이 발생하면, 이 ADR을 supersede하는 새 ADR에서 자체 동기화 메커니즘 도입을 검토한다.
-- `/health` 엔드포인트의 `policy_version` 필드 구현은 별도 이슈에서 다룬다.
-- Prometheus 기반 정책 버전 불일치 알림 규칙(`luagate_policy_version` 메트릭)은 운영 가이드에서 다룬다.
 
 ---
 
