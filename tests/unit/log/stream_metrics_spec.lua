@@ -5,10 +5,13 @@
 -- ---------------------------------------------------------------------------
 -- shared dict mock
 -- ---------------------------------------------------------------------------
-local function make_shared_dict()
+local function make_shared_dict(failed_keys)
   local data = {}
   return {
     incr = function(_, key, value, init)
+      if failed_keys and failed_keys[key] then
+        return nil, failed_keys[key]
+      end
       if data[key] == nil then
         data[key] = init or 0
       end
@@ -261,6 +264,35 @@ describe("log/stream_metrics.collect — shared dict 없음", function()
     assert.has_no.errors(function()
       metrics.collect()
     end)
+  end)
+end)
+
+describe("log/stream_metrics.collect — shared dict incr 실패", function()
+  it("incr 실패를 경고 로그로 남기고 계속 진행한다", function()
+    local ngx_mock = make_ngx({
+      shared = {
+        luagate_stream_metrics = make_shared_dict({
+          ["stream:metrics:connections_total"] = "no memory",
+        }),
+      },
+    })
+    _G.ngx = ngx_mock
+    local metrics = load_stream_metrics()
+
+    assert.has_no.errors(function()
+      metrics.collect()
+    end)
+
+    local logged = ngx_mock._get_logged()
+    assert.are.equal(
+      "[luagate] stream metrics incr failed for key=stream:metrics:connections_total: no memory",
+      logged[1]
+    )
+
+    local data = ngx_mock.shared.luagate_stream_metrics._data
+    assert.are.equal(2048, data["stream:metrics:bytes_sent_total"])
+    assert.are.equal(8192, data["stream:metrics:bytes_received_total"])
+    assert.are.equal(1, data["stream:metrics:protocol_detected_total:tls"])
   end)
 end)
 
