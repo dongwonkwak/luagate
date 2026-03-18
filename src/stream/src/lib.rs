@@ -177,6 +177,10 @@ enum SniResult {
 ///
 /// Returns `Err(())` for clearly invalid data (e.g. non-0x03 major version).
 fn reassemble_handshake(data: &[u8]) -> Result<Vec<u8>, ReassembleError> {
+    // Hard cap: 64KB total handshake payload to prevent memory exhaustion
+    // from malicious multi-record TLS data (security review M-1).
+    const MAX_HANDSHAKE_PAYLOAD: usize = 65536;
+
     let mut payload = Vec::new();
     let mut offset = 0;
 
@@ -229,6 +233,11 @@ fn reassemble_handshake(data: &[u8]) -> Result<Vec<u8>, ReassembleError> {
 
         payload.extend_from_slice(&data[offset + 5..record_end]);
         offset = record_end;
+
+        // Enforce hard cap (security review M-1)
+        if payload.len() > MAX_HANDSHAKE_PAYLOAD {
+            return Err(ReassembleError::Invalid);
+        }
     }
 
     Ok(payload)

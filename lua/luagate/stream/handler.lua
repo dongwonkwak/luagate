@@ -364,12 +364,18 @@ function _M.preread()
   end
 
   -- 8. proxy: set upstream for proxy_pass
-  if result.upstream then
-    ngx.var.luagate_upstream = result.upstream
+  -- Explicit nil check: upstream must be set for proxy action (security review R-2)
+  if not result.upstream or result.upstream == "" then
+    ngx.log(ngx.ERR, "[luagate-stream] proxy action but no upstream defined, fail-closed")
+    ctx.deny_reason = "no_upstream"
+    ctx.request_state = "denied"
+    ngx.var.luagate_stream_action = "deny"
+    ngx.var.luagate_request_state = "denied"
+    return ngx.exit(ngx.ERROR)
   end
+  ngx.var.luagate_upstream = result.upstream
   ctx.request_state = "proxied"
   ngx.var.luagate_request_state = "proxied"
-  ngx.var.luagate_upstream = ctx.upstream or ""
 end
 
 return _M
