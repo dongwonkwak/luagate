@@ -112,19 +112,37 @@ Content-Type: application/json
 GET /health
 ```
 
-**인증 불필요**. 서버 liveness 확인용. 상세 정보 미포함.
+**인증 불필요**. 서버 liveness 확인용.
 
 **응답 200:**
 
 ```json
-{"status": "ok"}
+{
+  "status": "ok",
+  "ffi_watchdog_timeouts": 0,
+  "ffi_watchdog_leak_count": [0, 0, 0, 0]
+}
 ```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `status` | string | `"ok"` 또는 `"unhealthy"` |
+| `ffi_watchdog_timeouts` | integer | Layer 2 watchdog 타임아웃 누적 횟수 (전체 worker 합산). [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) 참조 |
+| `ffi_watchdog_leak_count` | integer[] | Per-worker detached thread leak 카운터 배열 (인덱스 = `ngx.worker.id()`). 임곗값(기본 10) 초과 시 503 전환 |
+
+> `ffi_watchdog_leak_count` 배열 길이는 `worker_processes` 값과 동일하다.
 
 **응답 503** (unhealthy):
 
 ```json
 {"status": "unhealthy", "reason": "policy not loaded"}
 ```
+
+```json
+{"status": "unhealthy", "reason": "ffi_thread_leak_threshold_exceeded", "ffi_watchdog_leak_count": [0, 12, 0, 0]}
+```
+
+> 503 응답 조건: (1) 정책 미로드, (2) 임의 worker의 `ffi_watchdog_leak_count`가 임곗값(기본 10)을 초과 ([ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md)).
 
 ---
 

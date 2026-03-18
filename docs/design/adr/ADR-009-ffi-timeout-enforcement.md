@@ -191,11 +191,13 @@ pub extern "C" fn luagate_scan_http(
 - Detach된 thread는 OS가 관리한다. 해당 thread가 결국 정상 종료하면 자원이 회수된다.
 - thread가 무한 루프에 빠진 경우, worker 프로세스 종료 시 OS가 회수한다.
 - **per-worker leak 카운터**: `luagate_metrics` shared dict에 `ffi:timeout:leak:<worker_id>` 키로 worker별 leak 카운터를 관리한다 (AGENTS.md `ngx.worker.id()` 불변식 준수).
-- **worker 자발적 종료 메커니즘**: leak 카운터가 임곗값(기본 10)을 초과하면, 해당 worker는 `ngx.timer.at(0, function() ngx.exit(ngx.OK) end)`으로 현재 요청 완료 후 graceful exit을 트리거한다. `ngx.exit(ngx.OK)`는 worker의 이벤트 루프를 종료시키며, Nginx master가 새 worker를 spawn한다.
+- **worker 자발적 종료 불가 -- 외부 health check 의존**: `ngx.exit()`는 요청 처리 컨텍스트(rewrite, access, content, preread)에서만 유효하며, `ngx.timer.at` 콜백 컨텍스트에서는 worker 프로세스 종료를 유발하지 않는다. 따라서 worker 내부에서 자발적으로 프로세스를 종료하는 메커니즘은 존재하지 않는다. 대신 다음 전략으로 leak된 thread의 누적을 감지하고 외부에서 worker를 교체한다.
+  1. `GET /health` 응답에 per-worker `ffi_watchdog_leak_count`를 포함한다.
+  2. leak 카운터가 임곗값(기본 10)을 초과하면 `/health` 응답을 `503 unhealthy`로 전환한다 (`"reason": "ffi_thread_leak_threshold_exceeded"`).
+  3. 외부 오케스트레이터(Kubernetes liveness probe, systemd watchdog 등)가 503을 감지하여 프로세스를 재시작한다.
+  4. 이벤트 루프 자체가 hang되어 `/health`에 응답하지 못하는 극단적 상황에서는, liveness probe의 timeout 실패로 동일하게 프로세스 재시작이 트리거된다.
 
-> **`ngx.exit(ngx.ERROR)` 대신 `ngx.exit(ngx.OK)`를 사용하는 이유**: `ngx.exit(ngx.ERROR)`는 현재 요청의 에러 응답만 트리거할 뿐 worker 프로세스 종료가 아니다. worker 프로세스를 종료하려면 이벤트 루프의 현재 요청 처리 완료 후 `ngx.exit(ngx.OK)`를 timer callback에서 호출해야 한다. 이 호출은 worker의 listening socket을 닫고 in-flight 요청 완료를 기다린 후 프로세스를 종료시킨다.
->
-> **대안: `worker_shutdown_timeout` 활용**: leak 카운터 임곗값 초과 시 worker 자발적 종료가 동작하지 않는 극단적 상황(timer 자체가 실행되지 않을 정도로 이벤트 루프가 점유된 경우)에서는 Layer 3의 `worker_shutdown_timeout`이 외부 감시자 역할을 한다.
+> **`ngx.timer.at` + `ngx.exit()` 조합이 동작하지 않는 이유**: `ngx.exit()`는 OpenResty의 요청 처리 phase(rewrite, access, content, preread)에서만 현재 요청을 종료하는 API이다. Timer 콜백은 요청 컨텍스트가 아닌 독립적인 "light thread" 컨텍스트에서 실행되므로, `ngx.exit()`를 호출해도 worker 프로세스 종료가 발생하지 않는다. OpenResty/Nginx에는 worker가 스스로 프로세스를 종료하는 공개 API가 존재하지 않으며, 이는 Nginx master-worker 아키텍처의 설계 의도(master만이 worker 수명을 관리)에 부합한다.
 
 ### Layer 3: Nginx worker_shutdown_timeout + 모니터링 (신규)
 
@@ -237,7 +239,7 @@ Steady-state에서 hang된 detached thread 누적을 감지하기 위해 외부 
 | radix_build Layer 1 timeout (100ms) | `LUAGATE_BUDGET_EXCEEDED(-3)` 반환 |
 | radix_build Layer 2 timeout (1000ms) | `LUAGATE_TIMEOUT(-5)` 반환 |
 | timeout 후 fallback | **old tree(LKG) 유지**: 현재 worker의 module-level upvalue에 저장된 이전 radix tree 포인터를 계속 사용. `_cached_stream_version`을 갱신하지 않으므로 다음 요청에서 rebuild를 재시도한다. |
-| 반복 timeout | 매 요청마다 rebuild를 재시도하되, 실패가 연속되면 per-worker leak 카운터가 증가하여 결국 worker 자발적 종료 → master가 새 worker spawn |
+| 반복 timeout | 매 요청마다 rebuild를 재시도하되, 실패가 연속되면 per-worker leak 카운터가 증가하여 `/health` 503 전환 → 외부 오케스트레이터가 프로세스 재시작 |
 | cold start (LKG 없음) | init 단계에서 radix_build 실패 시 서버 시작 거부 (fail-closed). `worker_shutdown_timeout` 미적용 (init 단계는 graceful shutdown 대상이 아님) |
 
 > **설계 근거**: hot reload 시 rebuild timeout은 일시적 부하(큰 CIDR 목록) 또는 비정상 입력이 원인일 수 있다. Old tree(LKG)를 유지하면 stream 정책 평가는 이전 버전 기준으로 계속 동작하므로 서비스 가용성이 보장된다. 이는 ADR-003의 "commit 실패 시 롤백 불필요 — 기존 active pointer 유지" 원칙과 일관된다.
@@ -259,7 +261,7 @@ Steady-state에서 hang된 detached thread 누적을 감지하기 위해 외부 
 | 계층 | 실패 시 동작 | worker 영향 |
 |------|------------|------------|
 | Layer 1 | `LUAGATE_BUDGET_EXCEEDED(-3)` 반환 → deny | 없음 (정상 반환) |
-| Layer 2 | `LUAGATE_TIMEOUT(-5)` 반환 → deny + per-worker leak 카운터 증가 | thread leak 누적 시 자발적 graceful exit |
+| Layer 2 | `LUAGATE_TIMEOUT(-5)` 반환 → deny + per-worker leak 카운터 증가 | thread leak 누적 시 `/health` 503 전환 → 외부 오케스트레이터가 프로세스 재시작 |
 | Layer 3 | 외부 오케스트레이터가 health check 기반 프로세스 재시작 | worker 교체 |
 
 > **worker 즉시 재시작을 기본으로 하지 않는 이유**: Layer 2 타임아웃은 단일 요청의 비정상 입력이 원인일 가능성이 높다. Worker 전체를 재시작하면 해당 worker가 처리 중인 다른 정상 요청까지 영향받는다. Per-worker thread leak 카운터로 누적 상태를 추적하여, 반복 발생 시에만 worker를 교체한다.
@@ -340,7 +342,7 @@ end
 1. **OpenResty 이벤트 루프 비침해**: Rust 내부 thread이므로 Nginx 시그널/이벤트 루프와 무관하다.
 2. **프로세스 모델 유지**: ADR-001의 "동일 worker 내 동기 호출" 원칙을 유지한다. Worker 프로세스 외부에 새 프로세스를 생성하지 않는다.
 3. **구현 단순성**: `std::thread::spawn` + `mpsc::channel` + `recv_timeout`으로 구현 가능하다.
-4. **강제 종료 불가 한계 인정**: `std::thread`는 강제 종료할 수 없으나, detach + per-worker leak 카운터 + Layer 3(외부 health check)으로 보완한다.
+4. **강제 종료 불가 한계 인정**: `std::thread`는 강제 종료할 수 없으나, detach + per-worker leak 카운터 + `/health` 503 전환 + Layer 3(외부 오케스트레이터 health check)으로 보완한다.
 5. **ABI 안전성**: copy-in/copy-out 전략으로 caller-owned 버퍼와 작업 thread 간 소유권 충돌을 원천 차단한다.
 
 ---
@@ -350,7 +352,7 @@ end
 ### 긍정적 결과
 
 - **무한루프/데드락 방어**: Layer 1이 실패해도 Layer 2가 50ms 이내에 worker 이벤트 루프를 해방시켜 다른 요청 처리를 계속할 수 있다.
-- **worker 안정성**: 단일 비정상 요청이 worker 전체를 중단시키지 않는다. Per-worker thread leak 누적 시에만 worker를 교체한다.
+- **worker 안정성**: 단일 비정상 요청이 worker 전체를 중단시키지 않는다. Per-worker thread leak 카운터로 누적 상태를 추적하고, 임곗값 초과 시 `/health` 503 전환을 통해 외부 오케스트레이터가 프로세스를 재시작한다.
 - **관측 가능성**: 3계층 각각에서 per-worker 메트릭을 수집하므로, 타임아웃 발생 원인(Layer 1 vs Layer 2)과 영향 범위(어느 worker)를 구분하여 진단할 수 있다.
 - **점진적 적용**: 기존 코드(Layer 1)를 유지하면서 Layer 2/3을 추가하는 방식이므로, 기존 동작에 대한 regression 위험이 낮다.
 - **ABI 안전성**: copy-in/copy-out으로 caller-owned 버퍼와 작업 thread 간 use-after-return 위험을 원천 차단한다.
