@@ -269,3 +269,11 @@ COMPLETED_REVIEW: DON-144-code (2026-03-18)
 | 2026-03-18 | DON-173 | Codex 리뷰 피드백 반영 (4건) | `lua/luagate/admin/ratelimit.lua`, `tests/unit/admin/ratelimit_spec.lua`, `tests/unit/admin/router_spec.lua`, `docs/spec/architecture.md`, `docs/spec/admin-api.md` | (1) off-by-one: increment-then-check 패턴, (2) race condition: 원자적 incr 선행, (3) /health 면제 GET 메서드 제한, (4) spec 동기화 (zone + 429 계약) |
 
 COMPLETED_REVIEW: DON-173-code (2026-03-18)
+
+## Phase 2-Dashboard: ui/ 디렉토리 초기 설정 (DON-165)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-165 | ui/ 디렉토리 초기 설정 — Vite + React + TypeScript + Tailwind | `ui/`, `conf/nginx.conf`, `Makefile`, `Dockerfile`, `README.md` | YAML/ETag API 클라이언트, nginx /dashboard 서빙, Dockerfile COPY 추가. Codex code 리뷰 3건 + PR 리뷰 2건 반영. PR #39 |
+
+COMPLETED_REVIEW: DON-165-code (2026-03-18)
