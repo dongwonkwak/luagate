@@ -95,7 +95,7 @@ CI/CD 파이프라인은 다음 순서를 따를 것을 권장한다:
 - 인스턴스 간 정책 일관성은 **eventually consistent**로 정의한다.
 - 배포 과정에서 일시적 버전 불일치는 허용한다.
 - 불일치 허용 시간은 배포 파이프라인의 SLA로 정의하며, LuaGate 자체가 강제하지 않는다.
-- 각 요청 로그에 `policy_version` 필드가 포함되므로 (ADR-004), 불일치 기간 동안 어떤 정책으로 처리되었는지 감사 추적이 가능하다. 여기서 `policy_version`은 해당 요청을 처리한 서브시스템의 active version을 의미한다 (HTTP 요청이면 `active_http_version`, Stream이면 `active_stream_version`).
+- 각 요청 로그에 `active_version` 필드가 포함되므로 (ADR-004), 불일치 기간 동안 어떤 정책으로 처리되었는지 감사 추적이 가능하다. 여기서 `active_version`은 해당 요청을 처리한 서브시스템의 active version 스냅샷을 의미한다 (HTTP 요청이면 HTTP active version, Stream이면 Stream active version).
 
 ### §8.5 롤백 전략
 
@@ -176,7 +176,7 @@ etcd에 정책을 저장하고, 각 인스턴스가 watch로 변경을 감지.
 - **단순성 유지**: LuaGate에 외부 의존성이나 인스턴스 간 통신 로직을 추가하지 않음
 - **장애 격리**: 각 인스턴스가 완전히 독립적으로 동작하므로 장애 전파 없음
 - **운영 친화**: 기존 CI/CD 도구와 자연스럽게 통합
-- **감사 추적**: 요청별 `policy_version` 로그로 불일치 기간 추적 가능
+- **감사 추적**: 요청별 `active_version` 로그로 불일치 기간 추적 가능
 - **YAML canonical source 원칙 유지**: ADR-003과 완전한 정합성
 
 ### 부정적 결과
@@ -208,5 +208,5 @@ etcd에 정책을 저장하고, 각 인스턴스가 watch로 변경을 감지.
 
 - [ADR-001](./ADR-001-execution-shared-state-model.md) — 단일 인스턴스 실행 모델, 수평 확장 전략
 - [ADR-003](./ADR-003-policy-storage-hot-reload.md) — YAML canonical source, Hot Reload 시맨틱스, LKG
-- [ADR-004](./ADR-004-log-metrics-admin-security.md) — 요청 로그 `policy_version` 필드
+- [ADR-004](./ADR-004-log-metrics-admin-security.md) — 요청 로그 `active_version` 필드
 - [spec/architecture.md](../../spec/architecture.md) — §9 수평 확장 전략
