@@ -3,6 +3,7 @@
 > **ADR 참조**:
 >
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — C FFI 통합 방식 및 실패 정책
+> - [ADR-009 FFI 타임아웃 강제](../design/adr/ADR-009-ffi-timeout-enforcement.md) — 3계층 타임아웃 방어, 에러 코드 LUAGATE_TIMEOUT(-5), copy-in/copy-out ABI 안전성
 
 ## 1. 개요
 
@@ -27,8 +28,9 @@ enum luagate_result {
     LUAGATE_NEED_MORE_DATA  =  1,   /* 더 많은 입력 필요 (stream preread) */
     LUAGATE_INVALID_INPUT   = -1,   /* 유효하지 않은 입력 */
     LUAGATE_BUFFER_TOO_SMALL = -2,  /* out_cap 부족 (caller가 더 큰 버퍼로 재시도) */
-    LUAGATE_BUDGET_EXCEEDED = -3,   /* 시간 예산 초과 (> 5ms) */
-    LUAGATE_INTERNAL_ERROR  = -4    /* 내부 오류 */
+    LUAGATE_BUDGET_EXCEEDED = -3,   /* Layer 1 시간 예산 초과 (내부 자발적 종료) */
+    LUAGATE_INTERNAL_ERROR  = -4,   /* 내부 오류 */
+    LUAGATE_TIMEOUT         = -5    /* Layer 2 watchdog 타임아웃 (외부 강제, ADR-009) */
 };
 ```
 
@@ -42,6 +44,7 @@ enum luagate_result {
 | `LUAGATE_BUFFER_TOO_SMALL` | 더 큰 caller-allocated buffer로 재시도 (최대 1회) |
 | `LUAGATE_BUDGET_EXCEEDED` | fail-closed (403 또는 연결 종료) |
 | `LUAGATE_INTERNAL_ERROR` | fail-closed (403 또는 연결 종료) |
+| `LUAGATE_TIMEOUT` | fail-closed (403 또는 연결 종료) + per-worker leak 카운터 증가 ([ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md)) |
 
 ## 3. 메모리 Ownership 원칙
 
@@ -323,12 +326,21 @@ typedef struct {
 > **action 해석 위치**: Lua wrapper가 `rule_index`로 rules 배열을 조회하여 action 결정.
 > Rust radix tree는 action 값을 모른다.
 
-## 7. FFI 통합 원칙 (ADR-001)
+## 7. FFI 통합 원칙 (ADR-001, ADR-009)
 
 1. **동일 worker 내 동기 호출**: IPC 없음. `ffi.load()` 후 직접 함수 호출
 2. **return code 해석**: Lua wrapper가 return code를 확인하여 에러 처리. `pcall`은 Lua-level 예외(잘못된 인수 타입 등)에만 유효하며, native crash(segfault/abort)는 포착할 수 없다 (ADR-001 §1.2 참조)
-3. **실패 처리**: `LUAGATE_BUDGET_EXCEEDED`, `LUAGATE_INTERNAL_ERROR` → fail-closed (403 또는 연결 종료)
-4. **타임아웃**: 스캐너 < 5ms (budget_exceeded threshold). 디코더/파서 < 0.5ms
+3. **실패 처리**: `LUAGATE_BUDGET_EXCEEDED`, `LUAGATE_INTERNAL_ERROR`, `LUAGATE_TIMEOUT` → fail-closed (403 또는 연결 종료)
+4. **3계층 타임아웃 방어** ([ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md)):
+
+| 모듈 | Layer 1 budget (내부) | Layer 2 hard timeout (watchdog) |
+|------|----------------------|-------------------------------|
+| `luagate_scanner.so` | 5ms | 50ms |
+| `luagate_decoder.so` | 2ms | 20ms |
+| `luagate_stream.so` (detect/sni) | 1ms | 10ms |
+| `luagate_stream.so` (radix_build) | 100ms | 1000ms |
+
+> Layer 2 watchdog는 copy-in/copy-out 전략으로 caller-owned 버퍼의 ABI 안전성을 보장한다. 상세: ADR-009.
 
 ## 8. Rust 빌드 설정
 
@@ -490,3 +502,4 @@ fuzz-regression:
 - [spec/http-pipeline.md](./http-pipeline.md) — FFI 호출 컨텍스트
 - [spec/stream-pipeline.md](./stream-pipeline.md) — detect_protocol, radix tree lifecycle
 - [ADR-001](../design/adr/ADR-001-execution-shared-state-model.md) — FFI 모델 결정
+- [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) — FFI 타임아웃 강제 메커니즘

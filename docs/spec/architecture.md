@@ -1,6 +1,8 @@
 # Architecture Specification
 
-> **ADR 참조**: [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
+> **ADR 참조**:
+> - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
+> - [ADR-009 FFI 타임아웃 강제](../design/adr/ADR-009-ffi-timeout-enforcement.md) — 3계층 타임아웃 방어
 
 ## 1. 개요
 
@@ -69,7 +71,7 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 > **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):
 > 새 정책을 `policy:<new_version>:blob`에 먼저 기록한 뒤, `http:active_version` / `stream:active_version` 포인터를 교체한다.
 > 이렇게 하면 pointer 교체 이전까지 기존 worker는 old version을 계속 사용하며 무중단이 보장된다.
-
+>
 > **메트릭 키 스키마 상세**: [ADR-006 §3.2](../design/adr/ADR-006-metrics-cardinality-export-model.md#32-전체-키-스키마-luagate_metrics-zone) 참조.
 
 ### 3.3 `luagate_policy` Versioned Keyspace 구조
@@ -197,6 +199,8 @@ Client TCP Connect
 | rate limit counter eviction | fail-open | shared_dict 용량 초과 시 |
 | logging 실패 | fail-closed (감사 로그) | ADR-004: 감사 로그 드롭 금지 |
 | FFI .so 로드 실패 | fail-closed | 기동 거부 |
+| FFI Layer 1 budget 초과 | **fail-closed** | `LUAGATE_BUDGET_EXCEEDED(-3)` → deny (ADR-009) |
+| FFI Layer 2 watchdog timeout | **fail-closed** | `LUAGATE_TIMEOUT(-5)` → deny + per-worker leak 카운터 (ADR-009) |
 | native crash (worker) | process failure | nginx master가 재기동 |
 
 ## 6. 기술 스택
@@ -286,9 +290,10 @@ Internet
 - **ADR-002**: 정책 평가 규칙 → `lua/luagate/policy/evaluator.lua`
 - **ADR-003**: Hot Reload 시맨틱스 → `lua/luagate/policy/loader.lua`
 - **ADR-004**: 로그/메트릭 스키마, Admin 보안 → `lua/luagate/log/`, `lua/luagate/admin/`
+- **ADR-009**: FFI 타임아웃 강제 메커니즘 → 3계층 방어(budget guard + watchdog + health check)
 
 <!-- ADR 필요 -->
 > **TODO**: 멀티 인스턴스 정책 동기화(실시간) 구현 시 ADR 필요
-
-<!-- ADR 필요 -->
-> **TODO**: `.so` 함수 타임아웃 강제 메커니즘 구현 시 ADR 필요
+>
+> **해결됨**: `.so` 함수 타임아웃 강제 메커니즘 → [ADR-009 FFI 타임아웃 강제](../design/adr/ADR-009-ffi-timeout-enforcement.md)
+> 3계층 방어 전략(Layer 1 budget guard + Layer 2 watchdog thread + Layer 3 외부 health check)으로 FFI hang 방어 확정.

@@ -259,3 +259,11 @@ COMPLETED_REVIEW: DON-147-code (2026-03-18)
 | 2026-03-18 | DON-144 | Stream 파이프라인 통합 — 18필드 JSON 로그 + 메트릭 수집 | `lua/luagate/log/stream.lua`, `lua/luagate/log/stream_metrics.lua`, `conf/nginx.conf`, `tests/unit/log/stream_spec.lua`, `tests/unit/log/stream_metrics_spec.lua` | 662 tests 통과. Codex 1건 수정 (pcall 클로저 래핑), 4건 비범위 |
 
 COMPLETED_REVIEW: DON-144-code (2026-03-18)
+
+## Phase 0-A: ADR-009 FFI 타임아웃 강제 메커니즘 (DON-156)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-156 | ADR-009: FFI .so 타임아웃 강제 메커니즘 | `docs/design/adr/ADR-009-ffi-timeout-enforcement.md` | 설계 리뷰 대기 |
+
+PENDING_REVIEW: DON-156-design (2026-03-18)
