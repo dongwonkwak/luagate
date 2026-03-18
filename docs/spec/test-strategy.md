@@ -147,23 +147,46 @@ make test-unit-rust
 Lua↔Rust FFI 계약 검증 (ABI/메모리/에러 전파):
 
 ```lua
--- tests/unit/scanner/ffi_test.lua
+-- tests/unit/scanner/ffi_spec.lua
 describe("FFI contract", function()
-    it("returns non-NULL result for valid input", function()
-        local result = ffi_scanner.scan_http("/path", "body", "ua")
-        assert.is_not_nil(result)
+    it("maps caller-allocated scanner output into Lua values", function()
+        local scanner = load_module_with({
+            threat_type = "sqli",
+            rule_name = "sqli_union_select",
+        })
+        local result, err = scanner.scan({
+            path_raw = "/search",
+            path_normalized = "/search",
+            query_raw = "id=1 UNION SELECT",
+            query_normalized = "id=1 UNION SELECT",
+        })
+
+        assert.is_nil(err)
+        assert.equals("sqli", result.threat_type)
+        assert.equals("sqli_union_select", result.rule_name)
     end)
 
-    it("frees result without error", function()
-        local result = ffi_scanner.scan_http("/path", "", "")
-        -- free 호출 후 dangling pointer 없음 검증
-        ffi_scanner.free_result(result)
+    it("defaults optional fields and NULL body safely", function()
+        local scanner = load_module_with()
+        local result, err = scanner.scan({
+            path_raw = "/health",
+            path_normalized = "/health",
+        })
+
+        assert.is_nil(err)
+        assert.is_nil(result.threat_type)
+        assert.is_nil(result.rule_name)
     end)
 
-    it("handles NULL body gracefully (fail-closed)", function()
-        local result = ffi_scanner.scan_http("/path", nil, "ua")
-        -- fail-closed: NULL input은 deny 결과
-        assert.equals("deny", result.action)
+    it("propagates hard FFI errors as fail-closed tokens", function()
+        local scanner = load_module_with({ scan_rc = -3 })
+        local result, err = scanner.scan({
+            path_raw = "/search",
+            path_normalized = "/search",
+        })
+
+        assert.is_nil(result)
+        assert.truthy(err and err:find("scanner_fail"))
     end)
 end)
 ```

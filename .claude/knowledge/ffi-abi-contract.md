@@ -145,7 +145,8 @@ int luagate_extract_sni(
 | 반환값 | 의미 | Lua 처리 |
 |--------|------|---------|
 | `0` | 성공 | out 버퍼 사용 |
-| `-1` | NEED_MORE_DATA | 재시도 (preread 재수집) |
+| `1` | NEED_MORE_DATA | 재시도 (preread 재수집) |
+| `-1` | INVALID_INPUT | fail-closed (malformed TLS/non-TLS) |
 | `-2` | BUFFER_TOO_SMALL | fail-closed |
 | `-4` | INTERNAL_ERROR | fail-closed |
 

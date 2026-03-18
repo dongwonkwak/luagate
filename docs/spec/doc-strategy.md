@@ -225,8 +225,6 @@ PR에서 다음을 확인한다:
 | 위치 | 기능 | 우선순위 |
 |------|------|----------|
 | `architecture.md` | 멀티 인스턴스 정책 동기화 | Low |
-| `architecture.md` | FFI 타임아웃 강제 메커니즘 | Medium |
-| `http-pipeline.md` | FFI 타임아웃 강제 메커니즘 | Medium |
 | `security-scanner.md` | threat_score 기반 자동 차단 scope | Medium |
 | `security-scanner.md` | 패턴 핫 업데이트 | Low |
 | `stream-pipeline.md` | TLS 터미네이션 지원 | Low |
