@@ -24,6 +24,9 @@ frontend/.vite/
 ui/node_modules/
 ui/dist/
 ui/.vite/
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
 
 # Nix
 .direnv/

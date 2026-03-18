@@ -285,3 +285,9 @@ COMPLETED_REVIEW: DON-165-code (2026-03-18)
 | 2026-03-18 | DON-154 | ADR-008: 멀티 인스턴스 정책 동기화 모델 설계 | `docs/design/adr/ADR-008-multi-instance-policy-sync.md` | CI/CD 주도 배포 유지 + 가드레일 (버전 헬스체크, PUT split-brain 방지). Codex design 리뷰 3건 + PR 리뷰 2건 반영. PR #38 |
 
 COMPLETED_REVIEW: DON-154-design (2026-03-18)
+
+## Phase 2-Dashboard: CI 정합성 확보 (DON-198)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-198 | CI 정합성 확보: npm + e2e/ 위치 + base URL 정리 | `e2e/package.json`, `e2e/playwright.config.ts`, `docs/spec/test-strategy.md`, `Makefile`, `.gitignore` | e2e/ scaffold, test-strategy §9 E2E 추가, make e2e 타겟. Codex 리뷰 불필요 (문서+scaffold) |
