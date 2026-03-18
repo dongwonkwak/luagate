@@ -81,7 +81,7 @@ lint:
 	@for crate_dir in src/decoder src/scanner src/stream; do \
 	  if [ -f "$$crate_dir/Cargo.toml" ]; then \
 	    echo "  -> $$crate_dir"; \
-	    (cd "$$crate_dir" && cargo clippy --deny warnings) || exit 1; \
+	    (cd "$$crate_dir" && cargo clippy -- -D warnings) || exit 1; \
 	  fi; \
 	done
 	@echo "==> Markdown lint..."
