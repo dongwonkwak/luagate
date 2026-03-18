@@ -484,7 +484,10 @@ describe("router.dispatch", function()
       _G.ngx = make_ngx({
         var = { uri = "/metrics" },
         shared = {
-          luagate_policy = make_shared_dict({ ["http:active_version"] = "v1" }),
+          luagate_policy = make_shared_dict({
+            ["http:active_version"] = "v1",
+            ["stream:active_version"] = "v1",
+          }),
           luagate_state = make_shared_dict(),
           luagate_metrics = make_shared_dict(metrics_data or {}),
           luagate_stream_metrics = make_shared_dict(stream_data or {}),
@@ -663,6 +666,30 @@ describe("router.dispatch", function()
       assert.truthy(output:find("luagate_policy_loaded 1"), "정책 로드 상태에서 값이 1이어야 한다")
       -- ADR-006: version hash 라벨이 없어야 한다
       assert.is_nil(output:find("luagate_policy_version_info"), "version_info 메트릭은 없어야 한다 (ADR-006)")
+    end)
+
+    it("policy loaded gauge는 stream active_version이 없으면 0", function()
+      _G.ngx = make_ngx({
+        var = { uri = "/metrics" },
+        shared = {
+          luagate_policy = make_shared_dict({ ["http:active_version"] = "v1" }),
+          luagate_state = make_shared_dict(),
+          luagate_metrics = make_shared_dict(),
+          luagate_stream_metrics = make_shared_dict(),
+          luagate_connections = make_shared_dict(),
+          luagate_admin_ratelimit = make_shared_dict(),
+        },
+      })
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+      router = load_router(make_auth_pass())
+
+      router.dispatch()
+
+      local printed = _G.ngx._get_printed()
+      output = table.concat(printed, "")
+      assert.truthy(output:find("luagate_policy_loaded 0"), "stream version이 없으면 값이 0이어야 한다")
     end)
 
     it("upstream error counter 포함", function()

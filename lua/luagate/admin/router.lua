@@ -283,7 +283,8 @@ local function handle_metrics()
   local policy_dict = ngx.shared.luagate_policy
   if policy_dict then
     local http_ver = policy_dict:get("http:active_version")
-    local loaded = (http_ver and http_ver ~= "none") and 1 or 0
+    local stream_ver = policy_dict:get("stream:active_version")
+    local loaded = (http_ver and http_ver ~= "none" and stream_ver and stream_ver ~= "none") and 1 or 0
     prom_line(buf, "luagate_policy_loaded", "", loaded)
   else
     prom_line(buf, "luagate_policy_loaded", "", 0)
