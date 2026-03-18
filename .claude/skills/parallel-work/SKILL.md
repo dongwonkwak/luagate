@@ -41,12 +41,13 @@ trigger: "parallel-work | 병렬 작업 | 동시 작업 | worktree | 여러 이�
 
 ```bash
 # -b 플래그로 새 브랜치를 생성하면서 worktree 추가
-git worktree add -b <branch-name-1> ../luagate-don-xxx main
-git worktree add -b <branch-name-2> ../luagate-don-yyy main
+git worktree add -b <branch-name-1> ../luagate-don-xxx <integration-base>
+git worktree add -b <branch-name-2> ../luagate-don-yyy <integration-base>
 ```
 
 > `git worktree add <path> <branch>`는 기존 브랜치만 가능.
 > 새 이슈 브랜치는 반드시 `-b` 플래그를 사용한다.
+> `<integration-base>`는 현재 작업을 머지할 대상 브랜치의 최신 head를 사용한다 (예: 활성 epic 브랜치).
 
 ### 4. 각 worktree에서 implement-issue 실행
 
