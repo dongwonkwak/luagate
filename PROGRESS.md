@@ -328,3 +328,5 @@ COMPLETED_REVIEW: DON-197-code (2026-03-18)
 | 2026-03-18 | DON-155 | 멀티 인스턴스 정책 동기화 구현 (ADR-008 기반) | `lua/luagate/admin/router.lua`, `lua/luagate/policy/loader.lua`, `tests/unit/admin/router_spec.lua`, `docs/spec/admin-api.md`, `docs/spec/log-schema.md` | /health 버전 필드 + /metrics 정책 버전 gauge + policy_loaded_at 저장. 690 tests 통과. Codex 리뷰 대기 |
 
 COMPLETED_REVIEW: DON-197-code (2026-03-18)
+
+COMPLETED_REVIEW: DON-155-code (2026-03-18)
