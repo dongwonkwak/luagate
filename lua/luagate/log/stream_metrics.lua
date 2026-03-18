@@ -1,0 +1,67 @@
+--- Stream metrics collector for LuaGate.
+-- Updates counters in luagate_stream_metrics shared dict during log phase.
+--
+-- Metric keys (ADR-006 §key mapping):
+--   stream:metrics:connections_total          — all connections
+--   stream:metrics:connections_denied_total   — denied connections
+--   stream:metrics:bytes_sent_total           — proxy connections only
+--   stream:metrics:bytes_received_total       — proxy connections only
+--   stream:metrics:protocol_detected_total:<proto> — per-protocol
+--
+-- Implementation: lua/luagate/log/stream_metrics.lua
+-- Tests: tests/unit/log/stream_metrics_spec.lua
+
+local _M = {}
+local ALLOWED_PROTOCOLS = {
+  tls = true,
+  http = true,
+  raw = true,
+}
+
+local function safe_incr(dict, key, delta)
+  local d = delta or 1
+  local _, err = dict:incr(key, d, 0)
+  if err then
+    ngx.log(ngx.WARN, "[luagate] stream metrics incr failed for key=", key, ": ", tostring(err))
+  end
+end
+
+--- Collect stream metrics from the current session context.
+-- Called from log_by_lua (via pcall in nginx.conf stream block).
+function _M.collect()
+  local dict = ngx.shared.luagate_stream_metrics
+  if not dict then
+    return
+  end
+
+  local ctx = ngx.ctx.luagate_stream or {}
+
+  -- 1. Total connections counter (all connections)
+  safe_incr(dict, "stream:metrics:connections_total")
+
+  -- 2. Denied connections counter
+  local action = ctx.action or ngx.var.luagate_stream_action or "deny"
+  if action == "deny" then
+    safe_incr(dict, "stream:metrics:connections_denied_total")
+  end
+
+  -- 3. Bytes counters (proxy connections only)
+  if action == "proxy" then
+    local bytes_sent = tonumber(ngx.var.bytes_sent) or 0
+    if bytes_sent > 0 then
+      safe_incr(dict, "stream:metrics:bytes_sent_total", bytes_sent)
+    end
+
+    local bytes_received = tonumber(ngx.var.upstream_bytes_received) or 0
+    if bytes_received > 0 then
+      safe_incr(dict, "stream:metrics:bytes_received_total", bytes_received)
+    end
+  end
+
+  -- 4. Protocol detection counter
+  local protocol = ctx.detected_protocol or ngx.var.luagate_protocol or "raw"
+  protocol = ALLOWED_PROTOCOLS[protocol] and protocol or "raw"
+  safe_incr(dict, "stream:metrics:protocol_detected_total:" .. protocol)
+end
+
+return _M
