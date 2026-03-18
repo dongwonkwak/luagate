@@ -264,6 +264,9 @@ local function make_ngx(overrides)
       get_body_data = function()
         return nil
       end,
+      get_body_file = function()
+        return nil
+      end,
     },
   }
 
@@ -560,6 +563,46 @@ describe("PUT /api/v1/policies", function()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
     assert.are.equal("payload_too_large", body.error)
+  end)
+
+  it("accepts request bodies buffered to a temp file", function()
+    _file_registry["/tmp/client-body-buffered.yaml"] = yaml_body
+    _G.ngx.req.get_body_data = function()
+      return nil
+    end
+    _G.ngx.req.get_body_file = function()
+      return "/tmp/client-body-buffered.yaml"
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("committed", body.http_result)
+    assert.are.equal("committed", body.stream_result)
+  end)
+
+  it("returns 413 when a buffered temp file exceeds 1MB", function()
+    _file_registry["/tmp/client-body-too-large.yaml"] = string.rep("a", 1048577)
+    _G.ngx.req.get_body_data = function()
+      return nil
+    end
+    _G.ngx.req.get_body_file = function()
+      return "/tmp/client-body-too-large.yaml"
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(413, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("payload_too_large", body.error)
+    assert.are.equal("request", body.stage)
   end)
 
   it("returns 422 when parse fails", function()

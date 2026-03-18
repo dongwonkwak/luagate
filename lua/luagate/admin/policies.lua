@@ -142,6 +142,40 @@ local function make_tmp_path()
   return POLICY_FILE .. ".tmp." .. tostring(worker_id) .. "." .. tostring(ngx.now())
 end
 
+--- Read request body from memory or Nginx temp file.
+-- OpenResty returns nil from get_body_data() when the body was buffered to disk.
+-- @return string|nil body
+-- @return number|nil status
+-- @return string|nil code
+-- @return string|nil stage
+-- @return string|nil message
+local function read_request_body()
+  ngx.req.read_body()
+
+  local body = ngx.req.get_body_data()
+  if body then
+    return body, nil, nil, nil, nil
+  end
+
+  local body_file = ngx.req.get_body_file and ngx.req.get_body_file()
+  if not body_file then
+    return nil, 413, "payload_too_large", "request", "body missing or exceeds buffer limit"
+  end
+
+  local f, err = io.open(body_file, "r")
+  if not f then
+    return nil, 500, "internal_error", "internal", "cannot open buffered request body: " .. tostring(err)
+  end
+
+  body = f:read("*all")
+  f:close()
+  if body == nil then
+    return nil, 500, "internal_error", "internal", "failed to read buffered request body"
+  end
+
+  return body, nil, nil, nil, nil
+end
+
 --- Validate PUT If-Match against the current source_version.
 -- @param if_match string
 -- @return string|nil current_source
@@ -209,10 +243,9 @@ function _M.handle_put_policies()
   end
 
   -- [0] Read request body
-  ngx.req.read_body()
-  local body = ngx.req.get_body_data()
+  local body, body_status, body_code, body_stage, body_message = read_request_body()
   if not body then
-    send_error(413, "payload_too_large", "request", "body missing or exceeds buffer limit")
+    send_error(body_status, body_code, body_stage, body_message)
     return
   end
   if #body > MAX_BODY_SIZE then
