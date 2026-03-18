@@ -56,6 +56,7 @@ local function make_ngx(overrides)
   local exited_with = nil
   local logged = {}
   local said = {}
+  local current_method = "GET" -- default method
 
   local mock = {
     var = {
@@ -79,6 +80,11 @@ local function make_ngx(overrides)
     worker = {
       id = function()
         return 0
+      end,
+    },
+    req = {
+      get_method = function()
+        return current_method
       end,
     },
     log = function(level, ...)
@@ -107,6 +113,9 @@ local function make_ngx(overrides)
   end
   mock._get_said = function()
     return said
+  end
+  mock._set_method = function(m)
+    current_method = m
   end
   mock._reset_tracking = function()
     exited_with = nil
@@ -168,13 +177,47 @@ describe("ratelimit.check", function()
   end)
 
   describe("/health exemption", function()
-    it("/health 요청은 rate limit 미적용", function()
+    it("GET /health 요청은 rate limit 미적용", function()
       _G.ngx.var.uri = "/health"
+      _G.ngx._set_method("GET")
 
       local result = ratelimit.check()
 
       assert.is_true(result)
       assert.is_nil(_G.ngx._get_exited())
+    end)
+
+    it("POST /health 요청은 rate limit 적용 (GET만 면제)", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx._set_method("POST")
+
+      -- Pre-populate to exceed limit so we can verify rate limit kicks in
+      local now = _G.ngx.now()
+      local current_slot = math.floor(now / 60)
+      local key = "rl:127.0.0.1:" .. tostring(current_slot)
+      _G.ngx.shared.luagate_admin_ratelimit._data[key] = 30
+
+      ratelimit = load_ratelimit()
+      local result = ratelimit.check()
+
+      assert.is_false(result)
+      assert.are.equal(429, _G.ngx.status)
+    end)
+
+    it("DELETE /health 요청은 rate limit 적용 (GET만 면제)", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx._set_method("DELETE")
+
+      local now = _G.ngx.now()
+      local current_slot = math.floor(now / 60)
+      local key = "rl:127.0.0.1:" .. tostring(current_slot)
+      _G.ngx.shared.luagate_admin_ratelimit._data[key] = 30
+
+      ratelimit = load_ratelimit()
+      local result = ratelimit.check()
+
+      assert.is_false(result)
+      assert.are.equal(429, _G.ngx.status)
     end)
   end)
 
@@ -199,7 +242,23 @@ describe("ratelimit.check", function()
       assert.is_nil(_G.ngx._get_exited())
     end)
 
-    it("29번째 요청도 허용된다 (limit=30)", function()
+    it("30번째 요청도 허용된다 (limit=30, incr-then-check: 30 > 30 = false)", function()
+      -- Pre-populate current window with 29 requests
+      -- After incr: new_val = 30, weighted = 30, 30 > 30 = false -> allow
+      local now = _G.ngx.now()
+      local current_slot = math.floor(now / 60)
+      local key = "rl:127.0.0.1:" .. tostring(current_slot)
+      _G.ngx.shared.luagate_admin_ratelimit._data[key] = 29
+
+      ratelimit = load_ratelimit()
+      local result = ratelimit.check()
+
+      assert.is_true(result)
+      -- Counter should be incremented to 30
+      assert.are.equal(30, _G.ngx.shared.luagate_admin_ratelimit._data[key])
+    end)
+
+    it("29번째 요청도 허용된다", function()
       -- Pre-populate current window with 28 requests
       local now = _G.ngx.now()
       local current_slot = math.floor(now / 60)
@@ -216,8 +275,9 @@ describe("ratelimit.check", function()
   end)
 
   describe("rate limit exceeded", function()
-    it("30번째 요청에서 429 반환", function()
-      -- Pre-populate: 30 requests in current window (weighted >= 30)
+    it("31번째 요청에서 429 반환 (incr-then-check: 30+1=31 > 30)", function()
+      -- Pre-populate: 30 requests in current window
+      -- After incr: new_val = 31, 31 > 30 -> deny
       local now = _G.ngx.now()
       local current_slot = math.floor(now / 60)
       local key = "rl:127.0.0.1:" .. tostring(current_slot)
@@ -229,6 +289,26 @@ describe("ratelimit.check", function()
       assert.is_false(result)
       assert.are.equal(429, _G.ngx.status)
       assert.are.equal(429, _G.ngx._get_exited())
+    end)
+
+    it("off-by-one 경계: 정확히 30개일 때 허용, 31개일 때 거부", function()
+      local now = _G.ngx.now()
+      local current_slot = math.floor(now / 60)
+      local key = "rl:127.0.0.1:" .. tostring(current_slot)
+
+      -- 29 pre-populated -> incr to 30, 30 > 30 = false -> allow
+      _G.ngx.shared.luagate_admin_ratelimit._data[key] = 29
+      ratelimit = load_ratelimit()
+      local result1 = ratelimit.check()
+      assert.is_true(result1, "30th request (weighted=30) should be allowed")
+      assert.are.equal(30, _G.ngx.shared.luagate_admin_ratelimit._data[key])
+
+      -- Now counter is 30 -> incr to 31, 31 > 30 = true -> deny
+      _G.ngx._reset_tracking()
+      ratelimit = load_ratelimit()
+      local result2 = ratelimit.check()
+      assert.is_false(result2, "31st request (weighted=31) should be denied")
+      assert.are.equal(429, _G.ngx.status)
     end)
 
     it("429 응답에 Retry-After 헤더 포함", function()
@@ -264,12 +344,14 @@ describe("ratelimit.check", function()
   end)
 
   describe("sliding window calculation", function()
-    it("이전 window 카운터도 가중치 반영", function()
+    it("이전 window 카운터도 가중치 반영 (incr-then-check)", function()
       -- now = 1700000100.5
       -- current_slot = floor(1700000100.5 / 60) = 28333335
       -- window_start = 28333335 * 60 = 1700000100
       -- elapsed = 0.5s, elapsed_fraction = 0.5/60 = 0.00833...
-      -- weighted = prev * (1 - 0.00833) + curr = prev * 0.99167 + curr
+      -- After incr: curr becomes 10+1=11
+      -- weighted = prev * (1 - 0.00833) + new_curr = 20 * 0.99167 + 11 = 30.83 > 30 -> deny
+      -- So we use lower counts to test allow case
       local now = _G.ngx.now()
       local current_slot = math.floor(now / 60)
       local previous_slot = current_slot - 1
@@ -277,10 +359,11 @@ describe("ratelimit.check", function()
       local curr_key = "rl:127.0.0.1:" .. tostring(current_slot)
       local prev_key = "rl:127.0.0.1:" .. tostring(previous_slot)
 
-      -- 20 in previous window + 10 in current
+      -- 20 in previous window + 9 in current
+      -- After incr: new_val = 10
       -- weighted ~= 20 * 0.99167 + 10 = 29.83 < 30 -> allow
       _G.ngx.shared.luagate_admin_ratelimit._data[prev_key] = 20
-      _G.ngx.shared.luagate_admin_ratelimit._data[curr_key] = 10
+      _G.ngx.shared.luagate_admin_ratelimit._data[curr_key] = 9
 
       ratelimit = load_ratelimit()
       local result = ratelimit.check()
@@ -288,7 +371,7 @@ describe("ratelimit.check", function()
       assert.is_true(result, "weighted count ~29.83 should be under limit 30")
     end)
 
-    it("이전 window 높은 카운터 + 현재 window로 초과", function()
+    it("이전 window 높은 카운터 + 현재 window로 초과 (incr-then-check)", function()
       local now = _G.ngx.now()
       local current_slot = math.floor(now / 60)
       local previous_slot = current_slot - 1
@@ -296,10 +379,11 @@ describe("ratelimit.check", function()
       local curr_key = "rl:127.0.0.1:" .. tostring(current_slot)
       local prev_key = "rl:127.0.0.1:" .. tostring(previous_slot)
 
-      -- 25 in previous + 6 in current
-      -- weighted ~= 25 * 0.99167 + 6 = 30.79 >= 30 -> deny
+      -- 25 in previous + 5 in current
+      -- After incr: new_val = 6
+      -- weighted ~= 25 * 0.99167 + 6 = 30.79 > 30 -> deny
       _G.ngx.shared.luagate_admin_ratelimit._data[prev_key] = 25
-      _G.ngx.shared.luagate_admin_ratelimit._data[curr_key] = 6
+      _G.ngx.shared.luagate_admin_ratelimit._data[curr_key] = 5
 
       ratelimit = load_ratelimit()
       local result = ratelimit.check()

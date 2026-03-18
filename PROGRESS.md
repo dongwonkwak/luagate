@@ -266,4 +266,6 @@ COMPLETED_REVIEW: DON-144-code (2026-03-18)
 |------|------|------|--------|------|
 | 2026-03-18 | DON-173 | Admin API rate limiting (sliding window) | `lua/luagate/admin/ratelimit.lua`, `lua/luagate/admin/router.lua`, `conf/nginx.conf`, `.claude/knowledge/zone-registry.md`, `docs/spec/admin-api.md`, `docs/spec/architecture.md`, `tests/unit/admin/ratelimit_spec.lua`, `tests/unit/admin/router_spec.lua`, `CLAUDE.md` | Codex code 리뷰 완료 (1차 4건 + 재리뷰 1건 해결). PR #37 |
 
+| 2026-03-18 | DON-173 | Codex 리뷰 피드백 반영 (4건) | `lua/luagate/admin/ratelimit.lua`, `tests/unit/admin/ratelimit_spec.lua`, `tests/unit/admin/router_spec.lua`, `docs/spec/architecture.md`, `docs/spec/admin-api.md` | (1) off-by-one: increment-then-check 패턴, (2) race condition: 원자적 incr 선행, (3) /health 면제 GET 메서드 제한, (4) spec 동기화 (zone + 429 계약) |
+
 COMPLETED_REVIEW: DON-173-code (2026-03-18)

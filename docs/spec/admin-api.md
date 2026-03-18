@@ -45,6 +45,27 @@ Content-Type: application/json
 
 인증 실패 시 감사 로그 기록 (ADR-004 §6.3).
 
+## 2.1 Rate Limiting
+
+모든 요청에 IP 기반 sliding window rate limit 적용 (`GET /health` 제외 -- 메서드+경로 모두 일치해야 면제):
+
+- **Zone**: `luagate_admin_ratelimit` (shared dict)
+- **알고리즘**: Sliding window counter (increment-then-check)
+- **제한**: 30 requests / 60s window / IP
+- **면제**: `GET /health`만 (POST /health 등 다른 메서드는 rate limit 적용)
+- **초과 응답**: `429 Too Many Requests` + `Retry-After` 헤더 (초 단위, 현재 window 만료까지 남은 시간)
+
+```json
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+Retry-After: 42
+
+{"error":"rate_limited","message":"Too many requests. Try again later."}
+```
+
+- **fail-closed**: shared dict 사용 불가 또는 incr 실패 시 `503 Service Unavailable` 반환
+- **Worker 간 원자성**: `ngx.shared.DICT:incr()`의 원자적 증분을 먼저 수행한 뒤 결과값으로 판단 (increment-then-check 패턴)
+
 ## 3. 에러 응답 Contract
 
 모든 에러 응답의 JSON body shape:
@@ -68,6 +89,7 @@ Content-Type: application/json
 | `version_mismatch` | `reload` | 409 |
 | `reload_in_progress` | `reload` | 409 |
 | `audit_write_failed` | `audit` | 500 |
+| `rate_limited` | n/a (rate limit 계층) | 429 |
 | `not_found` | `routing` | 404 |
 | `method_not_allowed` | `routing` | 405 |
 | `payload_too_large` | `request` | 413 |

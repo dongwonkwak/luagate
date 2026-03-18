@@ -6,7 +6,7 @@
 --   - shared dict zone: `luagate_admin_ratelimit` (luagate_ prefix required)
 --   - Sliding window: 60s window, max 30 requests per IP
 --   - Exceeded -> 429 Too Many Requests + Retry-After header
---   - /health endpoint is exempt (health check probes)
+--   - GET /health endpoint is exempt (health check probes, method+path check)
 --   - fail-closed: if shared dict unavailable, deny request
 --   - No blocking I/O
 --   - ngx.ctx MUST NOT store rate limit state
@@ -54,17 +54,19 @@ end
 
 --- Check rate limit for the current request.
 -- Must be called early in the admin request pipeline (before auth).
--- Uses a sliding window counter approach:
+-- Uses a sliding window counter approach with increment-then-check:
 --   - Current window slot: floor(now / WINDOW_SIZE)
 --   - Previous window slot: current - 1
---   - Weighted count: prev_count * (1 - elapsed_fraction) + curr_count
---   - If weighted count >= MAX_REQUESTS -> 429
+--   - Atomically increment current counter first (race-safe)
+--   - Weighted count: prev_count * (1 - elapsed_fraction) + new_curr_count
+--   - If weighted count > MAX_REQUESTS -> 429
 --
 -- @return boolean  true if request is allowed, false if rejected (response sent)
 function _M.check()
-  -- /health is exempt from rate limiting
+  -- Only GET /health is exempt from rate limiting (method + path check)
   local uri = ngx.var.uri
-  if uri == HEALTH_PATH then
+  local method = ngx.req and ngx.req.get_method and ngx.req.get_method()
+  if uri == HEALTH_PATH and method == "GET" then
     return true
   end
 
@@ -93,8 +95,30 @@ function _M.check()
   local current_key = make_key(ngx.var.remote_addr, current_slot)
   local previous_key = make_key(ngx.var.remote_addr, previous_slot)
 
-  -- Read counters
-  local current_count = tonumber(dict:get(current_key)) or 0
+  -- Increment-then-check: atomically increment first to avoid worker race condition.
+  -- ngx.shared.DICT:incr() is atomic, so concurrent workers cannot all observe
+  -- the same pre-increment snapshot.
+  -- TTL = 2 * WINDOW_SIZE to keep the previous window available
+  local new_val, err = dict:incr(current_key, 1, 0, WINDOW_SIZE * 2)
+  if not new_val then
+    -- fail-closed on counter update failure
+    ngx.log(
+      ngx.ERR,
+      "[luagate:ratelimit] incr failed: ",
+      tostring(err),
+      " ip=",
+      ngx.var.remote_addr,
+      " worker_id=",
+      (ngx.worker and ngx.worker.id()) or 0
+    )
+    ngx.status = 503
+    ngx.header["Content-Type"] = "application/json"
+    ngx.say('{"error":"service_unavailable","message":"Rate limiter error"}')
+    ngx.exit(503)
+    return false
+  end
+
+  -- Read previous window counter (read-only, no race concern)
   local previous_count = tonumber(dict:get(previous_key)) or 0
 
   -- Calculate elapsed fraction within the current window
@@ -102,10 +126,10 @@ function _M.check()
   local elapsed = now - window_start
   local elapsed_fraction = elapsed / WINDOW_SIZE
 
-  -- Sliding window weighted count
-  local weighted_count = previous_count * (1 - elapsed_fraction) + current_count
+  -- Sliding window weighted count (uses post-increment new_val)
+  local weighted_count = previous_count * (1 - elapsed_fraction) + new_val
 
-  if weighted_count >= MAX_REQUESTS then
+  if weighted_count > MAX_REQUESTS then
     -- Calculate retry-after: time until current window expires
     local retry_after = math.ceil(WINDOW_SIZE - elapsed)
     if retry_after < 1 then
@@ -126,27 +150,6 @@ function _M.check()
     )
 
     reject_rate_limited(retry_after)
-    return false
-  end
-
-  -- Increment current window counter
-  -- TTL = 2 * WINDOW_SIZE to keep the previous window available
-  local new_val, err = dict:incr(current_key, 1, 0, WINDOW_SIZE * 2)
-  if not new_val then
-    -- fail-closed on counter update failure
-    ngx.log(
-      ngx.ERR,
-      "[luagate:ratelimit] incr failed: ",
-      tostring(err),
-      " ip=",
-      ngx.var.remote_addr,
-      " worker_id=",
-      (ngx.worker and ngx.worker.id()) or 0
-    )
-    ngx.status = 503
-    ngx.header["Content-Type"] = "application/json"
-    ngx.say('{"error":"service_unavailable","message":"Rate limiter error"}')
-    ngx.exit(503)
     return false
   end
 
