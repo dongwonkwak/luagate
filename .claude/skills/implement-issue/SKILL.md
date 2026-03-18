@@ -1,7 +1,7 @@
 ---
 name: implement-issue
 description: "이슈 전체 워크플로우. 이슈 번호 → 에이전트 순차 호출 → 리뷰 대기 → 완료 처리."
-trigger: "implement-issue | 이슈 구현 | DON-\\d+ 진행 | make implement"
+trigger: "implement-issue | 이슈 구현 | DON-\\d+ 진행 | DON-\\d+ 구현 | DON-\\d+ 해줘 | DON-\\d+ 작업 | make implement"
 ---
 
 # implement-issue Skill

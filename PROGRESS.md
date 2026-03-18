@@ -302,3 +302,11 @@ COMPLETED_REVIEW: DON-199-code (2026-03-18)
 |------|------|------|--------|------|
 | 2026-03-18 | DON-168 | ui-review-checklist.md 지식 파일 생성 | `.claude/knowledge/ui-review-checklist.md`, `AGENTS.md` | 5섹션(TS/React, 보안, API, Playwright, 접근성). Codex 리뷰 1건 수정(헤더 개수), 2건 DON-169 범위 |
 | 2026-03-18 | DON-199 | frontend-quality.yml 워크플로우 생성 | `.github/workflows/frontend-quality.yml`, `Makefile`, `docs/spec/test-strategy.md` | lint+format+build CI. Codex 리뷰 2건 수정(path filter, status check 강화) |
+
+## Phase 2-Agentic: 병렬 작업 인프라 (DON-195)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-195 | 병렬 작업 인프라 — git worktree 가이드 + parallel-work 스킬 | `.claude/knowledge/parallel-work.md`, `.claude/skills/parallel-work/SKILL.md`, `.claude/skills/implement-issue/SKILL.md`, `CLAUDE.md` | Codex 리뷰 3건 반영 (worktree -b, implement-issue 충돌, PROGRESS.md 충돌) |
+
+COMPLETED_REVIEW: DON-195-code (2026-03-18)
