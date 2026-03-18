@@ -60,7 +60,7 @@ ADR-003 §3.4에서 정의한 버전 모델에 따라 `source_version`, `active_
 }
 ```
 
-> **ADR-003 정합성**: ADR-003은 `source_version` (canonical file SHA256), `http:active_version`, `stream:active_version`을 독립적으로 관리한다. Partial commit 시 HTTP와 Stream의 active version이 다를 수 있으므로 (ADR-003 §3.4 Partial commit 표 참조), 단일 `policy_version`으로는 이 상태를 정확히 표현할 수 없다. 따라서 세 버전을 모두 노출하며, 외부 모니터링은 `source_version`을 기준으로 인스턴스 간 일관성을 비교해야 한다.
+> **ADR-003 정합성**: ADR-003은 `source_version` (canonical file SHA256), `http:active_version`, `stream:active_version`을 독립적으로 관리한다. Partial commit 시 HTTP와 Stream의 active version이 다를 수 있으므로 (ADR-003 §3.4 Partial commit 표 참조), 단일 `policy_version`으로는 이 상태를 정확히 표현할 수 없다. 따라서 세 버전을 모두 노출하며, 외부 모니터링은 CI/CD가 계산한 목표 버전(`target_version`)을 기준으로 각 인스턴스의 `source_version`, `active_http_version`, `active_stream_version`이 모두 일치하는지 확인해야 한다. 단순한 인스턴스 간 equality만으로는 배포 성공을 판정할 수 없다.
 
 외부 모니터링 시스템(Prometheus, 로드밸런서 헬스체크)이 인스턴스 간 정책 버전 불일치를 감지할 수 있다.
 
@@ -69,11 +69,12 @@ ADR-003 §3.4에서 정의한 버전 모델에 따라 `source_version`, `active_
 CI/CD 파이프라인은 다음 순서를 따를 것을 권장한다:
 
 ```text
-[1] policies.yaml 파일을 모든 인스턴스에 배포 (rsync, ConfigMap, S3 등)
-[2] 각 인스턴스에 POST /api/v1/policies/reload 호출 (병렬)
-[3] 각 인스턴스의 GET /health 응답에서 source_version 확인
-[4] 모든 인스턴스가 동일 source_version → 배포 완료
-[5] 일부 인스턴스 불일치 → 재시도 또는 알림
+[1] 배포할 policies.yaml 파일의 SHA256을 계산하여 target_version으로 기록
+[2] policies.yaml 파일을 모든 인스턴스에 배포 (rsync, ConfigMap, S3 등)
+[3] 각 인스턴스에 POST /api/v1/policies/reload 호출 (병렬)
+[4] 각 인스턴스의 GET /health 응답에서 source_version, active_http_version, active_stream_version 확인
+[5] 모든 인스턴스가 source_version == active_http_version == active_stream_version == target_version → 배포 완료
+[6] 일부 인스턴스에서 target_version 불일치 또는 active version 미갱신 → 재시도 또는 알림
 ```
 
 ### §8.3.1 `PUT /api/v1/policies` 직접 호출 금지 (멀티 인스턴스 환경)
@@ -101,9 +102,10 @@ CI/CD 파이프라인은 다음 순서를 따를 것을 권장한다:
 정책 롤백은 CI/CD 파이프라인이 이전 버전의 `policies.yaml`을 재배포하는 방식으로 수행한다:
 
 ```text
-[1] 이전 정책 파일을 모든 인스턴스에 배포 (git revert 또는 artifact 저장소에서 복원)
-[2] 각 인스턴스에 POST /api/v1/policies/reload 호출
-[3] GET /health 응답의 source_version으로 롤백 완료 확인
+[1] 롤백할 이전 정책 파일의 SHA256을 계산하여 rollback_target_version으로 기록
+[2] 이전 정책 파일을 모든 인스턴스에 배포 (git revert 또는 artifact 저장소에서 복원)
+[3] 각 인스턴스에 POST /api/v1/policies/reload 호출
+[4] GET /health 응답에서 source_version == active_http_version == active_stream_version == rollback_target_version 인지 확인
 ```
 
 - LuaGate 자체에는 "이전 N개 버전 보관" 기능을 두지 않는다.
