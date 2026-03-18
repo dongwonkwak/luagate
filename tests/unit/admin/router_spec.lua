@@ -1,0 +1,635 @@
+--- Unit tests for lua/luagate/admin/router.lua
+-- Implementation: lua/luagate/admin/router.lua
+-- Tests: tests/unit/admin/router_spec.lua
+--
+-- router.lua는 OpenResty ngx 전역 + cjson.safe + luagate.admin.auth에 의존하므로
+-- busted (Lua 5.4) 환경에서 stub을 주입한다.
+
+-- ---------------------------------------------------------------------------
+-- cjson.safe stub (dkjson wrapper — LuaJIT 없는 busted 환경)
+-- ---------------------------------------------------------------------------
+package.preload["cjson.safe"] = function()
+  local dkjson = require("dkjson")
+  return {
+    encode = dkjson.encode,
+    decode = dkjson.decode,
+    null = {},
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- Shared dict mock 팩토리
+-- ---------------------------------------------------------------------------
+local function make_shared_dict(data)
+  data = data or {}
+  return {
+    get = function(_, key)
+      return data[key]
+    end,
+    capacity = function()
+      return 10485760
+    end, -- 10MB
+    free_space = function()
+      return 8388608
+    end, -- 8MB
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- ngx mock 팩토리
+-- ---------------------------------------------------------------------------
+local function make_ngx(overrides)
+  local exited_with = nil
+  local logged = {}
+  local said = {}
+  local printed = {}
+
+  local mock = {
+    var = {
+      remote_addr = "10.0.0.1",
+      uri = "/health",
+    },
+    ctx = {},
+    header = {},
+    headers_sent = false,
+    status = 0,
+    -- Log levels (match OpenResty constants)
+    EMERG = 0,
+    ALERT = 1,
+    CRIT = 2,
+    ERR = 3,
+    WARN = 4,
+    NOTICE = 5,
+    INFO = 6,
+    DEBUG = 7,
+    HTTP_OK = 200,
+    HTTP_NOT_FOUND = 404,
+    shared = {
+      luagate_policy = make_shared_dict({ ["http:active_version"] = "abc123" }),
+      luagate_state = make_shared_dict(),
+      luagate_metrics = make_shared_dict(),
+      luagate_stream_metrics = make_shared_dict(),
+      luagate_connections = make_shared_dict(),
+    },
+    log = function(level, ...)
+      local parts = {}
+      for _, v in ipairs({ ... }) do
+        parts[#parts + 1] = tostring(v)
+      end
+      logged[#logged + 1] = { level = level, msg = table.concat(parts, "") }
+    end,
+    exit = function(code)
+      exited_with = code
+    end,
+    say = function(s)
+      said[#said + 1] = s
+    end,
+    print = function(s)
+      printed[#printed + 1] = s
+    end,
+    req = {
+      get_headers = function()
+        return { Authorization = "Bearer valid-test-token" }
+      end,
+      get_method = function()
+        return "GET"
+      end,
+    },
+  }
+
+  -- 추적용 getter
+  mock._get_exited = function()
+    return exited_with
+  end
+  mock._get_logged = function()
+    return logged
+  end
+  mock._get_said = function()
+    return said
+  end
+  mock._get_printed = function()
+    return printed
+  end
+  mock._reset_tracking = function()
+    exited_with = nil
+    for i = 1, #logged do
+      logged[i] = nil
+    end
+    for i = 1, #said do
+      said[i] = nil
+    end
+    for i = 1, #printed do
+      printed[i] = nil
+    end
+    mock.status = 0
+    mock.header = {}
+    mock.headers_sent = false
+  end
+
+  -- override 적용
+  if overrides then
+    for k, v in pairs(overrides) do
+      if type(v) == "table" and type(mock[k]) == "table" then
+        for k2, v2 in pairs(v) do
+          mock[k][k2] = v2
+        end
+      else
+        mock[k] = v
+      end
+    end
+  end
+
+  return mock
+end
+
+-- ---------------------------------------------------------------------------
+-- Auth mock 팩토리
+-- ---------------------------------------------------------------------------
+
+--- auth mock: verify()가 항상 성공하는 버전
+local function make_auth_pass()
+  return {
+    verify = function()
+      return true
+    end,
+    init = function()
+      return true
+    end,
+  }
+end
+
+--- auth mock: verify()가 401을 설정하고 coroutine abort를 시뮬레이션하는 버전.
+-- 실제 OpenResty에서 ngx.exit()는 coroutine yield로 실행을 중단한다.
+-- mock에서는 error()를 throw하여 동일한 abort 동작을 재현한다.
+local function make_auth_fail()
+  return {
+    verify = function()
+      ngx.status = 401
+      ngx.header["Content-Type"] = "application/json"
+      ngx.say('{"error":"Unauthorized","message":"Invalid or missing Bearer token"}')
+      error("ngx.exit(401)")
+    end,
+    init = function()
+      return true
+    end,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- 모듈 로드 헬퍼
+-- ---------------------------------------------------------------------------
+local _saved_ngx = _G.ngx
+_G.ngx = make_ngx()
+
+local router -- 테스트마다 fresh require
+
+--- router 모듈을 fresh require하는 헬퍼.
+-- auth mock을 preload한 뒤 router를 로드한다.
+local function load_router(auth_mock)
+  package.loaded["luagate.admin.router"] = nil
+  package.loaded["luagate.admin.auth"] = nil
+  package.preload["luagate.admin.auth"] = function()
+    return auth_mock or make_auth_pass()
+  end
+  return require("luagate.admin.router")
+end
+
+-- ---------------------------------------------------------------------------
+-- 전체 테스트 완료 후 정리
+-- ---------------------------------------------------------------------------
+teardown(function()
+  _G.ngx = _saved_ngx
+  package.preload["cjson.safe"] = nil
+  package.preload["luagate.admin.auth"] = nil
+  package.loaded["cjson.safe"] = nil
+  package.loaded["luagate.admin.auth"] = nil
+  package.loaded["luagate.admin.router"] = nil
+end)
+
+-- ===========================================================================
+-- 라우팅 테스트
+-- ===========================================================================
+describe("router.dispatch", function()
+  describe("라우팅", function()
+    before_each(function()
+      _G.ngx = make_ngx()
+      router = load_router(make_auth_pass())
+    end)
+
+    it("GET /health -> 200 + {status:ok} (정책 로드 상태)", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      assert.is_true(#said >= 1, "ngx.say가 호출되어야 한다")
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("ok", body.status)
+    end)
+
+    it("GET /health -> 503 + {status:unhealthy} (정책 미로드 상태)", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_policy = make_shared_dict({}) -- http:active_version 없음
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(503, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("unhealthy", body.status)
+      assert.are.equal("policy not loaded", body.reason)
+    end)
+
+    it("GET /health -> 503 (active_version이 'none'인 경우)", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_policy = make_shared_dict({ ["http:active_version"] = "none" })
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(503, _G.ngx.status)
+    end)
+
+    it("GET /metrics -> 200 + Content-Type: text/plain Prometheus 형식", function()
+      _G.ngx.var.uri = "/metrics"
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      assert.are.equal("text/plain; version=0.0.4; charset=utf-8", _G.ngx.header["Content-Type"])
+      local printed = _G.ngx._get_printed()
+      assert.is_true(#printed >= 1, "ngx.print가 호출되어야 한다")
+    end)
+
+    it("알 수 없는 경로 -> 404 + 에러 응답 형식", function()
+      _G.ngx.var.uri = "/unknown/path"
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(404, _G.ngx.status)
+      assert.are.equal(404, _G.ngx._get_exited())
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("not_found", body.error)
+      assert.are.equal("routing", body.stage)
+      assert.is_table(body.details)
+      assert.is_true(#body.details >= 1)
+    end)
+
+    it("잘못된 메서드 (POST /health) -> 405 + 에러 응답 형식", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.req.get_method = function()
+        return "POST"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(405, _G.ngx.status)
+      assert.are.equal(405, _G.ngx._get_exited())
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("method_not_allowed", body.error)
+      assert.are.equal("routing", body.stage)
+    end)
+
+    it("잘못된 메서드 (DELETE /metrics) -> 405", function()
+      _G.ngx.var.uri = "/metrics"
+      _G.ngx.req.get_method = function()
+        return "DELETE"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(405, _G.ngx.status)
+      assert.are.equal(405, _G.ngx._get_exited())
+    end)
+
+    it("인증 실패 (토큰 없음) -> 401 (auth.verify에 위임)", function()
+      _G.ngx = make_ngx()
+      _G.ngx.var.uri = "/metrics"
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+      router = load_router(make_auth_fail())
+
+      -- auth.verify()가 error()로 coroutine abort를 시뮬레이션하므로
+      -- dispatch()에서 에러가 전파된다 (실제 OpenResty에서는 ngx.exit가 yield)
+      local ok, _ = pcall(router.dispatch)
+      assert.is_false(ok, "auth 실패 시 coroutine abort(error)가 전파되어야 한다")
+
+      -- auth가 설정한 401 상태와 JSON 에러 본문 확인
+      assert.are.equal(401, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      assert.is_true(#said >= 1, "auth 에러 응답이 전송되어야 한다")
+      assert.truthy(said[1]:find("Unauthorized"), "401 응답에 Unauthorized가 포함되어야 한다")
+    end)
+
+    it("OPTIONS 요청 -> 204 (CORS preflight)", function()
+      _G.ngx = make_ngx()
+      _G.ngx.var.uri = "/metrics"
+      _G.ngx.req.get_method = function()
+        return "OPTIONS"
+      end
+      router = load_router(make_auth_pass())
+
+      router.dispatch()
+
+      assert.are.equal(204, _G.ngx.status)
+    end)
+  end)
+
+  -- =========================================================================
+  -- 메트릭스 출력 테스트
+  -- =========================================================================
+  describe("GET /metrics 출력", function()
+    local output
+
+    --- 메트릭스 출력을 캡처하는 헬퍼
+    local function get_metrics_output(metrics_data, stream_data, connections_data)
+      _G.ngx = make_ngx({
+        var = { uri = "/metrics" },
+        shared = {
+          luagate_policy = make_shared_dict({ ["http:active_version"] = "v1" }),
+          luagate_state = make_shared_dict(),
+          luagate_metrics = make_shared_dict(metrics_data or {}),
+          luagate_stream_metrics = make_shared_dict(stream_data or {}),
+          luagate_connections = make_shared_dict(connections_data or {}),
+        },
+      })
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+      router = load_router(make_auth_pass())
+
+      router.dispatch()
+
+      local printed = _G.ngx._get_printed()
+      return table.concat(printed, "")
+    end
+
+    before_each(function()
+      output = nil
+    end)
+
+    it("HTTP request counters (luagate_http_requests_total) 포함", function()
+      output = get_metrics_output({
+        ["metrics:http_requests_total:allow"] = 100,
+        ["metrics:http_requests_total:deny"] = 5,
+      })
+
+      assert.truthy(
+        output:find("luagate_http_requests_total"),
+        "luagate_http_requests_total 메트릭이 있어야 한다"
+      )
+      assert.truthy(
+        output:find('luagate_http_requests_total{action="allow"} 100'),
+        "allow 카운터가 100이어야 한다"
+      )
+      assert.truthy(output:find('luagate_http_requests_total{action="deny"} 5'), "deny 카운터가 5여야 한다")
+    end)
+
+    it("luagate_http_requests_denied_total 포함", function()
+      output = get_metrics_output({
+        ["metrics:http_requests_denied_total"] = 42,
+      })
+
+      assert.truthy(output:find("luagate_http_requests_denied_total"), "denied total 메트릭이 있어야 한다")
+      assert.truthy(output:find("luagate_http_requests_denied_total 42"), "denied total이 42여야 한다")
+    end)
+
+    it("latency histogram bucket 포함", function()
+      output = get_metrics_output({
+        ["latency:bucket:0.1"] = 10,
+        ["latency:bucket:1"] = 50,
+        ["latency:bucket:+Inf"] = 100,
+        ["latency:sum"] = 5000,
+        ["latency:count"] = 100,
+      })
+
+      assert.truthy(output:find("luagate_http_response_time_ms"), "histogram 메트릭이 있어야 한다")
+      assert.truthy(
+        output:find('luagate_http_response_time_ms_bucket{le="0.1"} 10'),
+        "0.1 bucket이 10이어야 한다"
+      )
+      assert.truthy(output:find('luagate_http_response_time_ms_bucket{le="1"} 50'), "1 bucket이 50이어야 한다")
+      assert.truthy(output:find('le="%+Inf"} 100'), "+Inf bucket이 100이어야 한다")
+      assert.truthy(output:find("luagate_http_response_time_ms_sum 5000"), "sum이 5000이어야 한다")
+      assert.truthy(output:find("luagate_http_response_time_ms_count 100"), "count가 100이어야 한다")
+    end)
+
+    it("stream counters 포함", function()
+      output = get_metrics_output(nil, {
+        ["stream:metrics:connections_total"] = 200,
+        ["stream:metrics:connections_denied_total"] = 3,
+        ["stream:metrics:bytes_sent_total"] = 1048576,
+        ["stream:metrics:bytes_received_total"] = 524288,
+      })
+
+      assert.truthy(output:find("luagate_stream_connections_total"), "stream connections total이 있어야 한다")
+      assert.truthy(output:find("luagate_stream_connections_total 200"), "stream connections이 200이어야 한다")
+      assert.truthy(output:find("luagate_stream_connections_denied_total 3"), "denied가 3이어야 한다")
+      assert.truthy(output:find("luagate_stream_bytes_sent_total 1048576"), "bytes sent가 맞아야 한다")
+      assert.truthy(output:find("luagate_stream_bytes_received_total 524288"), "bytes received가 맞아야 한다")
+    end)
+
+    it("stream protocol detected counters 포함", function()
+      output = get_metrics_output(nil, {
+        ["stream:metrics:protocol_detected_total:tls"] = 50,
+        ["stream:metrics:protocol_detected_total:http"] = 30,
+        ["stream:metrics:protocol_detected_total:raw"] = 10,
+      })
+
+      assert.truthy(output:find("luagate_stream_protocol_detected_total"), "protocol detected가 있어야 한다")
+      assert.truthy(output:find('luagate_stream_protocol_detected_total{protocol="tls"} 50'))
+      assert.truthy(output:find('luagate_stream_protocol_detected_total{protocol="http"} 30'))
+      assert.truthy(output:find('luagate_stream_protocol_detected_total{protocol="raw"} 10'))
+    end)
+
+    it("active connections gauge 포함", function()
+      output = get_metrics_output(nil, nil, {
+        ["active_http"] = 15,
+        ["active_stream"] = 8,
+      })
+
+      assert.truthy(output:find("luagate_active_connections"), "active connections 메트릭이 있어야 한다")
+      assert.truthy(output:find('luagate_active_connections{type="http"} 15'), "http active가 15여야 한다")
+      assert.truthy(output:find('luagate_active_connections{type="stream"} 8'), "stream active가 8이어야 한다")
+    end)
+
+    it("shared dict capacity/free gauges 포함 (5개 zone)", function()
+      output = get_metrics_output()
+
+      assert.truthy(output:find("luagate_shared_dict_capacity_bytes"), "capacity 메트릭이 있어야 한다")
+      assert.truthy(output:find("luagate_shared_dict_free_bytes"), "free 메트릭이 있어야 한다")
+      -- 5개 zone 모두 존재 확인
+      local zones = {
+        "luagate_policy",
+        "luagate_state",
+        "luagate_metrics",
+        "luagate_stream_metrics",
+        "luagate_connections",
+      }
+      for _, zone in ipairs(zones) do
+        assert.truthy(
+          output:find('luagate_shared_dict_capacity_bytes{zone="' .. zone .. '"}'),
+          zone .. " capacity가 있어야 한다"
+        )
+        assert.truthy(
+          output:find('luagate_shared_dict_free_bytes{zone="' .. zone .. '"}'),
+          zone .. " free가 있어야 한다"
+        )
+      end
+    end)
+
+    it("scanner threat counters: 0이 아닌 값만 출력", function()
+      output = get_metrics_output({
+        ["metrics:http_scanner_threats_total:threat:sqli"] = 7,
+        ["metrics:http_scanner_threats_total:threat:xss"] = 3,
+        -- 나머지 threat type은 0 (기본)
+      })
+
+      assert.truthy(output:find("luagate_http_scanner_threats_total"), "scanner threats 메트릭이 있어야 한다")
+      assert.truthy(
+        output:find('luagate_http_scanner_threats_total{threat_type="sqli"} 7'),
+        "sqli가 7이어야 한다"
+      )
+      assert.truthy(output:find('luagate_http_scanner_threats_total{threat_type="xss"} 3'), "xss가 3이어야 한다")
+      -- 0인 threat type은 출력되지 않아야 한다
+      assert.is_nil(output:find('threat_type="path_traversal"'), "0인 path_traversal은 출력되지 않아야 한다")
+      assert.is_nil(output:find('threat_type="cmd_injection"'), "0인 cmd_injection은 출력되지 않아야 한다")
+    end)
+
+    it("scanner threat counters: 모든 값이 0이면 threat line 없음", function()
+      output = get_metrics_output({}) -- 모든 threat 0
+
+      -- HELP/TYPE 헤더는 있지만 실제 값 라인은 없어야 한다
+      assert.truthy(output:find("# HELP luagate_http_scanner_threats_total"))
+      assert.truthy(output:find("# TYPE luagate_http_scanner_threats_total"))
+      assert.is_nil(output:find("threat_type="), "0인 threat type은 출력되지 않아야 한다")
+    end)
+
+    it("policy reload counters 포함", function()
+      output = get_metrics_output({
+        ["metrics:policy_reload_total"] = 10,
+        ["metrics:policy_reload_failures_total"] = 2,
+      })
+
+      assert.truthy(output:find("luagate_policy_reload_total"), "reload total이 있어야 한다")
+      assert.truthy(output:find("luagate_policy_reload_total 10"), "reload total이 10이어야 한다")
+      assert.truthy(output:find("luagate_policy_reload_failures_total 2"), "failures가 2여야 한다")
+    end)
+
+    it("upstream error counter 포함", function()
+      output = get_metrics_output({
+        ["metrics:http_upstream_errors_total"] = 17,
+      })
+
+      assert.truthy(output:find("luagate_http_upstream_errors_total"), "upstream errors가 있어야 한다")
+      assert.truthy(output:find("luagate_http_upstream_errors_total 17"), "upstream errors가 17이어야 한다")
+    end)
+
+    it("모든 카운터 0일 때도 올바른 출력 (dict 비어있음)", function()
+      output = get_metrics_output({}, {}, {})
+
+      -- 기본 카운터는 0으로 출력
+      assert.truthy(output:find('luagate_http_requests_total{action="allow"} 0'))
+      assert.truthy(output:find('luagate_http_requests_total{action="deny"} 0'))
+      assert.truthy(output:find("luagate_http_requests_denied_total 0"))
+      assert.truthy(output:find("luagate_stream_connections_total 0"))
+      assert.truthy(output:find('luagate_active_connections{type="http"} 0'))
+    end)
+
+    it("shared dict zone이 nil이어도 안전 처리", function()
+      _G.ngx = make_ngx({
+        var = { uri = "/metrics" },
+        shared = {
+          luagate_policy = nil,
+          luagate_state = nil,
+          luagate_metrics = nil,
+          luagate_stream_metrics = nil,
+          luagate_connections = nil,
+        },
+      })
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+      router = load_router(make_auth_pass())
+
+      -- nil dict여도 에러 없이 실행
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local printed = _G.ngx._get_printed()
+      assert.is_true(#printed >= 1, "출력이 있어야 한다")
+    end)
+
+    it("HELP/TYPE 헤더가 Prometheus 표준 형식", function()
+      output = get_metrics_output()
+
+      -- 몇 가지 대표 메트릭의 HELP/TYPE 확인
+      assert.truthy(output:find("# HELP luagate_http_requests_total"))
+      assert.truthy(output:find("# TYPE luagate_http_requests_total counter"))
+      assert.truthy(output:find("# HELP luagate_http_response_time_ms"))
+      assert.truthy(output:find("# TYPE luagate_http_response_time_ms histogram"))
+      assert.truthy(output:find("# HELP luagate_active_connections"))
+      assert.truthy(output:find("# TYPE luagate_active_connections gauge"))
+      assert.truthy(output:find("# HELP luagate_shared_dict_capacity_bytes"))
+      assert.truthy(output:find("# TYPE luagate_shared_dict_capacity_bytes gauge"))
+    end)
+
+    it("모든 9개 latency bucket boundary 존재", function()
+      output = get_metrics_output()
+
+      local buckets = { "0.1", "0.5", "1", "5", "10", "50", "100", "500", "1000" }
+      for _, b in ipairs(buckets) do
+        assert.truthy(
+          output:find('luagate_http_response_time_ms_bucket{le="' .. b .. '"}'),
+          "bucket le=" .. b .. "가 있어야 한다"
+        )
+      end
+      assert.truthy(output:find('le="%+Inf"'), "+Inf bucket이 있어야 한다")
+    end)
+  end)
+
+  -- =========================================================================
+  -- 핸들러 에러 전파 테스트
+  -- =========================================================================
+  describe("핸들러 에러 전파", function()
+    it("핸들러 내부 에러는 nginx error handler로 전파된다 (pcall 없음)", function()
+      _G.ngx = make_ngx()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+      -- ngx.say에서 에러 발생 시뮬레이션
+      _G.ngx.say = function()
+        error("say failed: broken pipe")
+      end
+      router = load_router(make_auth_pass())
+
+      -- pcall 없이 에러가 전파됨 (실제 OpenResty에서는 nginx가 500 반환)
+      local ok, err = pcall(router.dispatch)
+      assert.is_false(ok, "핸들러 에러가 전파되어야 한다")
+      assert.truthy(tostring(err):find("broken pipe"), "원본 에러 메시지가 보존되어야 한다")
+    end)
+  end)
+end)
