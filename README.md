@@ -138,7 +138,7 @@ luagate/
 │   └── spec/       # 스펙 문서 (10개)
 ├── tests/          # 단위(busted) + 통합(Test::Nginx) 테스트
 ├── scripts/        # 개발/운영 보조 스크립트
-├── frontend/       # Admin Dashboard UI
+├── ui/             # Admin Dashboard UI (Vite + React + TypeScript)
 ├── benchmarks/     # 성능 측정 스크립트
 ├── policies/       # 정책 파일 예시
 └── .claude/        # Claude Code 에이전트/스킬/메모리
@@ -198,7 +198,7 @@ luagate/
 
 ## 벤치마크
 
-*Phase 1 구현 완료 후 실측값 추가 예정*
+> Phase 1 구현 완료 후 실측값 추가 예정
 
 | 지표 | SLO (목표) | 실측 |
 |------|-----------|------|

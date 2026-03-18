@@ -59,6 +59,9 @@ COPY lua/luagate /usr/local/openresty/lualib/luagate/
 # Copy nginx config file only
 COPY conf/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
+# Copy Dashboard UI build output (run `make ui-build` before docker build)
+COPY ui/dist/ /etc/luagate/ui/dist/
+
 # Copy policies
 COPY policies/ /etc/luagate/policies/
 

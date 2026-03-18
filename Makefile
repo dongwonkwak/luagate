@@ -154,11 +154,11 @@ ui-dev:
 
 ui-build:
 	@echo "==> Building UI for production..."
+	@echo "    Output: ui/dist/ (Docker COPY maps to /etc/luagate/ui/dist)"
 	cd ui && npm run build
 
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean:
 	rm -rf csrc/build
-	rm -rf frontend/dist
 	rm -rf ui/dist
 	find lua -name '*.so' -delete
