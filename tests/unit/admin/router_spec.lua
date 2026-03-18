@@ -656,37 +656,13 @@ describe("router.dispatch", function()
       assert.truthy(output:find("luagate_policy_reload_failures_total 2"), "failures가 2여야 한다")
     end)
 
-    it("policy version info gauge 포함 (ADR-008)", function()
-      _G.ngx = make_ngx({
-        var = { uri = "/metrics" },
-        shared = {
-          luagate_policy = make_shared_dict({
-            ["http:active_version"] = "abc123",
-            ["stream:active_version"] = "abc123",
-            ["source_version"] = "abc123",
-          }),
-          luagate_state = make_shared_dict(),
-          luagate_metrics = make_shared_dict(),
-          luagate_stream_metrics = make_shared_dict(),
-          luagate_connections = make_shared_dict(),
-          luagate_admin_ratelimit = make_shared_dict(),
-        },
-      })
-      _G.ngx.req.get_method = function()
-        return "GET"
-      end
-      router = load_router(make_auth_pass())
+    it("policy loaded gauge 포함 (ADR-008)", function()
+      output = get_metrics_output({})
 
-      router.dispatch()
-
-      assert.are.equal(200, _G.ngx.status)
-      local printed = _G.ngx._get_printed()
-      output = table.concat(printed, "")
-
-      assert.truthy(output:find("luagate_policy_version_info"), "policy version info가 있어야 한다")
-      assert.truthy(output:find('source="abc123"'), "source version 라벨이 있어야 한다")
-      assert.truthy(output:find('http="abc123"'), "http version 라벨이 있어야 한다")
-      assert.truthy(output:find('stream="abc123"'), "stream version 라벨이 있어야 한다")
+      assert.truthy(output:find("luagate_policy_loaded"), "policy loaded gauge가 있어야 한다")
+      assert.truthy(output:find("luagate_policy_loaded 1"), "정책 로드 상태에서 값이 1이어야 한다")
+      -- ADR-006: version hash 라벨이 없어야 한다
+      assert.is_nil(output:find("luagate_policy_version_info"), "version_info 메트릭은 없어야 한다 (ADR-006)")
     end)
 
     it("upstream error counter 포함", function()

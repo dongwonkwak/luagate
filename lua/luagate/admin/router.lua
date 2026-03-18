@@ -275,19 +275,18 @@ local function handle_metrics()
     end
   end
 
-  -- ── Policy version info gauge (ADR-008 §8.2) ─────────────────────
-  prom_header(buf, "luagate_policy_version_info", "gauge", "Policy version info (value always 1, versions in labels).")
+  -- ── Policy loaded gauge (ADR-008 §8.2) ────────────────────────────
+  -- Version hashes are exposed only via /health (not as Prometheus labels)
+  -- to comply with ADR-006 cardinality rules. This gauge tracks whether
+  -- policy is loaded (1) or not (0).
+  prom_header(buf, "luagate_policy_loaded", "gauge", "Whether policy is loaded (1=loaded, 0=not loaded).")
   local policy_dict = ngx.shared.luagate_policy
   if policy_dict then
-    local src_ver = policy_dict:get("source_version") or ""
-    local http_ver = policy_dict:get("http:active_version") or ""
-    local stream_ver = policy_dict:get("stream:active_version") or ""
-    prom_line(
-      buf,
-      "luagate_policy_version_info",
-      '{source="' .. src_ver .. '",http="' .. http_ver .. '",stream="' .. stream_ver .. '"}',
-      1
-    )
+    local http_ver = policy_dict:get("http:active_version")
+    local loaded = (http_ver and http_ver ~= "none") and 1 or 0
+    prom_line(buf, "luagate_policy_loaded", "", loaded)
+  else
+    prom_line(buf, "luagate_policy_loaded", "", 0)
   end
 
   -- ── Send response ──────────────────────────────────────────────────
