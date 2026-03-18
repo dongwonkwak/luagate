@@ -30,6 +30,28 @@ local PEEK_BYTES = 1024
 -- Maximum retry attempts for NEED_MORE_DATA from detect_protocol
 local MAX_DETECT_RETRIES = 3
 
+--- Peek preread bytes without consuming the downstream stream buffer.
+-- Returns partial data on timeout so the caller can decide whether to retry.
+-- @param sock table
+-- @param bytes number
+-- @return string|nil, string|nil
+local function peek_preread_bytes(sock, bytes)
+  local ok_peek, data, err, partial = pcall(sock.peek, sock, bytes)
+  if not ok_peek then
+    return nil, data or err
+  end
+
+  if data then
+    return data, nil
+  end
+
+  if err == "timeout" then
+    return partial or "", "timeout"
+  end
+
+  return nil, err
+end
+
 --- Generate a connection UUID.
 -- Uses ngx.var.connection as base with worker_id prefix for uniqueness.
 -- @return string
@@ -102,9 +124,8 @@ function _M.preread()
   ngx.var.luagate_active_version = stream_ver
 
   -- 3. Peek preread buffer
-  -- In stream preread_by_lua, data read via ngx.req.socket(true) is automatically
-  -- preserved in the Nginx stream preread buffer. proxy_pass forwards this data
-  -- to upstream — the read does NOT consume data from the client stream.
+  -- Stream preread must use non-consuming peek so upstream still receives the
+  -- original client bytes (stream-pipeline.md §2.1).
   local ok_sock, sock = pcall(ngx.req.socket, true)
   if not ok_sock or not sock then
     ngx.log(ngx.ERR, "[luagate-stream] failed to get request socket: ", tostring(sock))
@@ -115,15 +136,9 @@ function _M.preread()
     return ngx.exit(ngx.ERROR)
   end
 
-  local preread_data
-  local ok_peek, data, peek_err = pcall(sock.receive, sock, PEEK_BYTES)
-  if ok_peek and data then
-    preread_data = data
-  elseif ok_peek and peek_err == "timeout" then
-    -- Partial data available (timeout means partial read in stream context)
-    preread_data = data or ""
-  else
-    ngx.log(ngx.ERR, "[luagate-stream] preread peek failed: ", tostring(data or peek_err))
+  local preread_data, peek_err = peek_preread_bytes(sock, PEEK_BYTES)
+  if not preread_data then
+    ngx.log(ngx.ERR, "[luagate-stream] preread peek failed: ", tostring(peek_err))
     ctx.deny_reason = "peek_io_error"
     ctx.request_state = "denied"
     ngx.var.luagate_stream_action = "deny"
@@ -159,21 +174,23 @@ function _M.preread()
 
   while need_more and retry_count < MAX_DETECT_RETRIES do
     retry_count = retry_count + 1
-    local ok_more, more_data, more_err = pcall(sock.receive, sock, PEEK_BYTES)
-    if ok_more and more_data then
-      preread_data = preread_data .. more_data
-    elseif ok_more and more_err == "timeout" then
-      if more_data then
-        preread_data = preread_data .. more_data
-      end
-      -- timeout with no new data -> break and fail-closed below
-      if not more_data or #more_data == 0 then
-        break
-      end
-    else
+    local peek_bytes = PEEK_BYTES * (retry_count + 1)
+    local more_data, more_err = peek_preread_bytes(sock, peek_bytes)
+    if not more_data then
       -- I/O error during retry -> break and fail-closed below
       break
     end
+
+    -- peek returns the full visible preread buffer, so retries must replace the
+    -- buffer snapshot instead of appending duplicate prefix bytes.
+    if #more_data <= #preread_data then
+      if more_err == "timeout" then
+        break
+      end
+    else
+      preread_data = more_data
+    end
+
     protocol, detect_err, need_more = stream_ffi.detect_protocol(preread_data)
   end
 

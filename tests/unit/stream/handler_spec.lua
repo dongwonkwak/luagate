@@ -156,9 +156,9 @@ local function make_ngx(overrides)
     },
     req = {
       socket = function()
-        -- Default: returns a mock socket with successful receive
+        -- Default: returns a mock socket with successful non-consuming peek
         return {
-          receive = function(_, _bytes)
+          peek = function(_, _bytes)
             return "\x16\x03\x01\x00\x05mock-tls-data"
           end,
         }
@@ -413,11 +413,11 @@ describe("handler.preread - peek I/O 실패 -> fail-closed", function()
     assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
   end)
 
-  it("receive 실패 -> fail-closed (peek_io_error)", function()
-    -- Override ngx.req.socket to return a socket that fails on receive
+  it("peek 실패 -> fail-closed (peek_io_error)", function()
+    -- Override ngx.req.socket to return a socket that fails on peek
     ngx_mock.req.socket = function()
       return {
-        receive = function()
+        peek = function()
           return nil, "connection reset"
         end,
       }
@@ -473,6 +473,21 @@ describe("handler.preread - NEED_MORE_DATA retry loop", function()
   it("detect_protocol NEED_MORE_DATA -> retries exhaust -> fail-closed", function()
     -- All calls return NEED_MORE_DATA
     _stream_ffi_stub.detect_result = { nil, nil, true }
+    ngx_mock.req.socket = function()
+      local responses = {
+        "\x16",
+        "\x16\x03",
+        "\x16\x03\x01",
+        "\x16\x03\x01\x00",
+      }
+      local call_count = 0
+      return {
+        peek = function(_, _bytes)
+          call_count = call_count + 1
+          return responses[call_count] or responses[#responses]
+        end,
+      }
+    end
 
     handler.preread()
 
@@ -498,6 +513,19 @@ describe("handler.preread - NEED_MORE_DATA retry loop", function()
       decision_source = "rule",
       upstream = "up:443",
     }
+    ngx_mock.req.socket = function()
+      local responses = {
+        "\x16\x03",
+        "\x16\x03\x01\x00\x05mock-tls-data",
+      }
+      local call_count = 0
+      return {
+        peek = function(_, _bytes)
+          call_count = call_count + 1
+          return responses[call_count] or responses[#responses]
+        end,
+      }
+    end
 
     handler.preread()
 
@@ -515,7 +543,7 @@ describe("handler.preread - NEED_MORE_DATA retry loop", function()
     ngx_mock.req.socket = function()
       local call_count = 0
       return {
-        receive = function(_, _bytes)
+        peek = function(_, _bytes)
           call_count = call_count + 1
           if call_count == 1 then
             return "\x16\x03" -- initial partial data
@@ -867,7 +895,7 @@ describe("handler.preread - empty preread data -> fail-closed", function()
   it("빈 preread 데이터 -> empty_preread deny", function()
     ngx_mock.req.socket = function()
       return {
-        receive = function()
+        peek = function()
           return nil, "timeout"
         end,
       }
