@@ -131,13 +131,12 @@ build-ffi:
 	@echo "==> Building Rust FFI modules..."
 	cd src/decoder && cargo build --release
 	cd src/scanner && cargo build --release 2>/dev/null || echo "  (scanner not yet built)"
-	cd src/stream && cargo build --release 2>/dev/null || echo "  (stream not yet built)"
+	cd src/stream && cargo build --release
 	@mkdir -p lib
 	cp src/decoder/target/release/libluagate_decoder.so lib/luagate_decoder.so
 	@[ -f src/scanner/target/release/libluagate_scanner.so ] && \
 	  cp src/scanner/target/release/libluagate_scanner.so lib/luagate_scanner.so || true
-	@[ -f src/stream/target/release/libluagate_stream.so ] && \
-	  cp src/stream/target/release/libluagate_stream.so lib/luagate_stream.so || true
+	cp src/stream/target/release/libluagate_stream.so lib/luagate_stream.so
 
 fuzz-regression:
 	@echo "==> Running fuzz regression..."
