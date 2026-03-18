@@ -14,8 +14,12 @@ services:
       # Mount specific config file, not the whole conf/ dir
       - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./policies:/etc/luagate/policies:ro
+      - ./policies/luagate.yaml:/conf/policies.yaml:ro
+      - ./conf/scanner-patterns:/conf/scanner-patterns:ro
     environment:
       - LUAGATE_ENV=development
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-development-token-at-least-32-bytes-long}
+      - LD_LIBRARY_PATH=/usr/local/openresty/lualib
     depends_on:
       - upstream-mock
     networks:

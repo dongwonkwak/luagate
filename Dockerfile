@@ -1,5 +1,5 @@
-# ── Stage 1: C extensions build ───────────────────────────────────────────
-FROM alpine:3.19 AS builder
+# ── Stage 1a: C extensions build ──────────────────────────────────────────
+FROM alpine:3.19 AS c-builder
 
 RUN apk add --no-cache \
     cmake \
@@ -16,6 +16,18 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
  && mkdir -p /build/artifacts \
  && find build \( -type f -o -type l \) -name '*.so*' -exec cp -L {} /build/artifacts/ \;
 
+# ── Stage 1b: Rust FFI build ─────────────────────────────────────────────
+FROM rust:1.83 AS rust-builder
+
+WORKDIR /build
+COPY src/ src/
+
+RUN cd /build/src/scanner && cargo build --release \
+ && cd /build/src/decoder && cargo build --release \
+ && cd /build/src/stream && cargo build --release \
+ && mkdir -p /build/artifacts \
+ && find /build/src -name 'libluagate_*.so' -path '*/release/*' -exec cp {} /build/artifacts/ \;
+
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM openresty/openresty:1.25.3.2-alpine
 
@@ -23,14 +35,23 @@ LABEL org.opencontainers.image.source="https://github.com/dongwonkwak/luagate"
 LABEL org.opencontainers.image.description="LuaGate — OpenResty API Gateway"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Install runtime dependencies
+# Install runtime dependencies + luarocks + lyaml
 RUN apk add --no-cache \
     curl \
-    ca-certificates
+    ca-certificates \
+    gcompat \
+    yaml-dev \
+    luarocks5.1 \
+ && apk add --no-cache --virtual .build-deps gcc musl-dev make \
+ && luarocks-5.1 install lyaml YAML_DIR=/usr \
+      LUA_INCDIR=/usr/local/openresty/luajit/include/luajit-2.1 \
+ && apk del .build-deps
 
-# Copy C shared libraries from builder when present.
-# The scaffold may not produce any modules yet, but the directory always exists.
-COPY --from=builder /build/artifacts/ /usr/local/openresty/lualib/
+# Copy C shared libraries from builder
+COPY --from=c-builder /build/artifacts/ /usr/local/openresty/lualib/
+
+# Copy Rust FFI shared libraries
+COPY --from=rust-builder /build/artifacts/ /usr/local/openresty/lualib/
 
 # Copy Lua modules into a dedicated subdir — preserves bundled resty/* libs
 COPY lua/luagate /usr/local/openresty/lualib/luagate/
