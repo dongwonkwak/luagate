@@ -157,6 +157,15 @@ ui-build:
 	@echo "    Output: ui/dist/ (Docker COPY maps to /etc/luagate/ui/dist)"
 	cd ui && npm run build
 
+# ── E2E (Playwright) ──────────────────────────────────────────────────────
+e2e:
+	@echo "==> Running Playwright E2E tests..."
+	cd e2e && npm run test
+
+e2e-ui:
+	@echo "==> Running Playwright E2E tests (UI mode)..."
+	cd e2e && npm run test:ui
+
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean:
 	rm -rf csrc/build

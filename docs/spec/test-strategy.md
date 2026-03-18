@@ -8,6 +8,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 |------|-----------|------|------|
 | 단위 테스트 | busted (Lua) + CMocka (C) + cargo test (Rust) | 함수/모듈 | 빠름 |
 | 통합 테스트 | Test::Nginx (HTTP/Stream) | HTTP/TCP 엔드투엔드 | 중간 |
+| E2E 테스트 | Playwright (TypeScript) | 대시보드 UI 유저 플로우 | 중간 |
 | 부하 테스트 | wrk / vegeta | 성능/처리량 | 느림 (선택) |
 
 ## 2. Makefile 명령 계약
@@ -22,6 +23,8 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 | `make test-integration-stream` | Stream 통합 (Test::Nginx::Stream) | Yes |
 | `make test-reload` | Hot reload 전용 테스트 | Yes |
 | `make test-docker` | Docker Compose 기반 HTTP 통합 테스트 (shard env override 지원) | No |
+| `make e2e` | Playwright E2E 테스트 (대시보드 UI) | No |
+| `make e2e-ui` | Playwright E2E 테스트 (UI 모드) | No |
 | `make bench` | 전체 벤치마크 (smoke) | No |
 | `make bench-http` | HTTP 벤치마크 (wrk/vegeta) | No |
 | `make bench-stream` | Stream 벤치마크 | No |
@@ -30,13 +33,13 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 
 ### 2.1 실행 환경 가이드
 
-**권장 순서**
+### 권장 순서
 
 1. Nix dev shell에서 `make test-unit`
 2. `make test` 또는 `make test-integration-http`
 3. 필요 시 `make test-docker`로 HTTP 통합 테스트만 단독 실행
 
-**환경별 동작**
+### 환경별 동작
 
 - `nix develop` 환경은 `busted`, `prove`, `ctest`를 제공한다.
 - `make test-integration-http`는 로컬 Perl에 `Test::Nginx::Socket`이 있으면 직접 `prove`를 실행한다.
@@ -46,7 +49,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 - `make test-unit-c`는 `csrc/build/CTestTestfile.cmake`가 없으면 skip 한다.
 - `make test-integration-stream`, `make test-reload`는 해당 테스트 디렉터리가 없으면 skip 한다.
 
-**예시**
+### 예시
 
 ```bash
 # Nix dev shell에서 전체 테스트
@@ -314,6 +317,7 @@ rules:
 | 로그 스키마 변경 | `test-unit-lua` (log/ golden test) |
 | Admin API 변경 | `test-unit-lua` (auth_test) + `test-integration-http` |
 | Stream 파이프라인 | `test-integration-stream` |
+| 대시보드 UI 변경 | `e2e` (Playwright) |
 | 보안 스캐너 | `test-unit-lua` (ffi_test) + OWASP 페이로드 테스트 |
 | 전체 | `make test` |
 
@@ -361,14 +365,60 @@ make bench
 
 도구: Rust `cargo fuzz` (libFuzzer), Lua `busted` property-based (추후 도입).
 
-## 9. 보안 테스트
+## 9. E2E 테스트 — Playwright
+
+### 개요
+
+React 대시보드(Admin plane)의 핵심 유저 플로우를 Playwright로 검증한다.
+컴포넌트 단위 테스트(Vitest)로 커버 불가한 실제 API 연동 흐름을 대상으로 한다.
+
+### 디렉토리 구조
+
+```
+e2e/                          # 프로젝트 루트 (ui/ 외부)
+├── package.json              # npm 사용
+├── playwright.config.ts
+├── fixtures/
+│   └── admin-server.ts       # Admin API mock server (추후)
+└── tests/
+    ├── auth.spec.ts
+    ├── policy-editor.spec.ts
+    ├── metrics.spec.ts
+    └── error-handling.spec.ts
+```
+
+> **위치 결정**: `ui/e2e/`가 아닌 프로젝트 루트 `e2e/`에 배치한다.
+> 대시보드는 Admin API(:9090)와 밀접하므로 UI 패키지 외부에서 통합 검증한다.
+
+### Base URL
+
+- nginx.conf의 Admin server block(:9090)이 `/dashboard`로 UI를 서빙
+- `PLAYWRIGHT_BASE_URL` 기본값: `http://localhost:9090/dashboard`
+
+### Makefile 명령
+
+```bash
+make e2e       # cd e2e && npm run test
+make e2e-ui    # cd e2e && npm run test:ui
+```
+
+### 패키지 매니저
+
+npm을 사용한다 (`ui/`, 루트 `package.json`과 동일).
+
+### 참조
+
+- DON-166: Playwright E2E 테스트 — 핵심 유저 플로우 5개
+- DON-169: CI codex-review.yml — e2e/** 파일 패턴 추가
+
+## 10. 보안 테스트
 
 OWASP Top 10 기반 공격 벡터 테스트 (`tests/fixtures/` 픽스처):
 
 > **주의**: canonical policy scope에 `threat_type`가 없으므로 스캐너 탐지가 자동 차단을 의미하지 않는다.
 > 통합 테스트는 "차단"과 "탐지"를 분리해 검증한다.
 
-## 10. CI 파이프라인
+## 11. CI 파이프라인
 
 ```yaml
 # .github/workflows/test.yml
@@ -385,7 +435,7 @@ stages:
 <!-- ADR 필요 -->
 > **TODO**: 카오스 엔지니어링(worker 강제 종료, shared dict 초과) 테스트 전략 수립 시 ADR 필요
 
-## 11. 의존성
+## 12. 의존성
 
 - [spec/policy-engine.md](./policy-engine.md) — 정책 평가 테스트 기준
 - [spec/security-scanner.md](./security-scanner.md) — 공격 벡터 테스트 기준
