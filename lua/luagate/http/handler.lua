@@ -324,11 +324,14 @@ function _M.access()
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = ctx.decoder_error
+    -- ADR-009: propagate ffi_timeout flag for decoder Layer 2 timeout
+    ctx.ffi_timeout = (ctx.decoder_error == "ffi_timeout")
+    local log_threat_type = ctx.ffi_timeout and "ffi_timeout" or "decode_error"
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = ctx.decoder_error
-    ngx.var.luagate_threat_type = "decode_error"
+    ngx.var.luagate_threat_type = log_threat_type
     do_deny(ctx.decoder_error, ctx.request_id or "")
     return
   end

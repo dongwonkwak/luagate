@@ -133,10 +133,10 @@ local function load_log_http()
 end
 
 -- ===========================================================================
--- 27 필드 완전성 검증
+-- 28 필드 완전성 검증
 -- ===========================================================================
 
-describe("log/http.finalize — 27필드 완전성", function()
+describe("log/http.finalize — 28필드 완전성", function()
   local EXPECTED_FIELDS = {
     -- request metadata (1-13)
     "timestamp",
@@ -160,7 +160,7 @@ describe("log/http.finalize — 27필드 완전성", function()
     "threat_type",
     "threat_score",
     "rule_name",
-    -- log phase (21-27)
+    -- log phase (21-28)
     "request_state",
     "latency_ms",
     "upstream_latency_ms",
@@ -168,9 +168,10 @@ describe("log/http.finalize — 27필드 완전성", function()
     "bytes_sent",
     "active_version",
     "worker_id",
+    "ffi_timeout",
   }
 
-  it("finalize() 후 luagate_log_json이 27개 필드를 모두 포함한다", function()
+  it("finalize() 후 luagate_log_json이 28개 필드를 모두 포함한다", function()
     local ngx_mock = make_ngx()
     _G.ngx = ngx_mock
     local log_http = load_log_http()
@@ -193,7 +194,7 @@ describe("log/http.finalize — 27필드 완전성", function()
     end
   end)
 
-  it("전체 27개 필드 수 검증 (JSON 문자열에서 키 카운트가 27개 이상)", function()
+  it("전체 28개 필드 수 검증 (JSON 문자열에서 키 카운트가 28개 이상)", function()
     local ngx_mock = make_ngx()
     _G.ngx = ngx_mock
     local log_http = load_log_http()
@@ -208,7 +209,7 @@ describe("log/http.finalize — 27필드 완전성", function()
     for _ in json_str:gmatch('"[^"]+":') do
       count = count + 1
     end
-    assert.is_true(count >= 27, "필드 수 부족: " .. count .. " (최소 27개 필요)")
+    assert.is_true(count >= 28, "필드 수 부족: " .. count .. " (최소 28개 필요)")
   end)
 end)
 
