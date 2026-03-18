@@ -328,3 +328,5 @@ COMPLETED_REVIEW: DON-197-code (2026-03-18)
 | 2026-03-18 | DON-157 | FFI 타임아웃 강제 구현 (ADR-009 기반) — Lua wrapper | `lua/luagate/scanner/ffi.lua`, `lua/luagate/decoder/ffi.lua`, `lua/luagate/stream/ffi.lua`, `tests/unit/scanner/ffi_spec.lua`, `tests/unit/decoder/ffi_spec.lua`, `tests/unit/stream/ffi_spec.lua` | LUAGATE_TIMEOUT(-5) 핸들링, per-worker leak counter, ffi_timeout threat_type. 706 tests 통과. Codex 리뷰 대기 |
 
 COMPLETED_REVIEW: DON-197-code (2026-03-18)
+
+COMPLETED_REVIEW: DON-157-code (2026-03-18)
