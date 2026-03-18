@@ -308,6 +308,17 @@ describe("metrics.collector.record — latency histogram bucket", function()
 
     assert.are.equal(1, ngx_mock._get_counter("latency:bucket:1000"))
   end)
+
+  it("latency histogram sum/count도 함께 기록한다", function()
+    local ngx_mock = make_ngx({ var = { status = "200", request_time = "0.010" } })
+    _G.ngx = ngx_mock
+    local collector = load_collector()
+
+    collector.record({ action = "allow" })
+
+    assert.are.equal(10, ngx_mock._get_counter("latency:sum"))
+    assert.are.equal(1, ngx_mock._get_counter("latency:count"))
+  end)
 end)
 
 -- ===========================================================================

@@ -10,6 +10,8 @@
 --   metrics:http:status:<code>              — per-status-code counter
 --   latency:bucket:<ms>                     — latency histogram bucket
 --   latency:bucket:+Inf                     — +Inf bucket
+--   latency:sum                             — latency histogram sum (ms)
+--   latency:count                           — latency histogram count
 --
 -- Design rules:
 --   - No blocking I/O.
@@ -116,6 +118,8 @@ function _M.record(ctx)
   local latency_ms = request_time_s * 1000
   local bucket = latency_bucket(latency_ms)
   safe_incr(dict, "latency:bucket:" .. bucket)
+  safe_incr(dict, "latency:sum", latency_ms)
+  safe_incr(dict, "latency:count")
 end
 
 return _M
