@@ -1,0 +1,861 @@
+--- Unit tests for lua/luagate/stream/handler.lua
+-- Implementation: lua/luagate/stream/handler.lua
+-- Tests: tests/unit/stream/handler_spec.lua
+--
+-- handler.lua는 OpenResty ngx 전역에 강하게 의존하므로
+-- 모든 테스트에서 ngx mock을 주입한다.
+--
+-- Stubs injected before module load:
+--   - luagate.policy.evaluator -> 제어 가능한 stub
+--   - luagate.stream.ffi       -> 제어 가능한 stub
+
+-- ---------------------------------------------------------------------------
+-- evaluator stub
+-- ---------------------------------------------------------------------------
+local _evaluator_stub = {
+  get_policy_result = nil, -- nil = 정책 없음, table = 정책 반환
+  evaluate_stream_result = nil, -- evaluate_stream() 반환값 제어
+  get_policy_error = nil, -- get_policy() 에러 시뮬레이션
+}
+
+package.preload["luagate.policy.evaluator"] = function()
+  return {
+    get_policy = function()
+      if _evaluator_stub.get_policy_error then
+        error(_evaluator_stub.get_policy_error)
+      end
+      return _evaluator_stub.get_policy_result
+    end,
+    evaluate_stream = function(_rules, _ctx)
+      if _evaluator_stub.evaluate_stream_result then
+        return _evaluator_stub.evaluate_stream_result
+      end
+      return { action = "deny", matched_rule = nil, decision_source = "default" }
+    end,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- stream.ffi stub
+-- ---------------------------------------------------------------------------
+local _stream_ffi_stub = {
+  detect_result = nil, -- { protocol, err, need_more }
+  sni_result = nil, -- { sni, err, need_more }
+}
+
+local _stream_ffi_module = {
+  detect_protocol = function(_data)
+    if _stream_ffi_stub.detect_result then
+      local r = _stream_ffi_stub.detect_result
+      return r[1], r[2], r[3]
+    end
+    return "raw", nil, false
+  end,
+  extract_sni = function(_data)
+    if _stream_ffi_stub.sni_result then
+      local r = _stream_ffi_stub.sni_result
+      return r[1], r[2], r[3]
+    end
+    return "", nil, false
+  end,
+}
+
+package.preload["luagate.stream.ffi"] = function()
+  return _stream_ffi_module
+end
+
+-- ---------------------------------------------------------------------------
+-- ngx mock factory (stream context)
+-- ---------------------------------------------------------------------------
+local function make_ngx(overrides)
+  local exited_with = nil
+  local logged = {}
+
+  local incr_calls = {}
+
+  local mock = {
+    var = {
+      connection = "1001",
+      remote_addr = "10.0.0.1",
+      remote_port = "54321",
+      server_port = "443",
+      -- luagate_ prefix nginx variables
+      luagate_conn_id = "",
+      luagate_worker_id = "0",
+      luagate_active_version = "none",
+      luagate_stream_action = "",
+      luagate_request_state = "",
+      luagate_protocol = "",
+      luagate_sni = "",
+      luagate_decision_source = "",
+      luagate_matched_rule = "",
+      luagate_upstream = "",
+    },
+    ctx = {},
+    shared = {
+      luagate_policy = {
+        get = function(_, _key)
+          return nil
+        end,
+      },
+      luagate_connections = {
+        incr = function(_, key, delta, default)
+          table.insert(incr_calls, { key = key, delta = delta, default = default })
+          return 1, nil
+        end,
+      },
+    },
+    WARN = 5,
+    ERR = 4,
+    INFO = 6,
+    ERROR = -1, -- ngx.ERROR sentinel
+    log = function(_, ...)
+      local parts = { ... }
+      logged[#logged + 1] = table.concat(parts, "")
+    end,
+    exit = function(code)
+      exited_with = code
+    end,
+    now = function()
+      return 1710633600.0
+    end,
+    worker = {
+      id = function()
+        return 0
+      end,
+    },
+    req = {
+      socket = function()
+        -- Default: returns a mock socket with successful receive
+        return {
+          receive = function(_, _bytes)
+            return "\x16\x03\x01\x00\x05mock-tls-data"
+          end,
+        }
+      end,
+    },
+  }
+
+  -- Tracking accessors
+  mock._get_exited = function()
+    return exited_with
+  end
+  mock._get_logged = function()
+    return logged
+  end
+  mock._get_incr_calls = function()
+    return incr_calls
+  end
+
+  -- Override support
+  if overrides then
+    for k, v in pairs(overrides) do
+      if type(v) == "table" and type(mock[k]) == "table" then
+        for k2, v2 in pairs(v) do
+          mock[k][k2] = v2
+        end
+      else
+        mock[k] = v
+      end
+    end
+  end
+
+  return mock
+end
+
+-- ---------------------------------------------------------------------------
+-- Module load
+-- ---------------------------------------------------------------------------
+local _saved_ngx = _G.ngx
+_G.ngx = make_ngx()
+
+local handler = require("luagate.stream.handler")
+
+-- Cleanup on teardown
+teardown(function()
+  _G.ngx = _saved_ngx
+  package.preload["luagate.policy.evaluator"] = nil
+  package.preload["luagate.stream.ffi"] = nil
+  package.loaded["luagate.policy.evaluator"] = nil
+  package.loaded["luagate.stream.ffi"] = nil
+  package.loaded["luagate.stream.handler"] = nil
+end)
+
+-- ---------------------------------------------------------------------------
+-- Helper: reset stubs
+-- ---------------------------------------------------------------------------
+local function reset_stubs()
+  _evaluator_stub.get_policy_result = nil
+  _evaluator_stub.evaluate_stream_result = nil
+  _evaluator_stub.get_policy_error = nil
+  _stream_ffi_stub.detect_result = nil
+  _stream_ffi_stub.sni_result = nil
+  package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  package.loaded["luagate.policy.evaluator"] = nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Helper: make a standard policy for proxy tests
+-- ---------------------------------------------------------------------------
+local function make_proxy_policy()
+  return {
+    global = { default_action = "deny" },
+    rules = {},
+    stream_rules = {},
+    _compiled_stream = {},
+  }
+end
+
+-- ===========================================================================
+-- TLS + SNI -> policy proxy -> upstream 설정
+-- ===========================================================================
+
+describe("handler.preread - TLS + SNI -> policy proxy", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("TLS + SNI -> evaluate proxy -> upstream 설정, request_state = 'proxied'", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-tls-allow",
+      decision_source = "rule",
+      upstream = "backend-tls:8443",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.is_not_nil(ctx)
+    assert.equals("tls", ctx.detected_protocol)
+    assert.equals("example.com", ctx.sni)
+    assert.equals("proxy", ctx.action)
+    assert.equals("rule-tls-allow", ctx.matched_rule_id)
+    assert.equals("backend-tls:8443", ctx.upstream)
+    assert.equals("proxied", ctx.request_state)
+    assert.equals("backend-tls:8443", ngx_mock.var.luagate_upstream)
+    assert.is_nil(ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- TLS + SNI -> policy deny -> ngx.exit(ERROR)
+-- ===========================================================================
+
+describe("handler.preread - TLS + SNI -> policy deny", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("TLS + SNI -> evaluate deny -> ngx.exit(ERROR)", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "blocked.com", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = "rule-block-tls",
+      decision_source = "rule",
+      upstream = nil,
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("deny", ctx.action)
+    assert.equals("denied", ctx.request_state)
+    assert.equals("rule-block-tls", ctx.deny_reason)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+    assert.equals("deny", ngx_mock.var.luagate_stream_action)
+    assert.equals("denied", ngx_mock.var.luagate_request_state)
+  end)
+end)
+
+-- ===========================================================================
+-- HTTP 프로토콜 탐지 -> policy proxy
+-- ===========================================================================
+
+describe("handler.preread - HTTP protocol -> policy proxy", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("HTTP 프로토콜 탐지 -> proxy", function()
+    _stream_ffi_stub.detect_result = { "http", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-http",
+      decision_source = "rule",
+      upstream = "http-backend:80",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("http", ctx.detected_protocol)
+    assert.is_nil(ctx.sni) -- SNI extraction skipped for non-TLS
+    assert.equals("proxy", ctx.action)
+    assert.equals("proxied", ctx.request_state)
+    assert.equals("http-backend:80", ctx.upstream)
+    assert.is_nil(ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- raw 프로토콜 -> policy deny (기본 정책)
+-- ===========================================================================
+
+describe("handler.preread - raw protocol -> default deny", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("raw 프로토콜 -> evaluate deny (기본 정책)", function()
+    _stream_ffi_stub.detect_result = { "raw", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("raw", ctx.detected_protocol)
+    assert.equals("deny", ctx.action)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- peek I/O 실패 -> fail-closed
+-- ===========================================================================
+
+describe("handler.preread - peek I/O 실패 -> fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("socket 획득 실패 -> fail-closed (ngx.exit ERROR)", function()
+    -- Override ngx.req.socket to fail
+    ngx_mock.req.socket = function()
+      return nil, "no socket"
+    end
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("socket_error", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+  end)
+
+  it("receive 실패 -> fail-closed (peek_io_error)", function()
+    -- Override ngx.req.socket to return a socket that fails on receive
+    ngx_mock.req.socket = function()
+      return {
+        receive = function()
+          return nil, "connection reset"
+        end,
+      }
+    end
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("peek_io_error", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- detect_protocol 실패 -> fail-closed
+-- ===========================================================================
+
+describe("handler.preread - detect_protocol 실패 -> fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("detect_protocol 에러 -> fail-closed", function()
+    _stream_ffi_stub.detect_result = { nil, "invalid_input", false }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.truthy(ctx.deny_reason and ctx.deny_reason:find("detect_error"))
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- NEED_MORE_DATA -> fail-closed
+-- ===========================================================================
+
+describe("handler.preread - NEED_MORE_DATA -> fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("detect_protocol NEED_MORE_DATA -> fail-closed", function()
+    _stream_ffi_stub.detect_result = { nil, nil, true }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("detect_need_more_data", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- SNI 추출 실패 -> 계속 진행 (graceful degradation)
+-- ===========================================================================
+
+describe("handler.preread - SNI 추출 실패 -> graceful degradation", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("SNI 에러 -> sni = nil로 설정하고 계속 진행", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { nil, "invalid_input", false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-fallback",
+      decision_source = "rule",
+      upstream = "fallback:443",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.is_nil(ctx.sni)
+    assert.equals("tls", ctx.detected_protocol)
+    assert.equals("proxy", ctx.action)
+    assert.equals("proxied", ctx.request_state)
+    -- Should NOT have called ngx.exit
+    assert.is_nil(ngx_mock._get_exited())
+  end)
+
+  it("SNI NEED_MORE_DATA -> sni = nil로 설정하고 계속 진행", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { nil, nil, true }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-x",
+      decision_source = "rule",
+      upstream = "backend:443",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.is_nil(ctx.sni)
+    assert.equals("proxied", ctx.request_state)
+  end)
+end)
+
+-- ===========================================================================
+-- evaluator 없는 경우 -> fail-closed
+-- ===========================================================================
+
+describe("handler.preread - evaluator 로드 실패 -> fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("evaluator require 실패 -> fail-closed", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+
+    -- Make evaluator load fail
+    package.loaded["luagate.policy.evaluator"] = nil
+    local saved = package.preload["luagate.policy.evaluator"]
+    package.preload["luagate.policy.evaluator"] = function()
+      error("evaluator module not found")
+    end
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("evaluator_load_error", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+
+    -- Restore
+    package.preload["luagate.policy.evaluator"] = saved
+  end)
+end)
+
+-- ===========================================================================
+-- no policy -> fail-closed
+-- ===========================================================================
+
+describe("handler.preread - 정책 없음 -> fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("get_policy() = nil -> fail-closed deny", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = nil
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("no_policy", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+    assert.equals("deny", ngx_mock.var.luagate_stream_action)
+  end)
+
+  it("get_policy() 에러 -> fail-closed", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_error = "db connection failed"
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("policy_load_error", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- shared dict incr 호출 확인 (active_stream)
+-- ===========================================================================
+
+describe("handler.preread - active_stream counter", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("preread 시 luagate_connections.incr('active_stream', 1, 0) 호출", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-a",
+      decision_source = "rule",
+      upstream = "up:443",
+    }
+
+    handler.preread()
+
+    local incr_calls = ngx_mock._get_incr_calls()
+    assert.is_true(#incr_calls >= 1)
+
+    local found = false
+    for _, call in ipairs(incr_calls) do
+      if call.key == "active_stream" and call.delta == 1 and call.default == 0 then
+        found = true
+        break
+      end
+    end
+    assert.is_true(found, "expected incr('active_stream', 1, 0) call")
+  end)
+
+  it("luagate_connections가 nil이어도 에러 없이 진행", function()
+    ngx_mock.shared.luagate_connections = nil
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-a",
+      decision_source = "rule",
+      upstream = "up:443",
+    }
+
+    -- Should not error
+    handler.preread()
+    assert.is_nil(ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- ngx.ctx.luagate_stream 컨텍스트 올바른 설정
+-- ===========================================================================
+
+describe("handler.preread - ngx.ctx.luagate_stream 컨텍스트", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("ctx에 connection_id가 설정된다 (sw prefix + worker_id)", function()
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.is_not_nil(ctx.connection_id)
+    assert.truthy(ctx.connection_id:find("^sw0%-"))
+  end)
+
+  it("ctx에 src_ip가 ngx.var.remote_addr로 설정된다", function()
+    ngx_mock.var.remote_addr = "192.168.1.100"
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("192.168.1.100", ctx.src_ip)
+  end)
+
+  it("ctx에 dst_port가 ngx.var.server_port로 설정된다", function()
+    ngx_mock.var.server_port = "8443"
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals(8443, ctx.dst_port)
+  end)
+
+  it("ctx.action 기본값은 'deny' (fail-closed)", function()
+    -- Even before policy evaluation, default is deny
+    -- Force early exit by failing socket to see default
+    ngx_mock.req.socket = function()
+      return nil, "socket error"
+    end
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("deny", ctx.action)
+  end)
+
+  it("ctx.worker_id가 ngx.worker.id() 값으로 설정된다", function()
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals(0, ctx.worker_id)
+  end)
+
+  it("ctx.start_time_ms가 양수로 설정된다", function()
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.is_number(ctx.start_time_ms)
+    assert.is_true(ctx.start_time_ms > 0)
+  end)
+
+  it("ctx.active_version이 shared dict에서 읽힌다", function()
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return "v2026-03-18"
+      end
+      return nil
+    end
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("v2026-03-18", ctx.active_version)
+  end)
+
+  it("shared dict 없으면 active_version = 'none'", function()
+    ngx_mock.shared.luagate_policy = nil
+    handler.preread()
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("none", ctx.active_version)
+  end)
+
+  it("luagate_conn_id nginx 변수가 설정된다", function()
+    handler.preread()
+    assert.is_not_nil(ngx_mock.var.luagate_conn_id)
+    assert.truthy(ngx_mock.var.luagate_conn_id ~= "")
+  end)
+
+  it("luagate_worker_id nginx 변수가 '0'으로 설정된다", function()
+    handler.preread()
+    assert.equals("0", ngx_mock.var.luagate_worker_id)
+  end)
+end)
+
+-- ===========================================================================
+-- FFI 로드 실패 -> fail-closed
+-- ===========================================================================
+
+describe("handler.preread - FFI 로드 실패 -> fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("stream.ffi require 실패 -> ffi_load_error, fail-closed", function()
+    package.loaded["luagate.stream.ffi"] = nil
+    local saved = package.preload["luagate.stream.ffi"]
+    package.preload["luagate.stream.ffi"] = function()
+      error("libluagate_stream.so not found")
+    end
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("ffi_load_error", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+
+    -- Restore
+    package.preload["luagate.stream.ffi"] = saved
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+end)
+
+-- ===========================================================================
+-- empty preread data -> fail-closed
+-- ===========================================================================
+
+describe("handler.preread - empty preread data -> fail-closed", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("빈 preread 데이터 -> empty_preread deny", function()
+    ngx_mock.req.socket = function()
+      return {
+        receive = function()
+          return nil, "timeout"
+        end,
+      }
+    end
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("empty_preread", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- ngx.ctx에 policy 객체가 저장되지 않는다 (불변식)
+-- ===========================================================================
+
+describe("handler.preread - 불변식: ngx.ctx 정책 캐시 금지", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("preread 후 ngx.ctx에 policy 객체가 저장되지 않는다", function()
+    local policy_obj = make_proxy_policy()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = policy_obj
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-a",
+      decision_source = "rule",
+      upstream = "up:443",
+    }
+
+    handler.preread()
+
+    assert.is_nil(ngx_mock.ctx.luagate_stream.policy)
+    assert.are_not.equal(ngx_mock.ctx.luagate_stream, policy_obj)
+  end)
+end)
+
+-- ===========================================================================
+-- Non-TLS protocol does not call extract_sni
+-- ===========================================================================
+
+describe("handler.preread - non-TLS protocol skips SNI extraction", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("HTTP protocol -> extract_sni 호출하지 않고 sni = nil", function()
+    local sni_called = false
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "http", nil, false
+      end,
+      extract_sni = function()
+        sni_called = true
+        return "should-not-be-called", nil, false
+      end,
+    }
+
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-http",
+      decision_source = "rule",
+      upstream = "http:80",
+    }
+
+    handler.preread()
+
+    assert.is_false(sni_called)
+    assert.is_nil(ngx_mock.ctx.luagate_stream.sni)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+end)
