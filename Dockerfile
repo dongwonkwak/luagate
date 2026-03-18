@@ -28,6 +28,18 @@ RUN cd /build/src/scanner && cargo build --release \
  && mkdir -p /build/artifacts \
  && find /build/src -name 'libluagate_*.so' -path '*/release/*' -exec cp {} /build/artifacts/ \;
 
+# ── Stage 1c: Dashboard UI build ──────────────────────────────────────────
+FROM node:20-alpine AS ui-builder
+
+WORKDIR /build/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+
+COPY ui/index.html ui/tsconfig.json ui/vite.config.ts ui/tailwind.config.ts ui/postcss.config.js ./
+COPY ui/src/ ./src/
+
+RUN npm run build
+
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM openresty/openresty:1.25.3.2-alpine
 
@@ -59,8 +71,8 @@ COPY lua/luagate /usr/local/openresty/lualib/luagate/
 # Copy nginx config file only
 COPY conf/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
-# Copy Dashboard UI build output (run `make ui-build` before docker build)
-COPY ui/dist/ /etc/luagate/ui/dist/
+# Copy Dashboard UI build output
+COPY --from=ui-builder /build/ui/dist/ /etc/luagate/ui/dist/
 
 # Copy policies
 COPY policies/ /etc/luagate/policies/
