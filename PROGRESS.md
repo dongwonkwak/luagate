@@ -291,3 +291,5 @@ COMPLETED_REVIEW: DON-154-design (2026-03-18)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-18 | DON-198 | CI 정합성 확보: npm + e2e/ 위치 + base URL 정리 | `e2e/package.json`, `e2e/playwright.config.ts`, `docs/spec/test-strategy.md`, `Makefile`, `.gitignore` | e2e/ scaffold, test-strategy §9 E2E 추가, make e2e 타겟. Codex 리뷰 불필요 (문서+scaffold) |
+
+PENDING_REVIEW: DON-168-code
