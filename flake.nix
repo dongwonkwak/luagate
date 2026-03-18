@@ -26,8 +26,12 @@
             luajitPackages.luacheck
             stylua
 
-            # ── C/Rust tooling ─────────────────────────────────────────────
-            clang-tools   # clang-format (C 헤더 포맷용으로 유지)
+            # ── Rust tooling ──────────────────────────────────────────────
+            rustc
+            cargo
+            clippy
+            rustfmt
+            clang-tools   # clang-format (설정 파일 포맷용으로 유지)
 
             # ── Perl tooling ─────────────────────────────────────────────
             perl

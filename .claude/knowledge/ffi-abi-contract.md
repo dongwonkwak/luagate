@@ -115,6 +115,68 @@ int luagate_normalize_nfkc(
 
 ---
 
+## luagate_stream.so
+
+### `luagate_detect_protocol`
+
+```c
+int luagate_detect_protocol(
+    const char *buf, size_t buf_len,
+    char *protocol_out, size_t protocol_cap, size_t *protocol_len
+);
+```
+
+| 인수 | Ownership | NULLable | Max Length |
+|------|----------|---------|-----------|
+| `buf` | Caller | No | 65536 bytes (64KB cap) |
+| `protocol_out` | Caller (ffi.new) | No | protocol_cap bytes |
+
+### `luagate_extract_sni`
+
+```c
+int luagate_extract_sni(
+    const char *buf, size_t buf_len,
+    char *out, size_t out_cap, size_t *out_len
+);
+```
+
+**에러 코드 맵** (detect_protocol, extract_sni 공통):
+
+| 반환값 | 의미 | Lua 처리 |
+|--------|------|---------|
+| `0` | 성공 | out 버퍼 사용 |
+| `-1` | NEED_MORE_DATA | 재시도 (preread 재수집) |
+| `-2` | BUFFER_TOO_SMALL | fail-closed |
+| `-4` | INTERNAL_ERROR | fail-closed |
+
+### `luagate_radix_build` / `luagate_radix_lookup` / `luagate_radix_free`
+
+```c
+typedef struct LuagateRadix luagate_radix_t;
+
+int luagate_radix_build(
+    const char *cidr_list, size_t cidr_list_len,
+    luagate_radix_t **tree_out
+);
+int luagate_radix_lookup(
+    const luagate_radix_t *tree,
+    const char *ip_str, size_t ip_str_len,
+    uint32_t *matched_rule_index_out
+);
+int luagate_radix_free(luagate_radix_t *tree);
+```
+
+**메모리 관리**: radix tree는 **Rust가 할당**하며, `luagate_radix_free()` 호출 필수.
+`ffi.gc`로 자동 해제를 등록하는 것이 권장 패턴.
+
+| 반환값 | 의미 | Lua 처리 |
+|--------|------|---------|
+| `0` | 성공 | tree_out 포인터 사용 |
+| `-1` | INVALID_INPUT (잘못된 CIDR) | fail-closed |
+| `-4` | INTERNAL_ERROR | fail-closed |
+
+---
+
 ## 공통 ABI 규칙
 
 1. **caller-allocated buffer**: 모든 출력은 caller가 미리 할당한 버퍼에 기록. `*_len` out 파라미터로 실제 길이 반환
@@ -178,3 +240,4 @@ end
 - `.claude/knowledge/rust-ffi-guide.md` — 메모리 관리 가이드
 - `lua/luagate/scanner/ffi.lua` — 스캐너 바인딩 구현
 - `lua/luagate/decoder/ffi.lua` — 디코더 바인딩 구현
+- `lua/luagate/stream/ffi.lua` — 스트림 바인딩 구현

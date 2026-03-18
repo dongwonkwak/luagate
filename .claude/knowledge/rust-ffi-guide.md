@@ -18,6 +18,7 @@
 |------|----------|------|------|
 | 보안 스캐너 | `luagate_scanner.so` | `src/scanner/` | 위협 탐지, OWASP 패턴 매칭 |
 | URL 디코더 | `luagate_decoder.so` | `src/decoder/` | 멀티레이어 인코딩 디코딩/정규화 |
+| Stream 프로토콜 | `luagate_stream.so` | `src/stream/` | TLS SNI 추출, 프로토콜 탐지, radix tree |
 
 ## 라이브러리 로드 (init_by_lua에서 1회)
 
@@ -50,7 +51,7 @@ end
 
 LuaGate FFI는 **caller-allocated buffer** 모델을 사용한다.
 Rust는 메모리를 할당하여 반환하지 않고, Lua가 미리 할당한 버퍼에 결과를 기록한다.
-따라서 `free` 함수가 필요 없다.
+**예외**: `luagate_stream.so`의 radix tree는 Rust가 할당하며, `luagate_radix_free()`로 해제 필수.
 
 ### 규칙 1: Caller-allocated buffer 패턴
 
@@ -153,7 +154,7 @@ end
 
 ```bash
 make build-ffi
-# = cargo build --release (src/scanner, src/decoder)
+# = cargo build --release (src/scanner, src/decoder, src/stream)
 # + cp *.so lib/
 ```
 
@@ -174,7 +175,7 @@ describe("Scanner FFI", function()
         local result = scanner.scan({
             path_raw = "/search",
             path_normalized = "/search",
-            query_string = "id=1' OR '1'='1",
+            query_raw = "id=1' OR '1'='1",
         })
         assert.equals("sqli", result.threat_type)
         assert.truthy(result.threat_score > 0.7)

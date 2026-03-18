@@ -130,7 +130,7 @@ pre-commit (lint/format) + commit-msg (commitlint) + pre-push (test-unit) hooks 
 
 ```bash
 make test           # 전체 테스트
-make test-unit      # Lua + C 단위 테스트
+make test-unit      # Lua + Rust 단위 테스트
 make up             # Docker Compose 기동
 make down           # Docker Compose 종료
 ```
