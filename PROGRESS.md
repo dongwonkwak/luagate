@@ -291,3 +291,11 @@ COMPLETED_REVIEW: DON-154-design (2026-03-18)
 | 날짜 | 이슈 | 제목 | 산출물 | 비고 |
 |------|------|------|--------|------|
 | 2026-03-18 | DON-198 | CI 정합성 확보: npm + e2e/ 위치 + base URL 정리 | `e2e/package.json`, `e2e/playwright.config.ts`, `docs/spec/test-strategy.md`, `Makefile`, `.gitignore` | e2e/ scaffold, test-strategy §9 E2E 추가, make e2e 타겟. Codex 리뷰 불필요 (문서+scaffold) |
+
+COMPLETED_REVIEW: DON-168-code (2026-03-18)
+
+## Phase 2-Dashboard: UI 리뷰 체크리스트 + CI 품질 워크플로우
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-18 | DON-168 | ui-review-checklist.md 지식 파일 생성 | `.claude/knowledge/ui-review-checklist.md`, `AGENTS.md` | 5섹션(TS/React, 보안, API, Playwright, 접근성). Codex 리뷰 1건 수정(헤더 개수), 2건 DON-169 범위 |

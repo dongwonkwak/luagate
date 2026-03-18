@@ -54,7 +54,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 - **재리뷰 시 기해결 항목 지적 금지** — 기존 `[x]` 항목은 추가 지적하지 않음. 미해결 항목만 재검토
 - **테스트 실행 주체** — 테스트 실행은 사람이 수동으로 요청. Claude Code는 수정만 수행, Codex는 리뷰만 수행
 
-## .claude/knowledge/ 참조 맵 (전체 9개 + 신규 6개)
+## .claude/knowledge/ 참조 맵 (전체 16개)
 
 | 파일 | 내용 | 참조 시점 |
 |------|------|---------|
@@ -71,6 +71,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 | `admin-auth-contract.md` | 인증 헤더, timing-safe compare, 401 body, rate limit | Admin API 인증 구현 시 |
 | `logging-contract.md` | native vs Lua log, decision fields, PII redaction | 로그 관련 작업 시 |
 | `ffi-abi-contract.md` | 함수별 ownership, NULLability, max length, error code | FFI 함수 추가 시 |
+| `ui-review-checklist.md` | UI 코드 리뷰 체크리스트 (TypeScript/React/Playwright) | UI PR 리뷰 시 |
 | `interview-points.md` → `docs/human/` | 면접 포인트 (DON-116에서 이동) | — |
 | `portfolio-synergy.md` → `docs/human/` | 포트폴리오 시너지 (DON-116에서 이동) | — |
 
