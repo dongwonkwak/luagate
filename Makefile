@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-c test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build e2e
+.PHONY: build test test-unit test-unit-lua test-unit-c test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint e2e
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -156,6 +156,10 @@ ui-build:
 	@echo "==> Building UI for production..."
 	@echo "    Output: ui/dist/ (Docker COPY maps to /etc/luagate/ui/dist)"
 	cd ui && npm run build
+
+ui-lint:
+	@echo "==> Running UI lint + format check..."
+	cd ui && npm run lint && npm run format:check
 
 # ── E2E (Playwright) ──────────────────────────────────────────────────────
 e2e:
