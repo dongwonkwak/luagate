@@ -14,6 +14,27 @@ local ffi_load_count = 0
 local scan_calls = {}
 local init_calls = {}
 local mock_lib = {}
+local ngx_log_calls = {}
+local ngx_shared_metrics = {}
+
+-- Mock ngx global for timeout leak counter tests
+_G.ngx = _G.ngx or {}
+ngx.ERR = 0
+ngx.log = function(level, ...)
+  table.insert(ngx_log_calls, { level = level, args = { ... } })
+end
+ngx.worker = {
+  id = function()
+    return 0
+  end,
+}
+ngx.shared = {
+  luagate_metrics = {
+    incr = function(_, key, val, init)
+      ngx_shared_metrics[key] = (ngx_shared_metrics[key] or init or 0) + val
+    end,
+  },
+}
 
 local ffi_stub = {
   cdef = function() end,
@@ -80,6 +101,8 @@ local function reset_state()
   scan_calls = {}
   init_calls = {}
   mock_lib = {}
+  ngx_log_calls = {}
+  ngx_shared_metrics = {}
   package.loaded["luagate.scanner.ffi"] = nil
   package.loaded["_luagate_scanner_lib"] = nil
 end
@@ -260,6 +283,52 @@ describe("luagate.scanner.ffi", function()
       assert.is_nil(result)
       assert.truthy(err and err:find("scanner_fail"))
       assert.truthy(err and err:find("-4"))
+    end)
+
+    it("returns ffi_timeout result on LUAGATE_TIMEOUT (-5)", function()
+      local scanner = load_module_with({ scan_rc = -5 })
+
+      local result, err = scanner.scan({
+        path_raw = "/ok",
+        path_normalized = "/ok",
+      })
+
+      assert.is_nil(err)
+      assert.is_not_nil(result)
+      assert.equals("ffi_timeout", result.threat_type)
+      assert.equals("scanner_timeout", result.rule_name)
+      assert.equals(0.0, result.threat_score)
+      assert.is_true(result.ffi_timeout)
+    end)
+
+    it("increments per-worker leak counter on LUAGATE_TIMEOUT", function()
+      local scanner = load_module_with({ scan_rc = -5 })
+
+      scanner.scan({ path_raw = "/ok", path_normalized = "/ok" })
+
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:leak:0"])
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:scanner:0"])
+    end)
+
+    it("logs ERR on LUAGATE_TIMEOUT", function()
+      local scanner = load_module_with({ scan_rc = -5 })
+
+      scanner.scan({ path_raw = "/ok", path_normalized = "/ok" })
+
+      assert.is_true(#ngx_log_calls > 0)
+      assert.equals(ngx.ERR, ngx_log_calls[1].level)
+    end)
+
+    it("returns ffi_timeout = false on normal scan", function()
+      local scanner = load_module_with()
+
+      local result, err = scanner.scan({
+        path_raw = "/health",
+        path_normalized = "/health",
+      })
+
+      assert.is_nil(err)
+      assert.is_false(result.ffi_timeout)
     end)
 
     it("returns scanner_ffi_error when luagate_scan_http raises", function()

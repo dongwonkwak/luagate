@@ -57,6 +57,19 @@ local LUAGATE_OK = 0
 local LUAGATE_BUFFER_TOO_SMALL = -2
 local LUAGATE_BUDGET_EXCEEDED = -3
 local LUAGATE_INTERNAL_ERROR = -4
+local LUAGATE_TIMEOUT = -5
+
+--- Increment per-worker FFI timeout leak counter in shared dict.
+-- ADR-009 Layer 2: tracks detached watchdog threads per worker.
+-- Uses ngx.worker.id() per AGENTS.md invariant.
+local function incr_timeout_leak(module_name)
+  local dict = ngx.shared.luagate_metrics
+  if dict then
+    local wid = ngx.worker.id()
+    dict:incr("ffi:timeout:leak:" .. wid, 1, 0)
+    dict:incr("ffi:timeout:" .. module_name .. ":" .. wid, 1, 0)
+  end
+end
 
 -- Initial output buffer capacity (4 KB).
 -- Most URLs fit within this; the retry path doubles it once.
@@ -85,6 +98,13 @@ local function call_with_retry(fn, input, input_len)
     buf = ffi.new("char[?]", cap)
     out_len[0] = 0
     rc = fn(input, input_len, buf, cap, out_len)
+  end
+
+  -- ADR-009 Layer 2: hard timeout from watchdog thread
+  if rc == LUAGATE_TIMEOUT then
+    ngx.log(ngx.ERR, "decoder FFI hard timeout exceeded (Layer 2 watchdog)")
+    incr_timeout_leak("decoder")
+    return nil, "ffi_timeout"
   end
 
   -- Hard failures: budget exceeded, internal error, or buffer still too small after retry

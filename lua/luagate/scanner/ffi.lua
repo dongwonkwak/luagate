@@ -47,6 +47,24 @@ end
 local THREAT_BUF_CAP = 64
 local RULE_BUF_CAP = 128
 
+-- Error code constants (docs/spec/rust-ffi-modules.md)
+local LUAGATE_BUFFER_TOO_SMALL = -2
+local LUAGATE_BUDGET_EXCEEDED = -3
+local LUAGATE_INTERNAL_ERROR = -4
+local LUAGATE_TIMEOUT = -5
+
+--- Increment per-worker FFI timeout leak counter in shared dict.
+-- ADR-009 Layer 2: tracks detached watchdog threads per worker.
+-- Uses ngx.worker.id() per AGENTS.md invariant.
+local function incr_timeout_leak(module_name)
+  local dict = ngx.shared.luagate_metrics
+  if dict then
+    local wid = ngx.worker.id()
+    dict:incr("ffi:timeout:leak:" .. wid, 1, 0)
+    dict:incr("ffi:timeout:" .. module_name .. ":" .. wid, 1, 0)
+  end
+end
+
 local M = {}
 
 --- Scan an HTTP request for threats.
@@ -106,10 +124,21 @@ function M.scan(ctx)
     return nil, "scanner_ffi_error:" .. tostring(rc)
   end
 
-  -- rc == -2: LUAGATE_BUFFER_TOO_SMALL  (threat detected but output buffer too small)
-  -- rc == -3: LUAGATE_BUDGET_EXCEEDED
-  -- rc == -4: LUAGATE_INTERNAL_ERROR
-  if rc == -2 or rc == -3 or rc == -4 then
+  -- ADR-009 Layer 2: hard timeout from watchdog thread
+  if rc == LUAGATE_TIMEOUT then
+    ngx.log(ngx.ERR, "scanner FFI hard timeout exceeded (Layer 2 watchdog)")
+    incr_timeout_leak("scanner")
+    return {
+      threat_type = "ffi_timeout",
+      rule_name = "scanner_timeout",
+      threat_score = 0.0,
+      ffi_timeout = true,
+    },
+      nil
+  end
+
+  -- Hard failures: fail-closed
+  if rc == LUAGATE_BUFFER_TOO_SMALL or rc == LUAGATE_BUDGET_EXCEEDED or rc == LUAGATE_INTERNAL_ERROR then
     return nil, "scanner_fail:" .. rc
   end
 
@@ -122,7 +151,9 @@ function M.scan(ctx)
     threat_type = threat_type,
     rule_name = rule_name,
     threat_score = score[0],
-  }, nil
+    ffi_timeout = false,
+  },
+    nil
 end
 
 --- Initialise the scanner with optional pattern directory.

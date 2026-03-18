@@ -61,6 +61,19 @@ local LUAGATE_OK = 0
 local LUAGATE_NEED_MORE_DATA = 1
 local LUAGATE_INVALID_INPUT = -1
 local LUAGATE_BUFFER_TOO_SMALL = -2
+local LUAGATE_TIMEOUT = -5
+
+--- Increment per-worker FFI timeout leak counter in shared dict.
+-- ADR-009 Layer 2: tracks detached watchdog threads per worker.
+-- Uses ngx.worker.id() per AGENTS.md invariant.
+local function incr_timeout_leak(module_name)
+  local dict = ngx.shared.luagate_metrics
+  if dict then
+    local wid = ngx.worker.id()
+    dict:incr("ffi:timeout:leak:" .. wid, 1, 0)
+    dict:incr("ffi:timeout:" .. module_name .. ":" .. wid, 1, 0)
+  end
+end
 
 -- Output buffer capacities
 local PROTOCOL_BUF_CAP = 16
@@ -88,6 +101,12 @@ function M.detect_protocol(data)
 
   if not ok then
     return nil, "stream_ffi_error:" .. tostring(rc)
+  end
+
+  if rc == LUAGATE_TIMEOUT then
+    ngx.log(ngx.ERR, "stream detect_protocol FFI hard timeout exceeded (Layer 2 watchdog)")
+    incr_timeout_leak("stream_detect")
+    return nil, "ffi_timeout"
   end
 
   if rc == LUAGATE_NEED_MORE_DATA then
@@ -126,6 +145,12 @@ function M.extract_sni(data)
 
   if not ok then
     return nil, "stream_ffi_error:" .. tostring(rc)
+  end
+
+  if rc == LUAGATE_TIMEOUT then
+    ngx.log(ngx.ERR, "stream extract_sni FFI hard timeout exceeded (Layer 2 watchdog)")
+    incr_timeout_leak("stream_sni")
+    return nil, "ffi_timeout"
   end
 
   if rc == LUAGATE_NEED_MORE_DATA then
@@ -168,6 +193,12 @@ function M.radix_build(cidr_list)
     return nil, "stream_ffi_error:" .. tostring(rc)
   end
 
+  if rc == LUAGATE_TIMEOUT then
+    ngx.log(ngx.ERR, "stream radix_build FFI hard timeout exceeded (Layer 2 watchdog)")
+    incr_timeout_leak("stream_radix_build")
+    return nil, "ffi_timeout"
+  end
+
   if rc ~= LUAGATE_OK then
     return nil, "radix_build_fail:" .. rc
   end
@@ -197,6 +228,12 @@ function M.radix_lookup(tree, ip_str)
 
   if not ok then
     return nil, "stream_ffi_error:" .. tostring(rc)
+  end
+
+  if rc == LUAGATE_TIMEOUT then
+    ngx.log(ngx.ERR, "stream radix_lookup FFI hard timeout exceeded (Layer 2 watchdog)")
+    incr_timeout_leak("stream_radix_lookup")
+    return nil, "ffi_timeout"
   end
 
   if rc ~= LUAGATE_OK then

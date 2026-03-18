@@ -23,6 +23,28 @@ local calls = {}
 -- Mock library with controllable behaviour per test
 local mock_lib = {}
 
+local ngx_log_calls = {}
+local ngx_shared_metrics = {}
+
+-- Mock ngx global for timeout leak counter tests
+_G.ngx = _G.ngx or {}
+ngx.ERR = 0
+ngx.log = function(level, ...)
+  table.insert(ngx_log_calls, { level = level, args = { ... } })
+end
+ngx.worker = {
+  id = function()
+    return 0
+  end,
+}
+ngx.shared = {
+  luagate_metrics = {
+    incr = function(_, key, val, init)
+      ngx_shared_metrics[key] = (ngx_shared_metrics[key] or init or 0) + val
+    end,
+  },
+}
+
 -- Stub ffi cdef, new, string, load
 ffi_stub = {
   cdef = function() end,
@@ -103,6 +125,8 @@ describe("luagate.decoder.ffi", function()
   before_each(function()
     -- Reset call log and module cache
     calls = {}
+    ngx_log_calls = {}
+    ngx_shared_metrics = {}
     package.loaded["luagate.decoder.ffi"] = nil
     package.loaded["_luagate_decoder_lib"] = nil
     decoder = require("luagate.decoder.ffi")
@@ -265,6 +289,55 @@ describe("luagate.decoder.ffi", function()
       local result, err = decoder.normalize_nfkc("")
       assert.is_string(result)
       assert.is_nil(err)
+    end)
+  end)
+
+  -- ── LUAGATE_TIMEOUT (-5) — ADR-009 Layer 2 ────────────────────────────────
+
+  describe("LUAGATE_TIMEOUT (-5)", function()
+    it("normalize_path returns nil + ffi_timeout on LUAGATE_TIMEOUT", function()
+      mock_lib.luagate_normalize_path = make_mock_fn("", -5)
+      local result, err = decoder.normalize_path("/slow")
+      assert.is_nil(result)
+      assert.equals("ffi_timeout", err)
+    end)
+
+    it("normalize_query returns nil + ffi_timeout on LUAGATE_TIMEOUT", function()
+      mock_lib.luagate_normalize_query = make_mock_fn("", -5)
+      local result, err = decoder.normalize_query("a=1")
+      assert.is_nil(result)
+      assert.equals("ffi_timeout", err)
+    end)
+
+    it("normalize_nfkc returns nil + ffi_timeout on LUAGATE_TIMEOUT", function()
+      mock_lib.luagate_normalize_nfkc = make_mock_fn("", -5)
+      local result, err = decoder.normalize_nfkc("test")
+      assert.is_nil(result)
+      assert.equals("ffi_timeout", err)
+    end)
+
+    it("increments per-worker leak counter on timeout", function()
+      mock_lib.luagate_normalize_path = make_mock_fn("", -5)
+      decoder.normalize_path("/slow")
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:leak:0"])
+      assert.equals(1, ngx_shared_metrics["ffi:timeout:decoder:0"])
+    end)
+
+    it("logs ERR on timeout", function()
+      mock_lib.luagate_normalize_path = make_mock_fn("", -5)
+      decoder.normalize_path("/slow")
+      assert.is_true(#ngx_log_calls > 0)
+      assert.equals(ngx.ERR, ngx_log_calls[1].level)
+    end)
+
+    it("does not retry on LUAGATE_TIMEOUT (unlike BUFFER_TOO_SMALL)", function()
+      local call_count = 0
+      mock_lib.luagate_normalize_path = function(_i, _il, _out_buf, _cap, _out_len_slot)
+        call_count = call_count + 1
+        return -5
+      end
+      decoder.normalize_path("/slow")
+      assert.equals(1, call_count)
     end)
   end)
 
