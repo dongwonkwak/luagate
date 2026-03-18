@@ -26,7 +26,7 @@ README.md
 | 방법 | 필요 도구 |
 |------|----------|
 | **권장 (Nix)** | [Nix](https://nixos.org/download) + [direnv](https://direnv.net/) |
-| 수동 | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, CMake 3.20+, Node.js 20+ |
+| 수동 | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, Node.js 20+ |
 
 ### 개발 환경 설정
 
@@ -140,7 +140,7 @@ docs(spec): update http-pipeline stream preread section [DON-90]
 | 변경 유형 | 필수 테스트 |
 |----------|-----------|
 | 정책 평가 로직 | `make test-unit-lua` |
-| FFI 모듈 | `make test-unit-c` + `make test-unit-lua` |
+| FFI 모듈 | `make test-unit-rust` + `make test-unit-lua` |
 | HTTP 파이프라인 | `make test-integration-http` |
 | Stream 파이프라인 | `make test-integration-stream` |
 | Hot Reload | `make test-reload` |

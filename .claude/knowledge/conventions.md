@@ -11,7 +11,7 @@
 - `ngx.ctx` 사용 범위: 요청 단위(request-scoped) 데이터만 저장. 정책 캐시는 module-level upvalue 사용
 
 ### C / Rust
-- C 헤더 포매터: **clang-format** (`.clang-format` 기준)
+- 포매터: **clang-format** (`.clang-format` 기준, C 헤더가 있는 경우)
 - Rust: `cargo fmt` + `cargo clippy --deny warnings`
 - FFI 함수 명명: `luagate_<module>_<action>` (예: `luagate_scan_http`)
 - Panic 전략: `panic = "abort"` — Rust panic 시 worker 즉시 abort (UB 방지)
@@ -19,7 +19,7 @@
 ### 테스트
 - Lua 단위 테스트: **busted** 프레임워크, 한국어 서술형 BDD 스타일
 - 통합 테스트: **Test::Nginx** (Docker 기반)
-- C 단위 테스트: **CMocka**
+- Rust 단위 테스트: **cargo test**
 - 커버리지 목표: 핵심 패스(policy evaluation, scanner) 80%+
 - OWASP 페이로드 픽스처: `tests/fixtures/` 에 저장
 
@@ -110,7 +110,7 @@ make install-hooks
 |------|------|------|
 | Lua 포맷 | `lua/**/*.lua`, `tests/**/*.lua` | `stylua --check` |
 | Lua 린트 | `lua/**/*.lua`, `tests/**/*.lua` | `luacheck` |
-| C 포맷 | `csrc/**/*.c/h` | `clang-format --dry-run --Werror` |
+| C 포맷 | `*.c/h` (있는 경우) | `clang-format --dry-run --Werror` |
 | Shell 린트 | `scripts/**/*.sh` | `shellcheck` |
 | Markdown 린트 | `docs/**/*.md`, `*.md` | `markdownlint` |
 | 후행 공백 / 개행 | 전체 | pre-commit built-in |
@@ -129,7 +129,7 @@ type(scope): description [DON-XX]
 | Hook | 내용 |
 |------|------|
 | `make test-unit` | busted 단위 테스트 (~10초) |
-| `clang-tidy` | C 정적 분석 (빌드 후에만) |
+| `cargo clippy` | Rust 정적 분석 |
 | `luacheck` 전체 | 전체 프로젝트 린트 |
 
 ## PR 컨벤션

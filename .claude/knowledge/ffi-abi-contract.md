@@ -1,6 +1,6 @@
 # FFI ABI Contract — 함수별 Ownership, NULLability, Max Length, Error Code Map
 
-> 참조: `docs/spec/c-ffi-modules.md`, ADR-001
+> 참조: `docs/spec/rust-ffi-modules.md`, ADR-001
 
 ## luagate_scanner.so
 
@@ -167,9 +167,9 @@ end
 
 ## 참조
 
-- `docs/spec/c-ffi-modules.md` — FFI 통합 원칙 + 공통 패턴
+- `docs/spec/rust-ffi-modules.md` — FFI 통합 원칙 + 공통 패턴
 - `docs/spec/security-scanner.md §3` — scanner C ABI 원본
 - `docs/design/adr/ADR-001` — FFI 결정
-- `.claude/knowledge/c-ffi-guide.md` — 메모리 관리 가이드
+- `.claude/knowledge/rust-ffi-guide.md` — 메모리 관리 가이드
 - `lua/luagate/scanner/ffi.lua` — 스캐너 바인딩 구현
 - `lua/luagate/decoder/ffi.lua` — 디코더 바인딩 구현

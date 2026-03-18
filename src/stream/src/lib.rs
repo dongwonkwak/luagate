@@ -1,6 +1,6 @@
 // luagate_stream — Protocol detection, TLS SNI extraction, CIDR radix tree.
 //
-// ABI contract: docs/spec/c-ffi-modules.md §6
+// ABI contract: docs/spec/rust-ffi-modules.md §6
 // All functions use the common luagate_result error codes.
 //
 // All public extern "C" functions accept raw pointers from C callers.
@@ -10,7 +10,7 @@
 
 use std::net::Ipv4Addr;
 
-// Return codes (ABI contract — docs/spec/c-ffi-modules.md §2)
+// Return codes (ABI contract — docs/spec/rust-ffi-modules.md §2)
 const LUAGATE_OK: i32 = 0;
 const LUAGATE_NEED_MORE_DATA: i32 = 1;
 const LUAGATE_INVALID_INPUT: i32 = -1;

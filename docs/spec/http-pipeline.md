@@ -42,7 +42,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
        /admin?id=1'OR'1'='1
                           │
                           ▼
-3단계: 유니코드 정규화 (NFKC — c-ffi-modules.md의 normalize_nfkc)
+3단계: 유니코드 정규화 (NFKC — rust-ffi-modules.md의 normalize_nfkc)
        /admin?id=1'OR'1'='1
                           │
                           ▼
@@ -77,7 +77,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 │     L1 캐시 active_version 비교             │
 │     └─ 변경됨 → L2에서 새 정책 로드         │
 │                                             │
-│  2. C FFI: 보안 스캐너 (§5)                 │
+│  2. Rust FFI: 보안 스캐너 (§5)               │
 │     입력: path_raw, path_normalized,        │
 │           query_raw, query_normalized       │
 │     출력: { threat_type, rule_name }        │
@@ -286,8 +286,8 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 | 단계 | Layer 1 budget (내부) | Layer 2 hard timeout (watchdog) | 설명 |
 |------|----------------------|-------------------------------|------|
-| C FFI 디코더 | 2ms | 20ms | Layer 1 초과 시 `LUAGATE_BUDGET_EXCEEDED(-3)`, Layer 2 초과 시 `LUAGATE_TIMEOUT(-5)` → fail-closed |
-| C FFI 스캐너 | 5ms | 50ms | 동일 |
+| Rust FFI 디코더 | 2ms | 20ms | Layer 1 초과 시 `LUAGATE_BUDGET_EXCEEDED(-3)`, Layer 2 초과 시 `LUAGATE_TIMEOUT(-5)` → fail-closed |
+| Rust FFI 스캐너 | 5ms | 50ms | 동일 |
 | 업스트림 연결 | — | — | 5s (`proxy_connect_timeout`) |
 | 업스트림 읽기 | — | — | 30s (`proxy_read_timeout`) |
 | 업스트림 쓰기 | — | — | 30s (`proxy_send_timeout`) |
@@ -308,4 +308,4 @@ HTTP 파이프라인 에러 분류 통일 표:
 - [spec/security-scanner.md](./security-scanner.md) — 보안 스캐너 상세
 - [spec/policy-engine.md](./policy-engine.md) — 정책 평가 엔진 상세
 - [spec/log-schema.md](./log-schema.md) — 로그 스키마 상세 (HTTP 27필드)
-- [spec/c-ffi-modules.md](./c-ffi-modules.md) — C FFI 모듈 인터페이스
+- [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — Rust FFI 모듈 인터페이스

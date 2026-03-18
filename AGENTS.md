@@ -21,7 +21,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 
 - **단일 인스턴스 배포** — 수평 확장은 LB 뒤 다중 인스턴스
 - **Worker 간 공유**: `ngx.shared.DICT` (mmap)만 사용, IPC 없음
-- **C FFI**: 각 worker에서 `ffi.load()`, 동일 worker 내 동기 호출
+- **Rust FFI**: 각 worker에서 `ffi.load()`, 동일 worker 내 동기 호출
 - **정책 캐시**: module-level upvalue (`_cached_policy`, `_cached_version`) — `ngx.ctx` 아님
 - **Stream 파이프라인**: `preread_by_lua` 기반 (HTTP의 `access_by_lua`에 해당하는 단계 없음)
 - **Shared dict 원자성**: versioned keyspace (`policy:<hash>:blob`) + active pointer swap
@@ -61,7 +61,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 | `conventions.md` | 코딩/커밋/브랜치 규칙 | 코드 작성 시 |
 | `architecture.md` | 아키텍처 요약, zone map, hot reload 7단계 | 파이프라인/zone 관련 작업 |
 | `openresty-patterns.md` | 패턴/안티패턴/gotchas | Lua 핸들러 작성 시 |
-| `c-ffi-guide.md` | FFI unsafe 경고 + 메모리 관리 규칙 | FFI 코드 작성 시 |
+| `rust-ffi-guide.md` | FFI unsafe 경고 + 메모리 관리 규칙 | FFI 코드 작성 시 |
 | `security-patterns.md` | precedence matrix, OWASP 기준, Admin 보안 | 보안 기능 구현 시 |
 | `review-checklist.md` | 코드 리뷰 체크리스트 (커버리지 상태 포함) | PR 리뷰 시 |
 | `known-limitations-detail.md` | MVP vs 영구 제약 (내부용) | 프로덕션 갭 확인 시 |
@@ -84,7 +84,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 | 정책 엔진 / Hot Reload | `docs/spec/policy-engine.md` |
 | Admin API 구현 | `docs/spec/admin-api.md` |
 | 로그 스키마 / 메트릭 | `docs/spec/log-schema.md` |
-| C FFI 모듈 인터페이스 | `docs/spec/c-ffi-modules.md` |
+| Rust FFI 모듈 인터페이스 | `docs/spec/rust-ffi-modules.md` |
 | 보안 스캐너 | `docs/spec/security-scanner.md` |
 | 전체 아키텍처 | `docs/spec/architecture.md` |
 | ADR 목록 | `docs/design/adr/` |
@@ -92,7 +92,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 ## 코딩 컨벤션
 
 - **Lua**: StyLua (`--indent-type Spaces --indent-width 4`) + luacheck
-- **C/Rust**: clang-format + `cargo fmt` + `cargo clippy --deny warnings`
+- **Rust**: `cargo fmt` + `cargo clippy --deny warnings`. clang-format은 C 헤더 포맷용으로 유지
 - 전역 변수 금지 — module-level local 또는 `ngx.ctx.luagate` 사용
 - blocking I/O 금지 (핸들러 내 `io.open`, `os.execute` 등)
 
@@ -124,7 +124,7 @@ pre-commit (lint/format) + commit-msg (commitlint) + pre-push (test-unit) hooks 
 
 - Lua 단위 테스트: **busted**, 한국어 서술형 BDD (`describe`/`it`)
 - 통합 테스트: **Test::Nginx** (Docker)
-- C 단위 테스트: **CMocka** / `cargo test`
+- Rust 단위 테스트: `cargo test`
 - OWASP 페이로드: `tests/fixtures/` 에서 로드
 - 새 기능 = 새 테스트 (필수)
 
@@ -143,7 +143,7 @@ make down           # Docker Compose 종료
 | Stream 파이프라인 | stream-pipeline.md | preread_test | 설계 대안 2개+ 시 |
 | 정책 평가 규칙 | policy-engine.md | evaluator_test | 항상 |
 | Admin API 엔드포인트 | admin-api.md | handler_test | 보안 변경 시 |
-| FFI 모듈 변경 | c-ffi-modules.md | ffi_test (Lua + Rust) | 항상 |
+| FFI 모듈 변경 | rust-ffi-modules.md | ffi_test (Lua + Rust) | 항상 |
 | 로그 스키마 변경 | log-schema.md | 로그 형식 테스트 | PII 정책 변경 시 |
 | 보안 패턴 추가 | security-scanner.md | OWASP 페이로드 테스트 | 새 탐지 카테고리 시 |
 | Shared dict zone 추가 | architecture.md zone map | zone 초기화 테스트 | 항상 |

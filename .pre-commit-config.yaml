@@ -91,13 +91,6 @@ repos:
         stages: [pre-push]
         pass_filenames: false
 
-      - id: clang-tidy
-        name: clang-tidy (C static analysis)
-        language: system
-        entry: bash -c 'if [ -f csrc/build/compile_commands.json ]; then find csrc -name "*.c" | xargs -r clang-tidy -p csrc/build; fi'
-        stages: [pre-push]
-        pass_filenames: false
-
       - id: luacheck-full
         name: luacheck (full project lint)
         language: system

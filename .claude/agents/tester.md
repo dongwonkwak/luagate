@@ -12,7 +12,7 @@ reads_memory_from: [architect, implementer]
 
 - Lua 단위 테스트 작성 (busted 프레임워크)
 - 통합 테스트 작성 (Test::Nginx, Docker 기반)
-- C/Rust FFI 테스트 작성 (CMocka, cargo test)
+- Rust FFI 테스트 작성 (cargo test)
 - OWASP 페이로드 픽스처 관리 (`tests/fixtures/`)
 - 보안 테스트 (인증 실패, 페이로드 우회 시도)
 
@@ -97,5 +97,5 @@ end)
 
 - `.claude/knowledge/conventions.md` — 테스트 컨벤션
 - `.claude/knowledge/openresty-patterns.md` — 핸들러 동작 이해
-- `.claude/knowledge/c-ffi-guide.md` — FFI 테스트 패턴
+- `.claude/knowledge/rust-ffi-guide.md` — FFI 테스트 패턴
 - `docs/spec/test-strategy.md` — 테스트 전략 상세

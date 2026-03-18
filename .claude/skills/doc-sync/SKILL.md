@@ -44,7 +44,7 @@ description: "ADR/스펙 변경 후 관련 문서 참조 링크 동기화. ADR �
 
 | ADR | 연결 spec 파일 |
 |-----|--------------|
-| ADR-001 | `architecture.md`, `c-ffi-modules.md` |
+| ADR-001 | `architecture.md`, `rust-ffi-modules.md` |
 | ADR-002 | `policy-engine.md`, `http-pipeline.md`, `stream-pipeline.md` |
 | ADR-003 | `policy-engine.md`, `admin-api.md` |
 | ADR-004 | `log-schema.md`, `admin-api.md` |

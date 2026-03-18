@@ -1,8 +1,8 @@
-# C FFI Modules Specification
+# Rust FFI Modules Specification
 
 > **ADR 참조**:
 >
-> - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — C FFI 통합 방식 및 실패 정책
+> - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — Rust FFI 통합 방식 및 실패 정책
 > - [ADR-009 FFI 타임아웃 강제](../design/adr/ADR-009-ffi-timeout-enforcement.md) — 3계층 타임아웃 방어, 에러 코드 LUAGATE_TIMEOUT(-5), copy-in/copy-out ABI 안전성
 
 ## 1. 개요
@@ -75,7 +75,7 @@ Rust 책임:
 
 ## 4. 보안 스캐너 (`luagate_scanner.so`)
 
-### 4.1 C 헤더 시그니처
+### 4.1 ABI 시그니처 (extern "C")
 
 ```c
 /* luagate_scanner.h */
@@ -169,7 +169,7 @@ return M
 
 ## 5. URL 디코더/정규화 (`luagate_decoder.so`)
 
-### 5.1 C 헤더 시그니처
+### 5.1 ABI 시그니처 (extern "C")
 
 ```c
 /* luagate_decoder.h */
@@ -220,7 +220,7 @@ int luagate_normalize_nfkc(
 - non-TLS 프로토콜 탐지 (`http`, `raw`) 불가
 - LUAGATE_NEED_MORE_DATA 상태 관리 필요
 
-→ `extract_sni`는 C FFI custom parser 유지. non-TLS 프로토콜 파싱 포함.
+→ `extract_sni`는 Rust FFI custom parser 유지. non-TLS 프로토콜 파싱 포함.
 
 ### 6.2 TLS Parser 범위 (MVP)
 
@@ -230,7 +230,7 @@ int luagate_normalize_nfkc(
 - **GREASE 값**: 무시 (RFC 8701 — 탐지 로직에 영향 없음)
 - **ECH (Encrypted Client Hello)**: 무시 (outer SNI만 사용)
 
-### 6.3 C 헤더 시그니처
+### 6.3 ABI 시그니처 (extern "C")
 
 ```c
 /* luagate_stream.h */

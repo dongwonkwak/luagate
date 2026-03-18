@@ -2,7 +2,7 @@
 -- Wraps luagate_stream.so (src/stream/) for protocol detection, SNI
 -- extraction, and CIDR radix tree operations.
 --
--- ABI contract: docs/spec/c-ffi-modules.md §6
+-- ABI contract: docs/spec/rust-ffi-modules.md §6
 --
 -- Memory management:
 --   - detect_protocol / extract_sni: caller-allocated buffers (GC-managed).

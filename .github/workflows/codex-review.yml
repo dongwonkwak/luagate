@@ -4,7 +4,7 @@
 #
 # 감지 카테고리:
 #   lua        — lua/**/*.lua
-#   c_ffi      — csrc/**/*.c, csrc/**/*.h
+#   rust_ffi   — src/**/*.rs
 #   nginx_conf — conf/**/*.conf
 #   lua_test   — tests/**/*.lua
 #   int_test   — tests/**/*.t
@@ -59,12 +59,12 @@ jobs:
 
             const cats = {
               lua:        is([/^lua\/.+\.lua$/]),
-              c_ffi:      is([/^csrc\/.+\.(c|h)$/]),
+              rust_ffi:   is([/^src\/.+\.rs$/]),
               nginx_conf: is([/^conf\/.+\.conf$/]),
               lua_test:   is([/^tests\/.+\.lua$/]),
               int_test:   is([/^tests\/.+\.t$/]),
               frontend:   is([/^frontend\//]),
-              ci_build:   is([/^\.github\//, 'Makefile', 'flake.nix', 'CMakeLists.txt']),
+              ci_build:   is([/^\.github\//, 'Makefile', 'flake.nix']),
               docs:       is([/^docs\/.+\.md$/, /^\.claude\/knowledge\/.+\.md$/, /^[^/]+\.md$/]),
               policy:     is([/^policies\/.+\.yaml$/]),
             };
@@ -93,16 +93,15 @@ jobs:
               ].join('\n'));
             }
 
-            if (cats.c_ffi) {
+            if (cats.rust_ffi) {
               directives.push([
-                '### C FFI 코드 리뷰',
+                '### Rust FFI 코드 리뷰',
                 '- 메모리 할당/해제 쌍 확인 — Rust 할당 메모리는 반드시 `luagate_*_free()` 호출로 해제',
                 '- 버퍼 오버플로 방지 — 경계 검사 누락 여부 확인',
                 '- NULL 포인터 체크 — 모든 포인터 역참조 전 NULL 검사 필수',
-                '- visibility 선언 — 공개 API만 `__attribute__((visibility("default")))`',
-                '- C11 표준 준수',
-                '- clang-format 포맷 준수 (`.clang-format` 기준)',
-                '- clang-tidy 경고 없음',
+                '- `#[no_mangle]` + `extern "C"` 선언 확인',
+                '- `panic = "abort"` 설정 확인 (Cargo.toml)',
+                '- `cargo fmt` + `cargo clippy --deny warnings` 통과',
                 '- `pcall` 래핑 필수 — FFI 호출부 Lua 측에서 `pcall`로 감싸기',
               ].join('\n'));
             }

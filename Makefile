@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-c test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint e2e
+.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint e2e
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -8,15 +8,12 @@ TEST_NGINX_SERVROOT ?= /tmp/nginx-test-servroot
 COMPOSE_PROJECT_NAME ?= luagate-test
 
 # ── Build ──────────────────────────────────────────────────────────────────
-build:
-	@echo "==> Building C extensions..."
-	cmake -S csrc -B csrc/build -DCMAKE_BUILD_TYPE=Release
-	cmake --build csrc/build
+build: build-ffi
 
 # ── Test ───────────────────────────────────────────────────────────────────
 test: test-unit test-integration-http test-integration-stream test-reload
 
-test-unit: test-unit-lua test-unit-c test-unit-rust
+test-unit: test-unit-lua test-unit-rust
 
 test-unit-lua:
 	@echo "==> Running Lua unit tests (busted)..."
@@ -35,13 +32,6 @@ test-unit-rust:
 	  fi; \
 	done
 
-test-unit-c:
-	@echo "==> Running C unit tests (CMocka)..."
-	@if [ -f csrc/build/CTestTestfile.cmake ]; then \
-	  ctest --test-dir csrc/build --output-on-failure; \
-	else \
-	  echo "  (skipping C tests — run 'make build' first)"; \
-	fi
 
 test-integration-http:
 	@echo "==> Running HTTP integration tests (Test::Nginx)..."
@@ -87,12 +77,13 @@ test-docker:
 lint:
 	@echo "==> Lua lint..."
 	luacheck lua/
-	@echo "==> C lint..."
-	@if [ -f csrc/build/compile_commands.json ]; then \
-	  find csrc -name '*.c' | xargs -r clang-tidy -p csrc/build; \
-	else \
-	  echo "  (skipping clang-tidy — run 'make build' first to generate compile_commands.json)"; \
-	fi
+	@echo "==> Rust lint..."
+	@for crate_dir in src/decoder src/scanner src/stream; do \
+	  if [ -f "$$crate_dir/Cargo.toml" ]; then \
+	    echo "  -> $$crate_dir"; \
+	    (cd "$$crate_dir" && cargo clippy --deny warnings) || exit 1; \
+	  fi; \
+	done
 	@echo "==> Markdown lint..."
 	markdownlint docs/
 
@@ -172,6 +163,11 @@ e2e-ui:
 
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean:
-	rm -rf csrc/build
+	rm -rf lib/*.so
 	rm -rf ui/dist
-	find lua -name '*.so' -delete
+	@for crate_dir in src/decoder src/scanner src/stream; do \
+	  if [ -d "$$crate_dir/target" ]; then \
+	    echo "  -> cleaning $$crate_dir"; \
+	    (cd "$$crate_dir" && cargo clean); \
+	  fi; \
+	done

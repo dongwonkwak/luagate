@@ -32,7 +32,7 @@ git diff --cached --name-only -- docs/spec/
 | `docs/spec/admin-api.md` | "admin-api" |
 | `docs/spec/log-schema.md` | "log-schema" |
 | `docs/spec/security-scanner.md` | "security-scanner" |
-| `docs/spec/c-ffi-modules.md` | "c-ffi-modules" |
+| `docs/spec/rust-ffi-modules.md` | "rust-ffi-modules" |
 | `docs/spec/test-strategy.md` | "test-strategy" |
 | `docs/spec/doc-strategy.md` | "doc-strategy" |
 | `docs/design/adr/*.md` | ADR 번호로 검색 |

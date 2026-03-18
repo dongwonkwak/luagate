@@ -4,7 +4,7 @@ description: "새 Rust FFI 바인딩 추가 절차. ABI 규칙, 메모리 관리
 
 # Skill: 새 FFI 바인딩 추가
 
-> ⚠️ FFI는 본질적으로 unsafe. 이 skill 수행 전 `.claude/knowledge/c-ffi-guide.md` 필독.
+> ⚠️ FFI는 본질적으로 unsafe. 이 skill 수행 전 `.claude/knowledge/rust-ffi-guide.md` 필독.
 
 ## 절차
 
@@ -106,7 +106,7 @@ return M
 
 ## 참조
 
-- `.claude/knowledge/c-ffi-guide.md` — 메모리 관리 + ABI 규칙
-- `docs/spec/c-ffi-modules.md` — FFI 통합 원칙
+- `.claude/knowledge/rust-ffi-guide.md` — 메모리 관리 + ABI 규칙
+- `docs/spec/rust-ffi-modules.md` — FFI 통합 원칙
 - `docs/design/adr/ADR-001` — FFI 모델 결정
 - `lua/luagate/scanner/ffi.lua` — 참조 구현

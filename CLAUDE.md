@@ -67,7 +67,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | 작업 | 반드시 읽을 knowledge |
 |------|-------------------|
 | Lua 핸들러 수정 | `openresty-patterns.md` + `architecture.md` |
-| FFI 코드 작성/수정 | `c-ffi-guide.md` |
+| FFI 코드 작성/수정 | `rust-ffi-guide.md` |
 | 보안 기능 구현 | `security-patterns.md` |
 | 코드 리뷰 | `review-checklist.md` |
 | 새 spec 작성 | `conventions.md` + `architecture.md` |
@@ -174,4 +174,4 @@ PR에 `chatgpt-codex-connector` review thread 가 달린 뒤 후속 수정/답�
 
 - pre-commit: `stylua --check`, `luacheck`, `clang-format --check`, `shellcheck`, `markdownlint`
 - commit-msg: `commitlint` (Conventional Commits 형식 강제)
-- pre-push: `make test-unit` + `clang-tidy` + `luacheck` 전체
+- pre-push: `make test-unit` + `luacheck` 전체

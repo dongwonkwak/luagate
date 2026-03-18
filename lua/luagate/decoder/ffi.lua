@@ -1,8 +1,8 @@
 --- luagate.decoder.ffi — LuaJIT FFI binding for luagate_decoder.so
 --
--- ABI contract (docs/spec/c-ffi-modules.md §5):
+-- ABI contract (docs/spec/rust-ffi-modules.md §5):
 --   - caller-allocated output buffers (no Rust malloc returned)
---   - pcall wrapping at call site (c-ffi-guide.md)
+--   - pcall wrapping at call site (rust-ffi-guide.md)
 --   - fail semantics: BUDGET_EXCEEDED / INTERNAL_ERROR → nil, "ffi_fail:<rc>"
 --   - INVALID_INPUT (-1): decode_partial — partial result returned, no error
 --   - 1 buffer-too-small retry (2x capacity)

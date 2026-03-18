@@ -166,7 +166,7 @@ function _M.preread()
     return ngx.exit(ngx.ERROR)
   end
 
-  -- NEED_MORE_DATA retry loop (stream-pipeline.md §2.1, c-ffi-modules.md §2):
+  -- NEED_MORE_DATA retry loop (stream-pipeline.md §2.1, rust-ffi-modules.md §2):
   -- If detect_protocol returns NEED_MORE_DATA, read more bytes from the socket
   -- and retry up to MAX_DETECT_RETRIES times (within preread_timeout).
   local protocol, detect_err, need_more = stream_ffi.detect_protocol(preread_data)
@@ -283,7 +283,7 @@ function _M.preread()
     return ngx.exit(ngx.ERROR)
   end
 
-  -- Radix tree rebuild on version change (c-ffi-modules.md §6.4)
+  -- Radix tree rebuild on version change (rust-ffi-modules.md §6.4)
   -- Each worker independently rebuilds when active_version changes.
   local stream_rules = policy._compiled_stream or {}
   if stream_ver ~= _radix_version then

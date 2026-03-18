@@ -1,7 +1,7 @@
 --- LuaGate scanner FFI binding.
 -- Wraps luagate_scanner.so (src/scanner/) for threat detection.
 --
--- ABI contract: docs/spec/c-ffi-modules.md §4
+-- ABI contract: docs/spec/rust-ffi-modules.md §4
 -- Caller-allocated buffer pattern — no Rust-owned memory is returned, so
 -- there is no free function to call (unlike the decoder module).
 --

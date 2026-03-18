@@ -6,7 +6,7 @@
 
 1. **단일 인스턴스 단위 배포** — 수평 확장은 LB 뒤 다중 인스턴스로 달성
 2. **Worker 간 공유 = shared dict만** — IPC, 소켓, 파일 기반 워커 통신 없음
-3. **C FFI는 동기·동일 Worker 내** — IPC 없음, 각 worker에서 `ffi.load()` 후 직접 호출
+3. **Rust FFI는 동기·동일 Worker 내** — IPC 없음, 각 worker에서 `ffi.load()` 후 직접 호출
 4. **정책 캐시 = module-level upvalue** — `ngx.ctx`가 아님 (요청 범위 아님, worker 수명 동안 유지)
 5. **Stream 파이프라인 = `preread_by_lua` 기반** — HTTP의 `access_by_lua`에 해당하는 단계가 없음
 

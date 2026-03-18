@@ -49,7 +49,7 @@ reads_memory_from: [architect, implementer]
 ## 참조 knowledge
 
 - `.claude/knowledge/security-patterns.md` — 보안 패턴 + precedence matrix
-- `.claude/knowledge/c-ffi-guide.md` — FFI 보안 규칙
+- `.claude/knowledge/rust-ffi-guide.md` — FFI 보안 규칙
 - `.claude/knowledge/review-checklist.md` — 전체 리뷰 체크리스트
 - `docs/spec/security-scanner.md` — 스캐너 스펙
 - `docs/spec/admin-api.md` — Admin 보안 스펙

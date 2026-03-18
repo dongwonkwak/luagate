@@ -7,8 +7,8 @@
 # Lua core
 /lua/               @dongwonkwak
 
-# C extensions
-/csrc/              @dongwonkwak
+# Rust FFI modules
+/src/               @dongwonkwak
 
 # Infrastructure / CI
 /Dockerfile         @dongwonkwak

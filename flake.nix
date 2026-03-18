@@ -26,11 +26,8 @@
             luajitPackages.luacheck
             stylua
 
-            # ── C tooling ────────────────────────────────────────────────
-            cmake
-            gcc
-            clang
-            clang-tools   # clang-tidy, clang-format
+            # ── C/Rust tooling ─────────────────────────────────────────────
+            clang-tools   # clang-format (C 헤더 포맷용으로 유지)
 
             # ── Perl tooling ─────────────────────────────────────────────
             perl
@@ -52,7 +49,6 @@
 
             # ── Docs ─────────────────────────────────────────────────────
             luajitPackages.ldoc
-            doxygen
 
             # ── VHS (terminal GIF recorder) ──────────────────────────────
             vhs

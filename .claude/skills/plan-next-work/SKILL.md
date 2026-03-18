@@ -30,7 +30,7 @@ Linear에서 이슈를 조회하여 의존성을 분석하고, 블로커가 없�
    - ADR 수정 또는 신규 ADR 필요
    - 스펙 문서 2개 이상 수정
    - 새로운 shared dict zone 추가
-   - 새로운 C FFI 인터페이스 추가
+   - 새로운 Rust FFI 인터페이스 추가
    - Dependencies 3개 이상
    - 이슈 라벨에 "architecture" 포함
 

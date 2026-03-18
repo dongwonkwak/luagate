@@ -47,7 +47,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
   - HUP 시그널 수신 시: nginx.conf 재로드 + 새 worker 기동 + 기존 worker graceful shutdown (full config reload, ADR-002 §3.3)
 - **worker process**: 실제 요청 처리. 각자 독립 Lua VM 보유. 이벤트 기반 비동기 처리
 - **shared dict**: worker 간 정책 버전, 메트릭, 연결 수 공유 (ADR-001)
-- **C/Rust FFI**: `.so` 파일을 각 worker에서 `ffi.load()`로 로드. IPC 없음 (ADR-001)
+- **Rust FFI**: `.so` 파일을 각 worker에서 `ffi.load()`로 로드. IPC 없음 (ADR-001)
 
 ## 3. Shared Dict Zone 모델
 
@@ -151,7 +151,7 @@ Client
   ▼
 [access_by_lua] ── 정책 평가 (핵심 처리 단계)
   │               1. 정책 버전 확인 (shared dict L2, L1 캐시 비교)
-  │               2. C FFI: 보안 스캐너 실행
+  │               2. Rust FFI: 보안 스캐너 실행
   │               3. 정책 매칭 (ADR-002)
   │               ├─ deny → 403 반환, 로그 기록
   │               └─ allow → 다음 단계
@@ -234,9 +234,9 @@ luagate/
 │   │   │   ├── evaluator.lua   # 정책 평가 엔진 (ADR-002)
 │   │   │   └── conflict.lua    # 충돌/음영 감지 (ADR-002)
 │   │   ├── scanner/
-│   │   │   └── ffi.lua         # C FFI 바인딩 (보안 스캐너)
+│   │   │   └── ffi.lua         # Rust FFI 바인딩 (보안 스캐너)
 │   │   ├── decoder/
-│   │   │   └── ffi.lua         # C FFI 바인딩 (URL 디코더)
+│   │   │   └── ffi.lua         # Rust FFI 바인딩 (URL 디코더)
 │   │   ├── log/
 │   │   │   ├── http.lua        # HTTP 요청 로그 (ADR-004, 27필드)
 │   │   │   └── stream.lua      # TCP 세션 로그 (ADR-004, 18필드)
@@ -288,7 +288,7 @@ Internet
 
 ## 10. 의존성
 
-- **ADR-001**: 실행 모델, shared dict 구조, C FFI 통합 방식
+- **ADR-001**: 실행 모델, shared dict 구조, Rust FFI 통합 방식
 - **ADR-002**: 정책 평가 규칙 → `lua/luagate/policy/evaluator.lua`
 - **ADR-003**: Hot Reload 시맨틱스 → `lua/luagate/policy/loader.lua`
 - **ADR-004**: 로그/메트릭 스키마, Admin 보안 → `lua/luagate/log/`, `lua/luagate/admin/`

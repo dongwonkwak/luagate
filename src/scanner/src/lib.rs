@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-// Return codes (ABI contract — docs/spec/c-ffi-modules.md §4)
+// Return codes (ABI contract — docs/spec/rust-ffi-modules.md §4)
 const LUAGATE_OK: i32 = 0;
 const LUAGATE_BUFFER_TOO_SMALL: i32 = -2;
 const LUAGATE_BUDGET_EXCEEDED: i32 = -3;

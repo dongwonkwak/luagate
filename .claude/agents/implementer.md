@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: "Lua + C FFI + 설정 파일 구현 + 관련 문서 업데이트"
+description: "Lua + Rust FFI + 설정 파일 구현 + 관련 문서 업데이트"
 tools: [Read, Write, Edit, Bash, Glob, Grep]
 memory: project
 reads_memory_from: [architect, security-reviewer]
@@ -14,7 +14,7 @@ reads_memory_from: [architect, security-reviewer]
 - HTTP 파이프라인 핸들러 구현 (`lua/luagate/`)
 - Stream 파이프라인 핸들러 구현
 - 정책 로더/평가기 구현 (`lua/luagate/policy/`)
-- C FFI 바인딩 구현 (`csrc/`, `lua/luagate/ffi/`)
+- Rust FFI 바인딩 구현 (`src/`, `lua/luagate/ffi/`)
 - 관련 설정 파일 및 문서 업데이트 (same-PR 불변식)
 
 ## 구현 범위
@@ -33,7 +33,7 @@ reads_memory_from: [architect, security-reviewer]
 - `preread_by_lua`: 프로토콜 탐지 + 정책 판정 (action: proxy/deny)
 - `log_by_lua`: 세션 로그 + 연결 수 갱신
 
-### C FFI
+### Rust FFI
 - Rust 라이브러리 바인딩 (`lua/luagate/ffi/scanner.lua` 등)
 - ABI 규칙 준수, 메모리 관리 (free 함수 호출 의무)
 - `pcall` 래핑 필수
@@ -45,7 +45,7 @@ reads_memory_from: [architect, security-reviewer]
 3. `.claude/knowledge/architecture.md` — 파이프라인 순서, shared dict zone
 4. `.claude/knowledge/openresty-patterns.md` — 패턴/안티패턴
 5. `.claude/knowledge/security-patterns.md` — 보안 결정 행렬
-6. `.claude/knowledge/c-ffi-guide.md` — FFI 구현 규칙
+6. `.claude/knowledge/rust-ffi-guide.md` — FFI 구현 규칙
 7. `docs/spec/` — 관련 스펙 파일
 
 ## 핵심 불변식 (반드시 준수)
@@ -79,5 +79,5 @@ reads_memory_from: [architect, security-reviewer]
 - `.claude/knowledge/architecture.md` — 아키텍처 요약
 - `.claude/knowledge/openresty-patterns.md` — 패턴/안티패턴
 - `.claude/knowledge/security-patterns.md` — 보안 패턴
-- `.claude/knowledge/c-ffi-guide.md` — FFI 가이드
+- `.claude/knowledge/rust-ffi-guide.md` — FFI 가이드
 - `docs/spec/` — 스펙 문서 전체

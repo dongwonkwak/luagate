@@ -1,10 +1,10 @@
-# C FFI 가이드 — 메모리 관리 & 안전 규칙
+# Rust FFI 가이드 — 메모리 관리 & 안전 규칙
 
 > ⚠️ **FFI는 본질적으로 unsafe하다.** 잘못된 포인터 연산, 이중 해제, 버퍼 오버플로우는
 > Lua pcall로도 복구할 수 없는 worker abort를 유발한다.
 > 아래 규칙을 엄격히 준수하고, FFI 코드 변경 시 반드시 security-reviewer와 협의한다.
 
-> 참조: `docs/spec/c-ffi-modules.md`, `docs/design/adr/ADR-001`
+> 참조: `docs/spec/rust-ffi-modules.md`, `docs/design/adr/ADR-001`
 
 ## FFI 통합 원칙 (ADR-001)
 

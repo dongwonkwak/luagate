@@ -439,7 +439,7 @@ thread pool 후보: `crossbeam` scoped thread pool 또는 Rust `std::thread::sco
 
 - [ADR-001](./ADR-001-execution-shared-state-model.md) -- 실행 모델, FFI 통합 방식, 실패 정책 (이 ADR이 해결하는 "향후 고려" 항목)
 - [ADR-003](./ADR-003-policy-storage-hot-reload.md) -- 정책 저장소 + Hot Reload (radix_build timeout 시 LKG 동작 연동)
-- [spec/c-ffi-modules.md](../../spec/c-ffi-modules.md) -- FFI ABI 계약, 에러 코드 정의, timeout budget
+- [spec/rust-ffi-modules.md](../../spec/rust-ffi-modules.md) -- FFI ABI 계약, 에러 코드 정의, timeout budget
 - [spec/http-pipeline.md](../../spec/http-pipeline.md) -- HTTP 파이프라인 타임아웃 설정
 - [spec/architecture.md](../../spec/architecture.md) -- 전체 아키텍처, 실패 정책 표
-- [knowledge/c-ffi-guide.md](../../../.claude/knowledge/c-ffi-guide.md) -- FFI 메모리 관리 규칙
+- [knowledge/rust-ffi-guide.md](../../../.claude/knowledge/rust-ffi-guide.md) -- FFI 메모리 관리 규칙
