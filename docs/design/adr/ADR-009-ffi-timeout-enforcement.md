@@ -229,13 +229,13 @@ Steady-state에서 hang된 detached thread 누적을 감지하기 위해 외부 
 
 ### radix_build hot reload 시 timeout 동작 (ADR-003 연동)
 
-`luagate_stream.so`의 `radix_build`는 init 단계 1회성 호출이 **아니다**. `c-ffi-modules.md` §6.4 및 `stream-pipeline.md` §2.2에 따라, `active_version` 변경 시 각 worker가 독립적으로 radix tree를 rebuild한다. 따라서 hot reload 이후 첫 stream 요청에서 `radix_build`가 호출될 수 있으며, 이때 Layer 2 hard timeout(1000ms)이 적용된다.
+`luagate_stream.so`의 `radix_build`는 init 단계 1회성 호출이 **아니다**. `rust-ffi-modules.md` §6.4 및 `stream-pipeline.md` §2.2에 따라, `active_version` 변경 시 각 worker가 독립적으로 radix tree를 rebuild한다. 따라서 hot reload 이후 첫 stream 요청에서 `radix_build`가 호출될 수 있으며, 이때 Layer 2 hard timeout(1000ms)이 적용된다.
 
 **rebuild timeout 시 동작 정의:**
 
 | 단계 | 동작 |
 |------|------|
-| radix_build 정상 완료 | new tree로 교체 (c-ffi-modules.md §6.4 atomic swap) |
+| radix_build 정상 완료 | new tree로 교체 (rust-ffi-modules.md §6.4 atomic swap) |
 | radix_build Layer 1 timeout (100ms) | `LUAGATE_BUDGET_EXCEEDED(-3)` 반환 |
 | radix_build Layer 2 timeout (1000ms) | `LUAGATE_TIMEOUT(-5)` 반환 |
 | timeout 후 fallback | **old tree(LKG) 유지**: 현재 worker의 module-level upvalue에 저장된 이전 radix tree 포인터를 계속 사용. `_cached_stream_version`을 갱신하지 않으므로 다음 요청에서 rebuild를 재시도한다. |
