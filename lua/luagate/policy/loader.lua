@@ -342,6 +342,10 @@ end
 -- @param  filepath  string  Absolute path to the YAML policy file.
 --                           Defaults to "conf/policies.yaml" (relative to
 --                           nginx prefix) when nil.
+-- @param  opts      table|nil  Optional hooks. opts.on_lock_acquired() runs
+--                              after the reload lock is acquired and before
+--                              stage [1]. Return false, err_code, err_detail
+--                              to abort while holding the lock.
 -- @return table  {
 --     ok              = boolean,  -- true if at least one subsystem was updated (or
 --                                 --   no reload needed due to same hash)
@@ -356,9 +360,12 @@ end
 --     conflicts       = table,
 --     shadowed        = table,
 --     err             = string|nil,  -- top-level abort error (stages [1]-[6])
+--     err_code        = string|nil,
+--     err_detail      = string|nil,
 --   }
-function _M.load_policy(filepath)
+function _M.load_policy(filepath, opts)
   filepath = filepath or "conf/policies.yaml"
+  opts = opts or {}
 
   local result = {
     ok = false,
@@ -373,6 +380,8 @@ function _M.load_policy(filepath)
     conflicts = {},
     shadowed = {},
     err = nil,
+    err_code = nil,
+    err_detail = nil,
   }
 
   -- -------------------------------------------------------------------------
@@ -382,6 +391,23 @@ function _M.load_policy(filepath)
   if not owner_id then
     result.err = lock_err or "reload_in_progress"
     return result
+  end
+
+  if opts.on_lock_acquired then
+    local hook_ok, proceed, err_code, err_detail = pcall(opts.on_lock_acquired)
+    if not hook_ok then
+      result.err = "on_lock_acquired hook failed: " .. tostring(proceed)
+      log_err(result.err)
+      release_reload_lock(owner_id)
+      return result
+    end
+    if proceed == false then
+      result.err = err_detail or err_code or "preflight_failed"
+      result.err_code = err_code or "preflight_failed"
+      result.err_detail = err_detail or result.err
+      release_reload_lock(owner_id)
+      return result
+    end
   end
 
   -- -------------------------------------------------------------------------

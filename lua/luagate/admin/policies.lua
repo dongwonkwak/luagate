@@ -142,6 +142,18 @@ local function make_tmp_path()
   return POLICY_FILE .. ".tmp." .. tostring(worker_id) .. "." .. tostring(ngx.now())
 end
 
+--- Validate PUT If-Match against the current source_version.
+-- @param if_match string
+-- @return string|nil current_source
+-- @return string|nil mismatch message
+local function validate_source_if_match(if_match)
+  local current_source = loader.get_active_versions().source_version
+  if current_source and if_match ~= current_source then
+    return current_source, "If-Match version mismatch: expected " .. current_source .. ", got " .. if_match
+  end
+  return current_source, nil
+end
+
 -- ---------------------------------------------------------------------------
 -- Endpoint handlers
 -- ---------------------------------------------------------------------------
@@ -217,11 +229,9 @@ function _M.handle_put_policies()
   -- Strip surrounding quotes if present
   if_match = if_match:gsub('^"', ""):gsub('"$', "")
 
-  local versions = loader.get_active_versions()
-  local current_source = versions.source_version
-  if current_source and if_match ~= current_source then
-    local msg = "If-Match version mismatch: expected " .. current_source .. ", got " .. if_match
-    send_error(409, "version_mismatch", "reload", msg)
+  local current_source, mismatch_msg = validate_source_if_match(if_match)
+  if mismatch_msg then
+    send_error(409, "version_mismatch", "reload", mismatch_msg)
     return
   end
 
@@ -292,13 +302,38 @@ function _M.handle_put_policies()
   end
 
   -- Load from temp file (stages [1]-[7] of loader pipeline)
-  local result = loader.load_policy(tmp_path)
+  local result = loader.load_policy(tmp_path, {
+    on_lock_acquired = function()
+      local locked_source, locked_mismatch_msg = validate_source_if_match(if_match)
+      if locked_mismatch_msg then
+        return false, "version_mismatch", locked_mismatch_msg
+      end
+      current_source = locked_source
+      return true
+    end,
+  })
 
   if result.err then
     -- Cleanup temp file
     os.remove(tmp_path)
 
     -- Determine error type
+    if result.err_code == "version_mismatch" then
+      local latest_source = loader.get_active_versions().source_version
+      if
+        not audit_or_reject("policy_update_failure", {
+          trigger = "api",
+          stage = "reload",
+          reason = result.err_detail or result.err,
+          current_version = latest_source,
+        })
+      then
+        return
+      end
+      send_error(409, "version_mismatch", "reload", result.err_detail or result.err)
+      return
+    end
+
     if result.err == "reload_in_progress" then
       if
         not audit_or_reject("policy_update_failure", {

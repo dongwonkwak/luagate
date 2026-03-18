@@ -54,6 +54,7 @@ end
 -- ---------------------------------------------------------------------------
 local _loader_result = {}
 local _loader_versions = { http_version = nil, stream_version = nil, source_version = nil }
+local _loader_before_lock_hook = nil
 local _parser_result = nil
 local _parser_err = nil
 local _validator_ok = true
@@ -63,7 +64,31 @@ local _conflict_shadowed = {}
 
 package.preload["luagate.policy.loader"] = function()
   return {
-    load_policy = function(_filepath)
+    load_policy = function(_filepath, opts)
+      if _loader_before_lock_hook then
+        _loader_before_lock_hook()
+      end
+      if opts and opts.on_lock_acquired then
+        local ok, err_code, err_detail = opts.on_lock_acquired()
+        if ok == false then
+          return {
+            ok = false,
+            skipped = false,
+            new_version = nil,
+            previous_http_version = nil,
+            previous_stream_version = nil,
+            http_ok = false,
+            stream_ok = false,
+            http_err = nil,
+            stream_err = nil,
+            conflicts = {},
+            shadowed = {},
+            err = err_detail or err_code,
+            err_code = err_code,
+            err_detail = err_detail,
+          }
+        end
+      end
       return _loader_result
     end,
     get_active_versions = function()
@@ -322,6 +347,7 @@ local function reset_stubs()
   _parser_err = nil
   _validator_ok = true
   _validator_err = nil
+  _loader_before_lock_hook = nil
   _conflict_conflicts = {}
   _conflict_shadowed = {}
   _file_registry = {}
@@ -502,6 +528,23 @@ describe("PUT /api/v1/policies", function()
     local body = dkjson.decode(said[1])
     assert.are.equal("version_mismatch", body.error)
     assert.are.equal("reload", body.stage)
+  end)
+
+  it("returns 409 when source_version changes after the initial If-Match check", function()
+    _loader_before_lock_hook = function()
+      _loader_versions.source_version = "def456"
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(409, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("version_mismatch", body.error)
+    assert.are.equal("reload", body.stage)
+    assert.truthy(body.details[1]:find("expected def456"))
   end)
 
   it("returns 413 when body is missing", function()
