@@ -285,7 +285,7 @@ describe("luagate.scanner.ffi", function()
       assert.truthy(err and err:find("-4"))
     end)
 
-    it("returns ffi_timeout result on LUAGATE_TIMEOUT (-5)", function()
+    it("returns nil + ffi_timeout error on LUAGATE_TIMEOUT (-5)", function()
       local scanner = load_module_with({ scan_rc = -5 })
 
       local result, err = scanner.scan({
@@ -293,12 +293,8 @@ describe("luagate.scanner.ffi", function()
         path_normalized = "/ok",
       })
 
-      assert.is_nil(err)
-      assert.is_not_nil(result)
-      assert.equals("ffi_timeout", result.threat_type)
-      assert.equals("scanner_timeout", result.rule_name)
-      assert.equals(0.0, result.threat_score)
-      assert.is_true(result.ffi_timeout)
+      assert.is_nil(result)
+      assert.equals("ffi_timeout", err)
     end)
 
     it("increments per-worker leak counter on LUAGATE_TIMEOUT", function()
@@ -319,7 +315,7 @@ describe("luagate.scanner.ffi", function()
       assert.equals(ngx.ERR, ngx_log_calls[1].level)
     end)
 
-    it("returns ffi_timeout = false on normal scan", function()
+    it("normal scan does not include ffi_timeout field", function()
       local scanner = load_module_with()
 
       local result, err = scanner.scan({
@@ -328,7 +324,7 @@ describe("luagate.scanner.ffi", function()
       })
 
       assert.is_nil(err)
-      assert.is_false(result.ffi_timeout)
+      assert.is_nil(result.ffi_timeout)
     end)
 
     it("returns scanner_ffi_error when luagate_scan_http raises", function()

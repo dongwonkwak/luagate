@@ -125,16 +125,12 @@ function M.scan(ctx)
   end
 
   -- ADR-009 Layer 2: hard timeout from watchdog thread
+  -- Returns nil + "ffi_timeout" (not a threat result) so handler can
+  -- distinguish operational timeout from actual threat detection.
   if rc == LUAGATE_TIMEOUT then
     ngx.log(ngx.ERR, "scanner FFI hard timeout exceeded (Layer 2 watchdog)")
     incr_timeout_leak("scanner")
-    return {
-      threat_type = "ffi_timeout",
-      rule_name = "scanner_timeout",
-      threat_score = 0.0,
-      ffi_timeout = true,
-    },
-      nil
+    return nil, "ffi_timeout"
   end
 
   -- Hard failures: fail-closed
@@ -151,9 +147,7 @@ function M.scan(ctx)
     threat_type = threat_type,
     rule_name = rule_name,
     threat_score = score[0],
-    ffi_timeout = false,
-  },
-    nil
+  }, nil
 end
 
 --- Initialise the scanner with optional pattern directory.

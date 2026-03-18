@@ -383,9 +383,15 @@ function _M.access()
   end
 
   if scan_err then
-    -- Distinguish budget_exceeded vs internal_error (security-scanner.md §2b)
+    -- ADR-009: ffi_timeout is an operational timeout, not a threat detection.
+    -- Use distinct deny_reason and threat_type so it does not pollute scanner
+    -- threat metrics (ADR-006). Log ffi_timeout field for observability.
     local deny_reason = "scanner_internal_error"
-    if scan_err:find("%-3") then
+    local log_threat_type = "scanner_error"
+    if scan_err == "ffi_timeout" then
+      deny_reason = "ffi_timeout"
+      log_threat_type = "ffi_timeout"
+    elseif scan_err:find("%-3") then
       deny_reason = "budget_exceeded"
     end
     ngx.log(ngx.ERR, "[luagate] scanner error: ", scan_err)
@@ -393,11 +399,12 @@ function _M.access()
     ctx.request_state = "scanner_denied"
     ctx.decision_source = "security_scanner"
     ctx.deny_reason = deny_reason
+    ctx.ffi_timeout = (scan_err == "ffi_timeout")
     ngx.var.luagate_action = "deny"
     ngx.var.luagate_decision_source = "security_scanner"
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = deny_reason
-    ngx.var.luagate_threat_type = "scanner_error"
+    ngx.var.luagate_threat_type = log_threat_type
     do_deny(deny_reason, ctx.request_id or "")
     return
   end
