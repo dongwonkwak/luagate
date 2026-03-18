@@ -1,0 +1,1025 @@
+--- Unit tests for lua/luagate/admin/policies.lua
+-- Implementation: lua/luagate/admin/policies.lua
+-- Tests: tests/unit/admin/policies_spec.lua
+--
+-- policies.lua depends on: cjson.safe, luagate.policy.loader,
+-- luagate.policy.parser, luagate.policy.validator, luagate.policy.conflict,
+-- resty.sha256, resty.string, and the ngx global.
+-- All are stubbed for busted (Lua 5.4) environment.
+
+-- ---------------------------------------------------------------------------
+-- cjson.safe stub (dkjson wrapper)
+-- ---------------------------------------------------------------------------
+package.preload["cjson.safe"] = function()
+  local dkjson = require("dkjson")
+  return {
+    encode = dkjson.encode,
+    decode = dkjson.decode,
+    null = {},
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- resty.sha256 stub — deterministic fake hash
+-- ---------------------------------------------------------------------------
+package.preload["resty.sha256"] = function()
+  return {
+    new = function()
+      local buf = {}
+      return {
+        update = function(_, s)
+          buf[#buf + 1] = s
+        end,
+        final = function(_)
+          return table.concat(buf)
+        end,
+      }
+    end,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- resty.string stub — to_hex returns input unchanged
+-- ---------------------------------------------------------------------------
+package.preload["resty.string"] = function()
+  return {
+    to_hex = function(s)
+      return s
+    end,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- Configurable stubs for policy modules
+-- ---------------------------------------------------------------------------
+local _loader_result = {}
+local _loader_versions = { http_version = nil, stream_version = nil, source_version = nil }
+local _loader_before_lock_hook = nil
+local _loader_rollback_result = nil
+local _loader_rollback_calls = {}
+local _parser_result = nil
+local _parser_err = nil
+local _validator_ok = true
+local _validator_err = nil
+local _conflict_conflicts = {}
+local _conflict_shadowed = {}
+
+package.preload["luagate.policy.loader"] = function()
+  return {
+    load_policy = function(_filepath, opts)
+      if _loader_before_lock_hook then
+        _loader_before_lock_hook()
+      end
+      if opts and opts.on_lock_acquired then
+        local ok, err_code, err_detail = opts.on_lock_acquired()
+        if ok == false then
+          return {
+            ok = false,
+            skipped = false,
+            new_version = nil,
+            previous_http_version = nil,
+            previous_stream_version = nil,
+            http_ok = false,
+            stream_ok = false,
+            http_err = nil,
+            stream_err = nil,
+            conflicts = {},
+            shadowed = {},
+            err = err_detail or err_code,
+            err_code = err_code,
+            err_detail = err_detail,
+          }
+        end
+      end
+      if _loader_result.ok and not _loader_result.skipped and _loader_result.new_version then
+        if _loader_result.http_ok then
+          _loader_versions.http_version = _loader_result.new_version
+        end
+        if _loader_result.stream_ok then
+          _loader_versions.stream_version = _loader_result.new_version
+        end
+        if _loader_result.http_ok and _loader_result.stream_ok then
+          _loader_versions.source_version = _loader_result.new_version
+        end
+      end
+      return _loader_result
+    end,
+    rollback_active_versions = function(versions)
+      _loader_rollback_calls[#_loader_rollback_calls + 1] = versions
+      _loader_versions.http_version = versions.http_version
+      _loader_versions.stream_version = versions.stream_version
+      _loader_versions.source_version = versions.source_version
+      return _loader_rollback_result
+        or {
+          ok = true,
+          http_ok = true,
+          stream_ok = true,
+          source_ok = true,
+          errors = {},
+        }
+    end,
+    get_active_versions = function()
+      return _loader_versions
+    end,
+    is_reload_in_progress = function()
+      return false
+    end,
+  }
+end
+
+package.preload["luagate.policy.parser"] = function()
+  return {
+    parse_string = function(_content)
+      return _parser_result, _parser_err
+    end,
+  }
+end
+
+package.preload["luagate.policy.validator"] = function()
+  return {
+    validate = function(_policy)
+      return _validator_ok, _validator_err
+    end,
+  }
+end
+
+package.preload["luagate.policy.conflict"] = function()
+  return {
+    filter_enabled = function(rules)
+      return rules
+    end,
+    detect = function(_rules)
+      return _conflict_conflicts, _conflict_shadowed
+    end,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- Auth mock (always passes)
+-- ---------------------------------------------------------------------------
+package.preload["luagate.admin.auth"] = function()
+  return {
+    verify = function()
+      return true
+    end,
+    init = function()
+      return true
+    end,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- io.open monkey-patch
+-- ---------------------------------------------------------------------------
+local _file_registry = {}
+local _file_write_captures = {} -- luacheck: ignore 241
+local _file_rename_result = true
+local _file_rename_err = nil
+
+local _original_io_open = io.open
+local _original_os_rename = os.rename
+local _original_os_remove = os.remove
+
+local function setup_io_stubs()
+  io.open = function(filepath, mode) -- luacheck: ignore 122
+    if mode == "w" then
+      -- Capture write operations
+      return {
+        write = function(_, content)
+          _file_write_captures[filepath] = content
+        end,
+        close = function(_) end,
+      },
+        nil
+    end
+    -- Read mode
+    local content = _file_registry[filepath]
+    if content == nil then
+      return nil, "No such file or directory"
+    end
+    return {
+      read = function(_, fmt)
+        if fmt == "*all" then
+          return content
+        end
+        return nil
+      end,
+      close = function(_) end,
+    },
+      nil
+  end
+
+  os.rename = function(_src, _dst) -- luacheck: ignore 122
+    return _file_rename_result, _file_rename_err
+  end
+
+  os.remove = function(_path) -- luacheck: ignore 122
+    return true
+  end
+end
+
+local function teardown_io_stubs()
+  io.open = _original_io_open -- luacheck: ignore 122
+  os.rename = _original_os_rename -- luacheck: ignore 122
+  os.remove = _original_os_remove -- luacheck: ignore 122
+end
+
+-- ---------------------------------------------------------------------------
+-- ngx mock factory
+-- ---------------------------------------------------------------------------
+local function make_ngx(overrides)
+  local exited_with = nil
+  local logged = {}
+  local said = {}
+
+  local mock = {
+    var = {
+      remote_addr = "127.0.0.1",
+      uri = "/api/v1/policies",
+    },
+    ctx = {},
+    header = {},
+    status = 0,
+    EMERG = 0,
+    ALERT = 1,
+    CRIT = 2,
+    ERR = 3,
+    WARN = 4,
+    NOTICE = 5,
+    INFO = 6,
+    DEBUG = 7,
+    shared = {
+      luagate_policy = {
+        get = function(_, _key)
+          return nil
+        end,
+      },
+    },
+    log = function(_level, ...)
+      local parts = {}
+      for _, v in ipairs({ ... }) do
+        parts[#parts + 1] = tostring(v)
+      end
+      logged[#logged + 1] = table.concat(parts, "")
+    end,
+    exit = function(code)
+      exited_with = code
+    end,
+    say = function(s)
+      said[#said + 1] = s
+    end,
+    print = function(_s) end,
+    utctime = function()
+      return "2026-03-18 06:00:00"
+    end,
+    now = function()
+      return 1742284800.0
+    end,
+    worker = {
+      id = function()
+        return 0
+      end,
+    },
+    req = {
+      get_headers = function()
+        return {}
+      end,
+      get_method = function()
+        return "GET"
+      end,
+      read_body = function() end,
+      get_body_data = function()
+        return nil
+      end,
+      get_body_file = function()
+        return nil
+      end,
+    },
+  }
+
+  mock._get_exited = function()
+    return exited_with
+  end
+  mock._get_logged = function()
+    return logged
+  end
+  mock._get_said = function()
+    return said
+  end
+  mock._reset_tracking = function()
+    exited_with = nil
+    for i = 1, #logged do
+      logged[i] = nil
+    end
+    for i = 1, #said do
+      said[i] = nil
+    end
+    mock.status = 0
+    mock.header = {}
+  end
+
+  if overrides then
+    for k, v in pairs(overrides) do
+      if type(v) == "table" and type(mock[k]) == "table" then
+        for k2, v2 in pairs(v) do
+          mock[k][k2] = v2
+        end
+      else
+        mock[k] = v
+      end
+    end
+  end
+
+  return mock
+end
+
+-- ---------------------------------------------------------------------------
+-- Module loading helper
+-- ---------------------------------------------------------------------------
+local _saved_ngx = _G.ngx
+_G.ngx = make_ngx()
+
+local policies
+
+local function load_policies()
+  package.loaded["luagate.admin.policies"] = nil
+  package.loaded["luagate.policy.loader"] = nil
+  package.loaded["luagate.policy.parser"] = nil
+  package.loaded["luagate.policy.validator"] = nil
+  package.loaded["luagate.policy.conflict"] = nil
+  return require("luagate.admin.policies")
+end
+
+-- ---------------------------------------------------------------------------
+-- Reset stubs to defaults
+-- ---------------------------------------------------------------------------
+local function reset_stubs()
+  _loader_result = {
+    ok = true,
+    skipped = false,
+    new_version = "new_sha256_hash",
+    previous_http_version = "old_sha256_hash",
+    previous_stream_version = "old_sha256_hash",
+    http_ok = true,
+    stream_ok = true,
+    http_err = nil,
+    stream_err = nil,
+    conflicts = {},
+    shadowed = {},
+    err = nil,
+  }
+  _loader_versions = {
+    http_version = "abc123",
+    stream_version = "abc123",
+    source_version = "abc123",
+  }
+  _parser_result = { rules = {}, stream_rules = {}, global = { default_action = "deny" } }
+  _parser_err = nil
+  _validator_ok = true
+  _validator_err = nil
+  _loader_before_lock_hook = nil
+  _loader_rollback_result = nil
+  _loader_rollback_calls = {}
+  _conflict_conflicts = {}
+  _conflict_shadowed = {}
+  _file_registry = {}
+  _file_write_captures = {}
+  _file_rename_result = true
+  _file_rename_err = nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Teardown
+-- ---------------------------------------------------------------------------
+teardown(function()
+  _G.ngx = _saved_ngx
+  teardown_io_stubs()
+  package.preload["cjson.safe"] = nil
+  package.preload["resty.sha256"] = nil
+  package.preload["resty.string"] = nil
+  package.preload["luagate.policy.loader"] = nil
+  package.preload["luagate.policy.parser"] = nil
+  package.preload["luagate.policy.validator"] = nil
+  package.preload["luagate.policy.conflict"] = nil
+  package.preload["luagate.admin.auth"] = nil
+end)
+
+-- ===========================================================================
+-- GET /api/v1/policies
+-- ===========================================================================
+describe("GET /api/v1/policies", function()
+  before_each(function()
+    reset_stubs()
+    setup_io_stubs()
+    _file_registry["conf/policies.yaml"] = "version: '1.0'\nrules: []\n"
+    _G.ngx = make_ngx({ var = { uri = "/api/v1/policies", remote_addr = "127.0.0.1" } })
+    policies = load_policies()
+  end)
+
+  after_each(function()
+    teardown_io_stubs()
+  end)
+
+  it("returns 200 with YAML content and ETag header", function()
+    policies.handle_get_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    assert.are.equal("application/x-yaml", _G.ngx.header["Content-Type"])
+    assert.truthy(_G.ngx.header["ETag"], "ETag header must be present")
+    assert.truthy(_G.ngx.header["ETag"]:find("abc123"), "ETag should contain source_version")
+    local said = _G.ngx._get_said()
+    assert.is_true(#said >= 1)
+    assert.truthy(said[1]:find("version"), "response body should contain YAML content")
+  end)
+
+  it("computes ETag from file content when source_version is nil", function()
+    _loader_versions.source_version = nil
+    _G.ngx = make_ngx({ var = { uri = "/api/v1/policies", remote_addr = "127.0.0.1" } })
+    policies = load_policies()
+
+    policies.handle_get_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    assert.truthy(_G.ngx.header["ETag"], "ETag should be computed from file content")
+  end)
+
+  it("returns 500 when policy file cannot be read", function()
+    _file_registry["conf/policies.yaml"] = nil -- file not found
+    _G.ngx = make_ngx({ var = { uri = "/api/v1/policies", remote_addr = "127.0.0.1" } })
+    policies = load_policies()
+
+    policies.handle_get_policies()
+
+    assert.are.equal(500, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("internal_error", body.error)
+  end)
+end)
+
+-- ===========================================================================
+-- GET /api/v1/policies/version
+-- ===========================================================================
+describe("GET /api/v1/policies/version", function()
+  before_each(function()
+    reset_stubs()
+    _G.ngx = make_ngx({ var = { uri = "/api/v1/policies/version", remote_addr = "127.0.0.1" } })
+    policies = load_policies()
+  end)
+
+  it("returns 200 with version triplet", function()
+    policies.handle_get_version()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("abc123", body.source_version)
+    assert.are.equal("abc123", body.active_http_version)
+    assert.are.equal("abc123", body.active_stream_version)
+    assert.are.equal("abc123", body.etag)
+  end)
+end)
+
+-- ===========================================================================
+-- PUT /api/v1/policies
+-- ===========================================================================
+describe("PUT /api/v1/policies", function()
+  local yaml_body = "version: '1.0'\nrules: []\nstream_rules: []\n"
+
+  before_each(function()
+    reset_stubs()
+    setup_io_stubs()
+    _file_registry["conf/policies.yaml"] = yaml_body
+    _G.ngx = make_ngx({
+      var = { uri = "/api/v1/policies", remote_addr = "127.0.0.1" },
+    })
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    _G.ngx.req.get_method = function()
+      return "PUT"
+    end
+    _G.ngx.req.get_body_data = function()
+      return yaml_body
+    end
+    policies = load_policies()
+  end)
+
+  after_each(function()
+    teardown_io_stubs()
+  end)
+
+  it("returns 200 on successful update", function()
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("committed", body.http_result)
+    assert.are.equal("committed", body.stream_result)
+    assert.truthy(body.new_http_version)
+    assert.truthy(body.new_stream_version)
+    assert.is_table(body.warnings)
+  end)
+
+  it("returns 428 when If-Match header is missing", function()
+    _G.ngx.req.get_headers = function()
+      return { Authorization = "Bearer valid-test-token" }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(428, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("version_mismatch", body.error)
+  end)
+
+  it("returns 409 when If-Match does not match source_version", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"wrong_version"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(409, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("version_mismatch", body.error)
+    assert.are.equal("reload", body.stage)
+  end)
+
+  it("returns 409 when source_version changes after the initial If-Match check", function()
+    _loader_before_lock_hook = function()
+      _loader_versions.source_version = "def456"
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(409, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("version_mismatch", body.error)
+    assert.are.equal("reload", body.stage)
+    assert.truthy(body.details[1]:find("expected def456"))
+  end)
+
+  it("returns 413 when body is missing", function()
+    _G.ngx.req.get_body_data = function()
+      return nil
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(413, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("payload_too_large", body.error)
+  end)
+
+  it("accepts request bodies buffered to a temp file", function()
+    _file_registry["/tmp/client-body-buffered.yaml"] = yaml_body
+    _G.ngx.req.get_body_data = function()
+      return nil
+    end
+    _G.ngx.req.get_body_file = function()
+      return "/tmp/client-body-buffered.yaml"
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("committed", body.http_result)
+    assert.are.equal("committed", body.stream_result)
+  end)
+
+  it("returns 413 when a buffered temp file exceeds 1MB", function()
+    _file_registry["/tmp/client-body-too-large.yaml"] = string.rep("a", 1048577)
+    _G.ngx.req.get_body_data = function()
+      return nil
+    end
+    _G.ngx.req.get_body_file = function()
+      return "/tmp/client-body-too-large.yaml"
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(413, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("payload_too_large", body.error)
+    assert.are.equal("request", body.stage)
+  end)
+
+  it("returns 422 when parse fails", function()
+    _parser_result = nil
+    _parser_err = "YAML syntax error at line 42"
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("validate", body.stage)
+    assert.truthy(body.details[1]:find("parse error"))
+  end)
+
+  it("returns 422 when validation fails", function()
+    _validator_ok = nil
+    _validator_err = "rule 'my-rule': action must be 'allow' or 'deny'"
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("validate", body.stage)
+  end)
+
+  it("returns 409 when reload_in_progress", function()
+    _loader_result = {
+      ok = false,
+      skipped = false,
+      err = "reload_in_progress",
+      conflicts = {},
+      shadowed = {},
+      http_ok = false,
+      stream_ok = false,
+    }
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(409, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("reload_in_progress", body.error)
+  end)
+
+  it("returns 500 on partial commit (stream fails)", function()
+    _loader_result = {
+      ok = true,
+      skipped = false,
+      new_version = "new_sha",
+      previous_http_version = "old_sha",
+      previous_stream_version = "old_sha",
+      http_ok = true,
+      stream_ok = false,
+      http_err = nil,
+      stream_err = "stream pointer swap failed",
+      conflicts = {},
+      shadowed = {},
+      err = nil,
+    }
+    _loader_versions.http_version = "new_sha"
+    _loader_versions.stream_version = "old_sha"
+    _loader_versions.source_version = "abc123"
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(500, _G.ngx.status)
+    assert.are.equal(1, #_loader_rollback_calls)
+    assert.are.same({
+      http_version = "old_sha",
+      stream_version = "old_sha",
+      source_version = "abc123",
+    }, _loader_rollback_calls[1])
+    assert.are.equal("old_sha", _loader_versions.http_version)
+    assert.are.equal("old_sha", _loader_versions.stream_version)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("commit_failed", body.error)
+    assert.are.equal("commit", body.stage)
+    assert.truthy(body.details[1]:find("stream"))
+    assert.are.equal("old_sha", body.current_http_version)
+    assert.are.equal("old_sha", body.current_stream_version)
+  end)
+
+  it("returns 500 when canonical file rename fails", function()
+    _file_rename_result = nil
+    _file_rename_err = "permission denied"
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(500, _G.ngx.status)
+    assert.are.equal(1, #_loader_rollback_calls)
+    assert.are.same({
+      http_version = "old_sha256_hash",
+      stream_version = "old_sha256_hash",
+      source_version = "abc123",
+    }, _loader_rollback_calls[1])
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("commit_failed", body.error)
+    assert.truthy(body.details[1]:find("canonical file write failed"))
+    assert.falsy(body.details[2], "successful rollback should not report active/canonical inconsistency")
+    assert.are.equal("old_sha256_hash", body.current_http_version)
+    assert.are.equal("old_sha256_hash", body.current_stream_version)
+  end)
+
+  it("returns 422 conflict_detected when conflicts found (admin-api.md §3)", function()
+    _conflict_conflicts = {
+      { rule_ids = { "rule-a", "rule-b" }, message = "same scope, priority, opposing action" },
+    }
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("conflict_detected", body.error)
+    assert.are.equal("conflict_detect", body.stage)
+    assert.truthy(body.details[1]:find("rule%-a"))
+  end)
+
+  it("writes policy_update_success audit log on success", function()
+    policies.handle_put_policies()
+
+    local logged = _G.ngx._get_logged()
+    local has_audit = false
+    for _, entry in ipairs(logged) do
+      if entry:find("%[luagate:audit%]") and entry:find("policy_update_success") then
+        has_audit = true
+        break
+      end
+    end
+    assert.is_true(has_audit, "audit log for policy_update_success should be written")
+  end)
+
+  it("writes policy_update_failure audit log on failure", function()
+    _loader_result = {
+      ok = false,
+      skipped = false,
+      err = "blob store failed",
+      conflicts = {},
+      shadowed = {},
+      http_ok = false,
+      stream_ok = false,
+    }
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    local logged = _G.ngx._get_logged()
+    local has_audit = false
+    for _, entry in ipairs(logged) do
+      if entry:find("%[luagate:audit%]") and entry:find("policy_update_failure") then
+        has_audit = true
+        break
+      end
+    end
+    assert.is_true(has_audit, "audit log for policy_update_failure should be written")
+  end)
+
+  it("rejects Content-Encoding header", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Encoding"] = "gzip",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+  end)
+end)
+
+-- ===========================================================================
+-- POST /api/v1/policies/reload
+-- ===========================================================================
+describe("POST /api/v1/policies/reload", function()
+  before_each(function()
+    reset_stubs()
+    setup_io_stubs()
+    _G.ngx = make_ngx({
+      var = { uri = "/api/v1/policies/reload", remote_addr = "127.0.0.1" },
+    })
+    _G.ngx.req.get_method = function()
+      return "POST"
+    end
+    policies = load_policies()
+  end)
+
+  after_each(function()
+    teardown_io_stubs()
+  end)
+
+  it("returns 200 on successful reload", function()
+    policies.handle_post_reload()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("committed", body.http_result)
+    assert.are.equal("committed", body.stream_result)
+    assert.truthy(body.reloaded_at)
+    assert.are.equal(0, body.warnings_count)
+    assert.is_table(body.errors)
+    assert.are.equal(0, #body.errors)
+  end)
+
+  it("returns 409 when If-Match does not match http:active_version", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"wrong_version"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_post_reload()
+
+    assert.are.equal(409, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("version_mismatch", body.error)
+  end)
+
+  it("succeeds when If-Match matches http:active_version", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_post_reload()
+
+    assert.are.equal(200, _G.ngx.status)
+  end)
+
+  it("succeeds when If-Match is not provided (optional)", function()
+    _G.ngx.req.get_headers = function()
+      return { Authorization = "Bearer valid-test-token" }
+    end
+    policies = load_policies()
+
+    policies.handle_post_reload()
+
+    assert.are.equal(200, _G.ngx.status)
+  end)
+
+  it("returns 409 when reload_in_progress", function()
+    _loader_result = {
+      ok = false,
+      skipped = false,
+      err = "reload_in_progress",
+      conflicts = {},
+      shadowed = {},
+      http_ok = false,
+      stream_ok = false,
+    }
+    policies = load_policies()
+
+    policies.handle_post_reload()
+
+    assert.are.equal(409, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("reload_in_progress", body.error)
+    assert.are.equal("reload", body.stage)
+  end)
+
+  it("returns 500 on reload failure (LKG retained)", function()
+    _loader_result = {
+      ok = false,
+      skipped = false,
+      err = "parse error at line 42: unexpected token",
+      conflicts = {},
+      shadowed = {},
+      http_ok = false,
+      stream_ok = false,
+    }
+    policies = load_policies()
+
+    policies.handle_post_reload()
+
+    assert.are.equal(500, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("reload_failed", body.error)
+    assert.are.equal("reload", body.stage)
+    assert.truthy(body.details[1]:find("parse error"))
+  end)
+
+  it("handles partial commit (HTTP ok, stream fail)", function()
+    _loader_result = {
+      ok = true,
+      skipped = false,
+      new_version = "new_sha",
+      previous_http_version = "old_sha",
+      previous_stream_version = "old_sha",
+      http_ok = true,
+      stream_ok = false,
+      http_err = nil,
+      stream_err = "stream pointer swap failed",
+      conflicts = {},
+      shadowed = {},
+      err = nil,
+    }
+    policies = load_policies()
+
+    policies.handle_post_reload()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("committed", body.http_result)
+    assert.are.equal("lkg_retained", body.stream_result)
+    assert.are.equal(1, #body.errors)
+    assert.truthy(body.errors[1]:find("stream"))
+  end)
+
+  it("writes audit log with subsystem on reload success", function()
+    policies.handle_post_reload()
+
+    local logged = _G.ngx._get_logged()
+    local has_audit = false
+    local has_subsystem = false
+    for _, entry in ipairs(logged) do
+      if entry:find("%[luagate:audit%]") and entry:find("policy_reload_success") then
+        has_audit = true
+        if entry:find('"subsystem"') then
+          has_subsystem = true
+        end
+        break
+      end
+    end
+    assert.is_true(has_audit, "audit log for reload success should be written")
+    assert.is_true(has_subsystem, "reload success audit must include subsystem field")
+  end)
+
+  it("writes audit log on reload failure", function()
+    _loader_result = {
+      ok = false,
+      skipped = false,
+      err = "file read error",
+      conflicts = {},
+      shadowed = {},
+      http_ok = false,
+      stream_ok = false,
+    }
+    policies = load_policies()
+
+    policies.handle_post_reload()
+
+    local logged = _G.ngx._get_logged()
+    local has_audit = false
+    for _, entry in ipairs(logged) do
+      if entry:find("%[luagate:audit%]") and entry:find("policy_reload_failure") then
+        has_audit = true
+        break
+      end
+    end
+    assert.is_true(has_audit, "audit log for reload failure should be written")
+  end)
+end)

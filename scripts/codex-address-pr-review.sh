@@ -478,9 +478,37 @@ printf '%s\n' "$THREADS" | while IFS= read -r thread; do
 
   COMMIT_SHA="-"
   if [ -n "$(git status --porcelain)" ]; then
-    git add -A
-    git commit -m "$(commit_message_for "$THREAD_PATH" "$ISSUE_KEY")"
-    COMMIT_SHA="$(git rev-parse --short HEAD)"
+    COMMIT_MSG="$(commit_message_for "$THREAD_PATH" "$ISSUE_KEY")"
+    MAX_RETRIES=3
+    for attempt in $(seq 1 "$MAX_RETRIES"); do
+      git add -A
+      if git commit -m "$COMMIT_MSG"; then
+        COMMIT_SHA="$(git rev-parse --short HEAD)"
+        break
+      fi
+      echo "커밋 실패 (시도 $attempt/$MAX_RETRIES): pre-commit hook 오류 — codex로 자동 수정 시도..." >&2
+      if [ "$attempt" -eq "$MAX_RETRIES" ]; then
+        append_state "failed" "$THREAD_URL" "$COMMENT_ID" "-" "$REVIEW_TITLE" "pre-commit hook 수정 $MAX_RETRIES회 실패"
+        echo "실패: pre-commit hook 오류를 $MAX_RETRIES회 시도 후에도 수정하지 못했습니다 — $THREAD_URL" >&2
+        exit 1
+      fi
+      FIX_PROMPT_FILE="$TMP_DIR/fix-commit-${COMMENT_ID}-${attempt}.md"
+      cat >"$FIX_PROMPT_FILE" <<FIXEOF
+pre-commit hook이 실패하여 커밋이 되지 않았습니다.
+아래 규칙에 맞게 코드를 수정하세요.
+
+규칙:
+- stylua: Lua 코드 포매팅
+- luacheck: Lua 린트 경고/오류
+- clang-format: C 코드 포매팅
+- shellcheck: 쉘 스크립트 린트
+- markdownlint: 마크다운 린트
+
+git status --porcelain 으로 변경된 파일만 확인하고, 해당 파일의 pre-commit hook 오류만 수정하세요.
+git commit / git push 는 하지 마세요.
+FIXEOF
+      codex exec --full-auto --color never -C "$REPO_ROOT" - <"$FIX_PROMPT_FILE" || true
+    done
   fi
 
   if [ "$NO_PUSH" -eq 1 ]; then
@@ -490,7 +518,32 @@ printf '%s\n' "$THREADS" | while IFS= read -r thread; do
   fi
 
   if [ "$COMMIT_SHA" != "-" ]; then
-    git push origin HEAD
+    MAX_PUSH_RETRIES=3
+    for push_attempt in $(seq 1 "$MAX_PUSH_RETRIES"); do
+      if git push origin HEAD; then
+        break
+      fi
+      echo "푸시 실패 (시도 $push_attempt/$MAX_PUSH_RETRIES): pre-push hook 오류 — codex로 자동 수정 시도..." >&2
+      if [ "$push_attempt" -eq "$MAX_PUSH_RETRIES" ]; then
+        append_state "failed" "$THREAD_URL" "$COMMENT_ID" "$COMMIT_SHA" "$REVIEW_TITLE" "pre-push hook 수정 ${MAX_PUSH_RETRIES}회 실패"
+        echo "실패: pre-push hook 오류를 ${MAX_PUSH_RETRIES}회 시도 후에도 수정하지 못했습니다 — $THREAD_URL" >&2
+        exit 1
+      fi
+      FIX_PUSH_PROMPT="$TMP_DIR/fix-push-${COMMENT_ID}-${push_attempt}.md"
+      cat >"$FIX_PUSH_PROMPT" <<FIXEOF
+pre-push hook이 실패하여 push가 되지 않았습니다.
+아래 규칙에 맞게 코드를 수정하세요.
+
+규칙:
+- make test-unit: Lua 단위 테스트 통과
+- clang-tidy: C 코드 정적 분석
+- luacheck: Lua 린트 전체
+
+최근 커밋에서 변경된 파일만 확인하고, 해당 파일의 pre-push hook 오류만 수정하세요.
+수정 후 git add + git commit 으로 fix 커밋을 만드세요. git push 는 하지 마세요.
+FIXEOF
+      codex exec --full-auto --color never -C "$REPO_ROOT" - <"$FIX_PUSH_PROMPT" || true
+    done
   fi
 
   if ! post_reply "$COMMENT_ID" "$REPLY_FILE"; then

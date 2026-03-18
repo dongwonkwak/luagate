@@ -16,6 +16,7 @@
 
 local cjson = require("cjson.safe")
 local auth = require("luagate.admin.auth")
+local policies = require("luagate.admin.policies")
 
 local _M = {}
 
@@ -257,6 +258,16 @@ local ROUTES = {
   },
   ["/metrics"] = {
     GET = handle_metrics,
+  },
+  ["/api/v1/policies"] = {
+    GET = policies.handle_get_policies,
+    PUT = policies.handle_put_policies,
+  },
+  ["/api/v1/policies/version"] = {
+    GET = policies.handle_get_version,
+  },
+  ["/api/v1/policies/reload"] = {
+    POST = policies.handle_post_reload,
   },
 }
 

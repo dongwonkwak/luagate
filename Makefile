@@ -27,7 +27,11 @@ test-unit-rust:
 	@for crate_dir in src/decoder src/scanner src/stream; do \
 	  if [ -f "$$crate_dir/Cargo.toml" ]; then \
 	    echo "  -> $$crate_dir"; \
-	    (cd "$$crate_dir" && cargo test) || exit 1; \
+	    if [ "$$crate_dir" = "src/scanner" ]; then \
+	      (cd "$$crate_dir" && cargo test -- --test-threads=1) || exit 1; \
+	    else \
+	      (cd "$$crate_dir" && cargo test) || exit 1; \
+	    fi; \
 	  fi; \
 	done
 
