@@ -4,6 +4,7 @@
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
 > - [ADR-002 정책 평가 규칙](../design/adr/ADR-002-policy-evaluation-conflict-detection.md)
 > - [ADR-004 로그/메트릭](../design/adr/ADR-004-log-metrics-admin-security.md)
+> - [ADR-009 FFI 타임아웃 강제](../design/adr/ADR-009-ffi-timeout-enforcement.md) — 3계층 타임아웃 방어, LUAGATE_TIMEOUT(-5)
 
 ## 1. 개요
 
@@ -260,7 +261,8 @@ HTTP 파이프라인 에러 분류 통일 표:
 |---------|---------|---------|------|
 | URL decode hard error / wrapper exception | fail-closed | 403 | 예: `decoder_path_exception`, `decoder_query_exception`, `decoder_load_error`, `ffi_fail:*` |
 | scanner_internal_error | fail-closed | 403 | 스캐너 자체 오류 |
-| budget_exceeded (>5ms) | fail-closed | 403 | 스캐너 타임아웃 |
+| budget_exceeded (Layer 1, >5ms) | fail-closed | 403 | 스캐너/디코더 내부 budget 초과 |
+| ffi_timeout (Layer 2 watchdog) | fail-closed | 403 | Layer 2 hard timeout 초과 (ADR-009). per-worker leak 카운터 증가 |
 | policy deny | — | 403 | 정책 매칭 deny |
 | upstream fail | — | 502 | proxy_pass 연결 실패 |
 | rate limit counter eviction | fail-open | — | shared_dict 용량 초과 (MVP 비범위) |
@@ -280,16 +282,19 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 ## 11. 타임아웃 설정
 
-| 단계 | 타임아웃 | 설명 |
-|------|----------|------|
-| C FFI 디코더 | < 0.5ms | Rust 함수 실행 시간 제한 (소프트) |
-| C FFI 스캐너 | < 5ms | budget_exceeded 시 fail-closed (c-ffi-modules.md 참조) |
-| 업스트림 연결 | 5s | `proxy_connect_timeout` |
-| 업스트림 읽기 | 30s | `proxy_read_timeout` |
-| 업스트림 쓰기 | 30s | `proxy_send_timeout` |
+> **ADR 참조**: [ADR-009 FFI 타임아웃 강제](../design/adr/ADR-009-ffi-timeout-enforcement.md) — 3계층 방어 전략 확정
 
-<!-- ADR 필요 -->
-> **TODO**: C FFI 타임아웃 강제 메커니즘 (watchdog timer 등) 구현 시 ADR 필요
+| 단계 | Layer 1 budget (내부) | Layer 2 hard timeout (watchdog) | 설명 |
+|------|----------------------|-------------------------------|------|
+| C FFI 디코더 | 2ms | 20ms | Layer 1 초과 시 `LUAGATE_BUDGET_EXCEEDED(-3)`, Layer 2 초과 시 `LUAGATE_TIMEOUT(-5)` → fail-closed |
+| C FFI 스캐너 | 5ms | 50ms | 동일 |
+| 업스트림 연결 | — | — | 5s (`proxy_connect_timeout`) |
+| 업스트림 읽기 | — | — | 30s (`proxy_read_timeout`) |
+| 업스트림 쓰기 | — | — | 30s (`proxy_send_timeout`) |
+
+> **Layer 2 watchdog 동작**: Rust 내부에서 작업 thread를 spawn하고 `recv_timeout`으로 hard timeout을 강제한다. copy-in/copy-out 전략으로 caller-owned 버퍼의 ABI 안전성을 보장한다. 상세: ADR-009.
+>
+> **Layer 2 timeout 시 부수효과**: per-worker leak 카운터(`ffi:timeout:leak:<worker_id>`) 증가. 누적 임곗값(10) 초과 시 worker 자발적 graceful exit.
 
 ## 12. 헬스체크
 
