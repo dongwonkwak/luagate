@@ -276,6 +276,9 @@ describe("handler.preread - TLS + SNI -> policy proxy", function()
     assert.equals("backend-tls:8443", ctx.upstream)
     assert.equals("proxied", ctx.request_state)
     assert.equals("backend-tls:8443", ngx_mock.var.luagate_upstream)
+    -- Fix 2: decision_source "rule" -> "policy_engine" (stream-pipeline.md §4)
+    assert.equals("policy_engine", ctx.decision_source)
+    assert.equals("policy_engine", ngx_mock.var.luagate_decision_source)
     assert.is_nil(ngx_mock._get_exited())
   end)
 end)
@@ -1073,6 +1076,48 @@ describe("handler.preread - radix tree CIDR integration", function()
     package.loaded["luagate.policy.evaluator"] = nil
   end)
 
+  it("radix_build CIDR list uses 1-based rule index (Fix 3)", function()
+    local captured_cidr = nil
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = _stream_ffi_module.detect_protocol,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function(cidr_list)
+        captured_cidr = cidr_list
+        return MOCK_RADIX_TREE, nil
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    _stream_ffi_stub.detect_result = { "raw", nil, false }
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+        { id = "rule-b", scope = { src_ip_cidr = "172.16.0.0/12" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
+    assert.is_not_nil(captured_cidr)
+    -- 1-based: first rule at index 1, second at index 2 (not 0, 1)
+    assert.truthy(captured_cidr:find("10.0.0.0/8,1"))
+    assert.truthy(captured_cidr:find("172.16.0.0/12,2"))
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
   it("radix_build 실패 시 WARN 로그만, 처리 계속", function()
     package.loaded["luagate.stream.ffi"] = {
       detect_protocol = function()
@@ -1111,5 +1156,115 @@ describe("handler.preread - radix tree CIDR integration", function()
 
     -- Restore
     package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+end)
+
+-- ===========================================================================
+-- decision_source 값 spec 준수 (Fix 2: stream-pipeline.md §4)
+-- ===========================================================================
+
+describe("handler.preread - decision_source spec compliance (Fix 2)", function()
+  local ngx_mock
+  local test_ver_counter = 200
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    test_ver_counter = test_ver_counter + 1
+    local ver = "v-ds-" .. test_ver_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver
+      end
+      return nil
+    end
+  end)
+
+  it("evaluator decision_source 'rule' -> 'policy_engine'", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "rule-a",
+      decision_source = "rule",
+      upstream = "up:443",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("policy_engine", ctx.decision_source)
+    assert.equals("policy_engine", ngx_mock.var.luagate_decision_source)
+  end)
+
+  it("evaluator decision_source 'default' -> 'policy_engine'", function()
+    _stream_ffi_stub.detect_result = { "raw", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("policy_engine", ctx.decision_source)
+    assert.equals("policy_engine", ngx_mock.var.luagate_decision_source)
+  end)
+
+  it("evaluator decision_source 'error' -> 'policy_engine'", function()
+    _stream_ffi_stub.detect_result = { "raw", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "error",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("policy_engine", ctx.decision_source)
+    assert.equals("policy_engine", ngx_mock.var.luagate_decision_source)
+  end)
+
+  it("evaluator decision_source nil -> 'policy_engine' (default)", function()
+    _stream_ffi_stub.detect_result = { "raw", nil, false }
+    _evaluator_stub.get_policy_result = make_proxy_policy()
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = nil,
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("policy_engine", ctx.decision_source)
+  end)
+
+  it("fail-closed paths use 'nginx_core' (socket error)", function()
+    ngx_mock.req.socket = function()
+      return nil, "no socket"
+    end
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("nginx_core", ctx.decision_source)
+  end)
+
+  it("fail-closed paths use 'policy_engine' (no_policy)", function()
+    _stream_ffi_stub.detect_result = { "tls", nil, false }
+    _stream_ffi_stub.sni_result = { "example.com", nil, false }
+    _evaluator_stub.get_policy_result = nil
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("policy_engine", ctx.decision_source)
   end)
 end)

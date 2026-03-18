@@ -274,7 +274,7 @@ function _M.preread()
     local cidr_lines = {}
     for i, rule in ipairs(policy.stream_rules or {}) do
       if rule.scope and rule.scope.src_ip_cidr then
-        cidr_lines[#cidr_lines + 1] = rule.scope.src_ip_cidr .. "," .. (i - 1)
+        cidr_lines[#cidr_lines + 1] = rule.scope.src_ip_cidr .. "," .. i
       end
     end
 
@@ -326,8 +326,17 @@ function _M.preread()
 
   ctx.action = result.action
   ctx.matched_rule_id = result.matched_rule
-  ctx.decision_source = result.decision_source or "policy_engine"
   ctx.upstream = result.upstream
+
+  -- Map evaluator decision_source to spec-compliant values (stream-pipeline.md §4).
+  -- Spec allows only "policy_engine" | "nginx_core".
+  -- evaluator may return "rule", "default", or "error" — all are policy_engine decisions.
+  local raw_source = result.decision_source or "policy_engine"
+  if raw_source == "rule" or raw_source == "default" or raw_source == "error" then
+    ctx.decision_source = "policy_engine"
+  else
+    ctx.decision_source = raw_source
+  end
 
   -- Update nginx variables
   ngx.var.luagate_stream_action = result.action

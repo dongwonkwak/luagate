@@ -148,11 +148,11 @@ pub extern "C" fn luagate_extract_sni(
     let data = unsafe { std::slice::from_raw_parts(buf as *const u8, buf_len) };
 
     match parse_sni(data) {
-        SniResult::Ok(sni) => {
-            if sni.is_empty() {
-                // No SNI extension — valid TLS without SNI
-                return LUAGATE_OK;
-            }
+        SniResult::Ok(ref sni) if sni.is_empty() => {
+            // No SNI extension — valid TLS without SNI
+            LUAGATE_OK
+        }
+        SniResult::Ok(ref sni) => {
             unsafe { write_output(sni.as_bytes(), out, out_cap, out_len) }
         }
         SniResult::NeedMoreData => LUAGATE_NEED_MORE_DATA,
@@ -160,13 +160,90 @@ pub extern "C" fn luagate_extract_sni(
     }
 }
 
-enum SniResult<'a> {
-    Ok(&'a str),
+enum SniResult {
+    Ok(String),
+    NeedMoreData,
+    Invalid,
+}
+
+/// Reassemble handshake payload from one or more TLS records.
+///
+/// A ClientHello may be split across multiple consecutive TLS Handshake
+/// records (ContentType 0x16).  This function walks all such records in
+/// `data`, concatenating their payloads into a single `Vec<u8>`.
+///
+/// Returns `None` if any record is incomplete (NEED_MORE_DATA) or if the
+/// first record is not a valid TLS Handshake record.
+///
+/// Returns `Err(())` for clearly invalid data (e.g. non-0x03 major version).
+fn reassemble_handshake(data: &[u8]) -> Result<Vec<u8>, ReassembleError> {
+    let mut payload = Vec::new();
+    let mut offset = 0;
+
+    // We must see at least one record
+    if data.len() < 5 {
+        return Err(ReassembleError::NeedMoreData);
+    }
+
+    while offset < data.len() {
+        // Need at least 5 bytes for record header
+        if offset + 5 > data.len() {
+            // Partial record header after a complete first record —
+            // treat as end-of-records (don't fail, just stop).
+            if !payload.is_empty() {
+                break;
+            }
+            return Err(ReassembleError::NeedMoreData);
+        }
+
+        let content_type = data[offset];
+        // Only concatenate Handshake records (0x16)
+        if content_type != 0x16 {
+            // If we haven't collected any data yet, this is invalid
+            if payload.is_empty() {
+                return Err(ReassembleError::Invalid);
+            }
+            // Otherwise stop — non-handshake record after handshake records
+            break;
+        }
+
+        // Validate TLS version in record header
+        if data[offset + 1] != 0x03 {
+            return Err(ReassembleError::Invalid);
+        }
+        if data[offset + 2] > 0x04 {
+            return Err(ReassembleError::Invalid);
+        }
+
+        let record_len = u16::from_be_bytes([data[offset + 3], data[offset + 4]]) as usize;
+        let record_end = offset + 5 + record_len;
+
+        if record_end > data.len() {
+            // Incomplete record
+            if payload.is_empty() {
+                return Err(ReassembleError::NeedMoreData);
+            }
+            // Partial second+ record — stop and try with what we have
+            break;
+        }
+
+        payload.extend_from_slice(&data[offset + 5..record_end]);
+        offset = record_end;
+    }
+
+    Ok(payload)
+}
+
+enum ReassembleError {
     NeedMoreData,
     Invalid,
 }
 
 /// Parse TLS ClientHello to extract SNI.
+///
+/// Supports multi-record ClientHello: if the handshake message spans
+/// multiple TLS records (ContentType 0x16), their payloads are reassembled
+/// before parsing.
 ///
 /// TLS Record structure:
 ///   [0]    ContentType (0x16 = Handshake)
@@ -184,34 +261,18 @@ enum SniResult<'a> {
 ///   ...    CipherSuites (u16 length + data)
 ///   ...    Compression methods (u8 length + data)
 ///   ...    Extensions (u16 total length + extension list)
-fn parse_sni(data: &[u8]) -> SniResult<'_> {
-    // Minimum TLS record header: 5 bytes
-    if data.len() < 5 {
-        return SniResult::NeedMoreData;
-    }
+fn parse_sni(data: &[u8]) -> SniResult {
+    let handshake_payload = match reassemble_handshake(data) {
+        Ok(p) => p,
+        Err(ReassembleError::NeedMoreData) => return SniResult::NeedMoreData,
+        Err(ReassembleError::Invalid) => return SniResult::Invalid,
+    };
 
-    // Validate TLS record
-    if data[0] != 0x16 {
-        return SniResult::Invalid;
-    }
-    if data[1] != 0x03 {
-        return SniResult::Invalid;
-    }
-    // TLS minor version: 0x01 (TLS 1.0) through 0x04 (TLS 1.3 record layer uses 0x03)
-    // Accept 0x00..0x04 range
-    if data[2] > 0x04 {
-        return SniResult::Invalid;
-    }
+    parse_sni_from_handshake(&handshake_payload)
+}
 
-    let record_len = u16::from_be_bytes([data[3], data[4]]) as usize;
-    let total_needed = 5 + record_len;
-
-    if data.len() < total_needed {
-        return SniResult::NeedMoreData;
-    }
-
-    let handshake = &data[5..total_needed];
-
+/// Parse SNI from a reassembled handshake payload.
+fn parse_sni_from_handshake(handshake: &[u8]) -> SniResult {
     // Handshake header: type(1) + length(3)
     if handshake.len() < 4 {
         return SniResult::Invalid;
@@ -257,7 +318,7 @@ fn parse_sni(data: &[u8]) -> SniResult<'_> {
     // Extensions (optional — old TLS without extensions is valid)
     if pos >= ch.len() {
         // No extensions
-        return SniResult::Ok("");
+        return SniResult::Ok(String::new());
     }
 
     if pos + 2 > ch.len() {
@@ -305,7 +366,7 @@ fn parse_sni(data: &[u8]) -> SniResult<'_> {
                 if name_type == 0x00 {
                     // host_name
                     match std::str::from_utf8(&ch[sni_pos..sni_pos + name_len]) {
-                        Ok(s) => return SniResult::Ok(s),
+                        Ok(s) => return SniResult::Ok(s.to_string()),
                         Err(_) => return SniResult::Invalid,
                     }
                 }
@@ -314,14 +375,14 @@ fn parse_sni(data: &[u8]) -> SniResult<'_> {
             }
 
             // SNI extension found but no host_name entry
-            return SniResult::Ok("");
+            return SniResult::Ok(String::new());
         }
 
         pos += ext_len;
     }
 
     // No SNI extension
-    SniResult::Ok("")
+    SniResult::Ok(String::new())
 }
 
 // ---------------------------------------------------------------------------
@@ -989,6 +1050,86 @@ mod tests {
             std::ptr::null_mut(),
         );
         assert_eq!(rc, LUAGATE_INTERNAL_ERROR);
+    }
+
+    /// Build a fragmented ClientHello split across two TLS records.
+    /// The first record contains the handshake header + first `split_at` bytes
+    /// of the ClientHello body; the second record contains the rest.
+    fn build_fragmented_client_hello(sni: &str, split_at: usize) -> Vec<u8> {
+        // First build a single-record ClientHello, then split the handshake.
+        let single = build_client_hello(sni);
+
+        // single = [TLS record header (5)] [handshake data]
+        let handshake_data = &single[5..];
+
+        // Split handshake into two parts
+        let actual_split = split_at.min(handshake_data.len().saturating_sub(1)).max(1);
+        let part1 = &handshake_data[..actual_split];
+        let part2 = &handshake_data[actual_split..];
+
+        let mut result = Vec::new();
+
+        // First TLS record
+        result.push(0x16); // Handshake
+        result.extend_from_slice(&[0x03, 0x01]); // TLS 1.0 record layer
+        result.extend_from_slice(&(part1.len() as u16).to_be_bytes());
+        result.extend_from_slice(part1);
+
+        // Second TLS record
+        result.push(0x16); // Handshake
+        result.extend_from_slice(&[0x03, 0x01]); // TLS 1.0 record layer
+        result.extend_from_slice(&(part2.len() as u16).to_be_bytes());
+        result.extend_from_slice(part2);
+
+        result
+    }
+
+    #[test]
+    fn test_extract_sni_fragmented_two_records() {
+        // Split the handshake at byte 10 (within the handshake header area)
+        let data = build_fragmented_client_hello("fragmented.example.com", 10);
+        let mut out = vec![0i8; 256];
+        let mut out_len: usize = 0;
+
+        let rc = luagate_extract_sni(
+            data.as_ptr() as *const i8,
+            data.len(),
+            out.as_mut_ptr(),
+            256,
+            &mut out_len,
+        );
+
+        assert_eq!(rc, LUAGATE_OK);
+        assert!(out_len > 0);
+        let sni_bytes: Vec<u8> = out[..out_len].iter().map(|&b| b as u8).collect();
+        assert_eq!(
+            String::from_utf8_lossy(&sni_bytes),
+            "fragmented.example.com"
+        );
+    }
+
+    #[test]
+    fn test_extract_sni_fragmented_split_in_extensions() {
+        // Split deep into the handshake (after session ID, into extensions area)
+        let data = build_fragmented_client_hello("deep-split.example.com", 50);
+        let mut out = vec![0i8; 256];
+        let mut out_len: usize = 0;
+
+        let rc = luagate_extract_sni(
+            data.as_ptr() as *const i8,
+            data.len(),
+            out.as_mut_ptr(),
+            256,
+            &mut out_len,
+        );
+
+        assert_eq!(rc, LUAGATE_OK);
+        assert!(out_len > 0);
+        let sni_bytes: Vec<u8> = out[..out_len].iter().map(|&b| b as u8).collect();
+        assert_eq!(
+            String::from_utf8_lossy(&sni_bytes),
+            "deep-split.example.com"
+        );
     }
 
     #[test]

@@ -232,3 +232,5 @@ COMPLETED_REVIEW: DON-145-code (2026-03-17)
 | 2026-03-18 | DON-143 | 설계 리뷰 피드백 5건 수정 | `src/stream/src/lib.rs`, `lua/luagate/stream/handler.lua`, `tests/unit/stream/handler_spec.lua` | Rust 23 + Lua 570 테스트 통과. 피드백: (1) preread 주석 추가 + raw=true, (2) NEED_MORE_DATA 재시도 루프 + malformed TLS fail-closed, (3) radix tree 실제 연결, (4) Vec→trie, (5) CONNECT 제거 |
 
 COMPLETED_REVIEW: DON-143-design (2026-03-18)
+
+COMPLETED_REVIEW: DON-143-code (2026-03-18)
