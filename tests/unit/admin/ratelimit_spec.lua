@@ -311,7 +311,7 @@ describe("ratelimit.check", function()
       assert.are.equal(429, _G.ngx.status)
     end)
 
-    it("429 응답에 Retry-After 헤더 포함", function()
+    it("현재 window 초과 시 Retry-After가 다음 weighted-window 회복 시점까지 반영", function()
       local now = _G.ngx.now()
       local current_slot = math.floor(now / 60)
       local key = "rl:127.0.0.1:" .. tostring(current_slot)
@@ -322,8 +322,7 @@ describe("ratelimit.check", function()
 
       assert.is_not_nil(_G.ngx.header["Retry-After"])
       local retry = tonumber(_G.ngx.header["Retry-After"])
-      assert.is_true(retry > 0, "Retry-After는 양수여야 한다")
-      assert.is_true(retry <= 60, "Retry-After는 window size 이하여야 한다")
+      assert.are.equal(64, retry)
     end)
 
     it("429 응답 body에 rate_limited 에러 포함", function()
@@ -390,6 +389,7 @@ describe("ratelimit.check", function()
 
       assert.is_false(result, "weighted count ~30.79 should exceed limit 30")
       assert.are.equal(429, _G.ngx.status)
+      assert.are.equal("5", _G.ngx.header["Retry-After"])
     end)
   end)
 

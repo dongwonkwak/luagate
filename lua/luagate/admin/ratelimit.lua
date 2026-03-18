@@ -38,8 +38,34 @@ local function make_key(ip, slot)
   return "rl:" .. ip .. ":" .. tostring(slot)
 end
 
+--- Calculate Retry-After from the earliest future request that can pass.
+-- Assumes no additional requests arrive before the client retries.
+-- @param previous_count number  Previous slot counter
+-- @param current_count number   Current slot counter after the denied incr
+-- @param elapsed number         Elapsed seconds in the current slot
+-- @return number
+local function calculate_retry_after(previous_count, current_count, elapsed)
+  local remaining = WINDOW_SIZE - elapsed
+
+  if previous_count > 0 and current_count < MAX_REQUESTS then
+    local allowed_previous_weight = MAX_REQUESTS - current_count - 1
+    local same_slot_retry_after = (WINDOW_SIZE * (1 - (allowed_previous_weight / previous_count))) - elapsed
+
+    if same_slot_retry_after > 0 and same_slot_retry_after < remaining then
+      return math.max(1, math.ceil(same_slot_retry_after))
+    end
+  end
+
+  local next_slot_elapsed = 0
+  if current_count > (MAX_REQUESTS - 1) then
+    next_slot_elapsed = WINDOW_SIZE * (1 - ((MAX_REQUESTS - 1) / current_count))
+  end
+
+  return math.max(1, math.ceil(remaining + next_slot_elapsed))
+end
+
 --- Send a 429 Too Many Requests response.
--- @param retry_after number  Seconds until the current window expires
+-- @param retry_after number  Seconds until the next request can succeed
 local function reject_rate_limited(retry_after)
   ngx.status = 429
   ngx.header["Content-Type"] = "application/json"
@@ -130,11 +156,7 @@ function _M.check()
   local weighted_count = previous_count * (1 - elapsed_fraction) + new_val
 
   if weighted_count > MAX_REQUESTS then
-    -- Calculate retry-after: time until current window expires
-    local retry_after = math.ceil(WINDOW_SIZE - elapsed)
-    if retry_after < 1 then
-      retry_after = 1
-    end
+    local retry_after = calculate_retry_after(previous_count, new_val, elapsed)
 
     ngx.log(
       ngx.WARN,
