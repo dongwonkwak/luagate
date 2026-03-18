@@ -51,6 +51,17 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | 정책 엔진 변경 | implementer → tester → (설계 변경 시) architect |
 | 문서만 변경 | doc-sync skill (직접 편집) |
 
+## 이슈 개발 지시 처리
+
+"DON-XXX 구현/해줘/작업/진행" 패턴의 지시를 받으면 **반드시** `implement-issue` 스킬을 invoke한다.
+스킬 invoke 없이 직접 구현 시작 금지.
+
+## 병렬 작업
+
+여러 이슈를 동시에 작업해야 할 때는 `parallel-work` 스킬을 invoke한다.
+- 참조: `.claude/knowledge/parallel-work.md`
+- git worktree로 독립적인 작업 환경 구성
+
 ## knowledge 인덱스 (작업별 필독 파일)
 
 | 작업 | 반드시 읽을 knowledge |
@@ -62,6 +73,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | 새 spec 작성 | `conventions.md` + `architecture.md` |
 | 정책/zone 관련 | `architecture.md` (zone map + hot reload 7단계) |
 | 프로덕션 제한 확인 | `known-limitations-detail.md` |
+| 병렬 작업 (worktree) | `parallel-work.md` |
 
 ## skills 목록
 
@@ -76,6 +88,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | `new-security-log-field` | `.claude/skills/new-security-log-field/` | 새 보안 로그 필드 추가 시 |
 | `doc-sync` | `.claude/skills/doc-sync/` | ADR 추가/변경 후 |
 | `pr-review-context` | `.claude/skills/pr-review-context/` | PR 생성 직후 Codex 심화 리뷰 컨텍스트 생성 시 |
+| `parallel-work` | `.claude/skills/parallel-work/` | 여러 이슈 병렬 작업 시 (git worktree) |
 
 ## 이슈 완료 Exit Criteria 체크리스트
 
