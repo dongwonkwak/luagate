@@ -69,6 +69,14 @@ fi
 REVIEW="${REVIEWS_DIR}/${PENDING}-review.md"
 RESULT="${REVIEWS_DIR}/${PENDING}-result.md"
 
+# --- worktree 리뷰 파일 탐색: worktree 먼저 확인, 없으면 MAIN_ROOT fallback ---
+WORKTREE_REVIEW="${WORKTREE_ROOT}/.claude/reviews/${PENDING}-review.md"
+if [ "$WORKTREE_ROOT" != "$MAIN_ROOT" ] && [ -f "$WORKTREE_REVIEW" ]; then
+  REVIEW="$WORKTREE_REVIEW"
+  RESULT="${WORKTREE_ROOT}/.claude/reviews/${PENDING}-result.md"
+  REVIEWS_DIR="${WORKTREE_ROOT}/.claude/reviews"
+fi
+
 # --- reviews 디렉토리 생성 (review 파일 존재 확인 전에 수행) ---
 mkdir -p "$REVIEWS_DIR"
 
@@ -140,7 +148,12 @@ else
 fi
 
 # --- PROGRESS.md 마커 정리: PENDING_REVIEW → COMPLETED_REVIEW ---
-if grep -q "^PENDING_REVIEW: ${PENDING}$" "${MAIN_ROOT}/PROGRESS.md" 2>/dev/null; then
-  sed "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" "${MAIN_ROOT}/PROGRESS.md" > "${MAIN_ROOT}/PROGRESS.md.tmp" && mv "${MAIN_ROOT}/PROGRESS.md.tmp" "${MAIN_ROOT}/PROGRESS.md"
+# worktree 환경에서는 worktree의 PROGRESS.md를 우선 갱신
+PROGRESS_FILE="${MAIN_ROOT}/PROGRESS.md"
+if [ "$WORKTREE_ROOT" != "$MAIN_ROOT" ] && [ -f "${WORKTREE_ROOT}/PROGRESS.md" ]; then
+  PROGRESS_FILE="${WORKTREE_ROOT}/PROGRESS.md"
+fi
+if grep -q "^PENDING_REVIEW: ${PENDING}$" "$PROGRESS_FILE" 2>/dev/null; then
+  sed "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" "$PROGRESS_FILE" > "${PROGRESS_FILE}.tmp" && mv "${PROGRESS_FILE}.tmp" "$PROGRESS_FILE"
   echo "PROGRESS.md 마커 갱신: PENDING_REVIEW → COMPLETED_REVIEW"
 fi

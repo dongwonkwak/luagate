@@ -87,3 +87,4 @@ git worktree remove <path>
 - worktree 간 브랜치 전환 주의 — 한 worktree에서 다른 worktree의 브랜치를 checkout 불가
 - 메인 저장소에서 worktree 브랜치 checkout 금지
 - 완료 후 worktree 정리 필수
+- **Codex 리뷰 파일은 worktree 내 `.claude/reviews/`에 생성** — `codex-review.sh`가 worktree 경로를 우선 탐색함
