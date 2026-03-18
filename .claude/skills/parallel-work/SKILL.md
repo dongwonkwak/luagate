@@ -40,14 +40,17 @@ trigger: "parallel-work | 병렬 작업 | 동시 작업 | worktree | 여러 이�
 ### 3. worktree 생성 (새 브랜치 포함)
 
 ```bash
+# Linear get_issue 응답의 gitBranchName 필드 사용
+# 한글이 포함된 경우 제거 후 연속 하이픈(--)을 단일 하이픈(-)으로 정리
 # -b 플래그로 새 브랜치를 생성하면서 worktree 추가
-git worktree add -b <branch-name-1> ../luagate-don-xxx <integration-base>
-git worktree add -b <branch-name-2> ../luagate-don-yyy <integration-base>
+git worktree add -b <sanitized-linear-gitBranchName-1> ../luagate-don-xxx <integration-base>
+git worktree add -b <sanitized-linear-gitBranchName-2> ../luagate-don-yyy <integration-base>
 ```
 
 > `git worktree add <path> <branch>`는 기존 브랜치만 가능.
 > 새 이슈 브랜치는 반드시 `-b` 플래그를 사용한다.
 > `<integration-base>`는 현재 작업을 머지할 대상 브랜치의 최신 head를 사용한다 (예: 활성 epic 브랜치).
+> 각 브랜치명은 AGENTS 불변식대로 Linear `gitBranchName`을 사용하고, 한글이 있으면 제거 후 연속 하이픈을 정리한다.
 
 ### 4. 각 worktree에서 implement-issue 실행
 
