@@ -15,7 +15,7 @@
 
 - [ ] ❌ token / 민감정보 `console.log` 출력 여부
 - [ ] ❌ `dangerouslySetInnerHTML` 사용 여부 (XSS 벡터)
-- [ ] ❌ API URL 하드코딩 여부 (`VITE_ADMIN_API_URL` 환경변수 미사용)
+- [ ] ❌ 안전하지 않은 절대 API URL 하드코딩 여부 (same-origin 상대 경로 `/api` 허용, 절대 URL은 환경변수/배포 설정으로 주입)
 - [ ] ❌ Bearer token 형식 준수 (`admin-auth-contract.md` 기준: `Authorization: Bearer <token>`)
 - [ ] ❌ localStorage 토큰 저장 방식 <!-- TODO: DON-198 auth 방침 확정 후 업데이트 -->
 
