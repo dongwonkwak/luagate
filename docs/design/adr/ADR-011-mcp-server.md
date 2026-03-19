@@ -48,6 +48,8 @@ AI 코딩 에이전트와 IDE 통합(Claude Desktop, VS Code 등)이 확산되�
 
 **결정**: stdio를 기본 transport로 채택. 원격 필요 시 Streamable HTTP 추가.
 
+> **인증 경계**: Streamable HTTP 활성화 시 ADR-004 §6의 localhost 바인딩 전제가 깨진다. 원격 transport 도입 전 반드시 별도 ADR에서 mTLS 또는 OAuth 인증 경계를 정의해야 한다. stdio-only v1에서는 이 문제가 발생하지 않는다.
+
 ### 2. 구현 언어
 
 | 옵션 | 채택 | 이유 |
@@ -83,11 +85,11 @@ AI 코딩 에이전트와 IDE 통합(Claude Desktop, VS Code 등)이 확산되�
 | Tool | Admin API 매핑 | 설명 |
 |------|---------------|------|
 | `luagate_get_policies` | GET /api/v1/policies | 정책 YAML + ETag 조회 |
-| `luagate_get_policy_versions` | GET /api/v1/policies/version | 버전 이력 조회 |
+| `luagate_get_policy_versions` | GET /api/v1/policies/version | 현재 시점 버전 스냅샷 조회 (source_version, active_http_version, active_stream_version) |
 | `luagate_get_status` | GET /api/v1/status | 상태 + active_version + worker 수 |
-| `luagate_validate_policies` | POST /api/v1/policies/validate | Dry-run: 문법/충돌 검증만, 적용 안 함 |
+| `luagate_validate_policies` | PUT /api/v1/policies?dry_run=true | Dry-run: 문법/충돌 검증만, 적용 안 함 (**Admin API 확장 필요** — DON-191에서 구현) |
 | `luagate_update_policies` | PUT /api/v1/policies | 정책 업데이트 (expected_source_version 필수) |
-| `luagate_rollback_policies` | POST /api/v1/policies/rollback | 이전 버전으로 롤백 |
+| `luagate_rollback_policies` | PUT /api/v1/policies (이전 YAML + expected_source_version) | 이전 버전 YAML로 복원 (**별도 엔드포인트 아닌 기존 PUT 재사용**) |
 | `luagate_reload` | POST /api/v1/policies/reload | Hot reload (운영 복구용) |
 
 ### 7. Blind Overwrite 방지
@@ -125,6 +127,8 @@ MCP 호출 시 감사 로그에 추가 메타데이터:
 ```
 
 기존 Admin API 직접 호출은 `actor_type: "api"` (하위 호환 기본값).
+
+> **스키마 동기화**: 위 필드 추가는 DON-191 (MCP 구현) 시 `docs/spec/admin-api.md` 감사 로그 섹션과 `docs/spec/log-schema.md` audit 필드에 동시 반영해야 한다 (same-PR 규칙). 이 ADR은 스키마 방향만 확정하며, spec 갱신은 구현 이슈에서 수행한다.
 
 ---
 
