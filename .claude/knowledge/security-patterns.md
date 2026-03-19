@@ -61,7 +61,7 @@ end
 
 ## Admin API 보안 계약
 
-- **바인딩**: `127.0.0.1:8080` 전용 (외부 노출 금지)
+- **바인딩**: `127.0.0.1:9090` 전용 (외부 노출 금지)
 - **인증**: `Authorization: Bearer <token>` (환경변수 `LUAGATE_ADMIN_TOKEN`)
 - **타이밍 안전 비교**: 토큰 비교 시 `string.len` 기반 단순 비교 금지, constant-time compare 사용
 
@@ -146,10 +146,14 @@ conf/scanner-patterns/
 ## 보안 헤더 규칙
 
 ```nginx
-# Admin 서버 응답 헤더
+# Admin 서버 응답 헤더 (DON-174)
+# CSP: Monaco Editor Web Worker를 위해 worker-src 'self' blob: 필수
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:" always;
 add_header X-Content-Type-Options "nosniff" always;
-add_header X-Frame-Options "DENY" always;
-add_header Cache-Control "no-store" always;
+add_header X-Frame-Options        "DENY"    always;
+add_header Referrer-Policy        "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy     "geolocation=(), microphone=()" always;
+add_header Cache-Control          "no-store" always;
 ```
 
 ## 로그 Redaction 정책 (ADR-007 후보)

@@ -201,7 +201,7 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 
 #### 6.1 네트워크 바인딩
 
-- Admin API 서버: `127.0.0.1:8080` (localhost만 바인딩)
+- Admin API 서버: `127.0.0.1:9090` (localhost만 바인딩)
 - 외부 네트워크 노출 금지 (방화벽/Nginx listen 설정으로 강제)
 - 외부 대시보드 접근: 역방향 프록시 또는 SSH 터널링을 통해야 함
 
@@ -235,7 +235,7 @@ Admin API에 대한 주요 위협과 완화 방안:
 
 | 위협 | 공격 시나리오 | 완화 방안 |
 |------|-------------|-----------|
-| **SSRF-to-loopback** | 외부 서비스를 경유하여 `127.0.0.1:8080`에 요청 전달 | localhost 바인딩 + 방화벽으로 외부 직접 접근 차단. 역방향 프록시에서 Admin 포트 노출 금지 |
+| **SSRF-to-loopback** | 외부 서비스를 경유하여 `127.0.0.1:9090`에 요청 전달 | localhost 바인딩 + 방화벽으로 외부 직접 접근 차단. 역방향 프록시에서 Admin 포트 노출 금지 |
 | **Container breakout** | 컨테이너 탈출 후 호스트 네트워크에서 Admin API 접근 | UDS(Unix Domain Socket) 바인딩 또는 mTLS를 통한 mutual authentication 검토 (별도 ADR) |
 | **Token 탈취** | 로그/환경변수에서 `LUAGATE_ADMIN_TOKEN` 노출 | 토큰을 로그에 기록하지 않음. 최소 32자 엔트로피 요구. 시크릿 관리 시스템(Vault 등) 연동 권장 |
 | **Brute force** | Bearer token 추측 시도 | 연속 인증 실패 시 IP 기반 일시 차단 (임계값: 10회/분) 구현 권장 |
