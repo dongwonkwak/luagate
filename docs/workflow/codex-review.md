@@ -127,7 +127,7 @@ Claude Code worktree(`isolation: "worktree"`)에서 구현한 경우의 워크�
    └─ cd <worktree-path>
    └─ ./scripts/codex-review.sh DON-XXX {type}
    └─ 스크립트가 main의 review.md 읽기 + worktree 코드 리뷰
-   └─ 결과: main/.claude/reviews/DON-XXX-{type}-result.md 생성
+   └─ 결과: worktree/.claude/reviews/DON-XXX-{type}-result.md 생성
 
 4. 이후 흐름은 기존과 동일
 ```

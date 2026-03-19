@@ -5,6 +5,10 @@ on:
     types: [closed]
     branches: [main]
 
+concurrency:
+  group: progress-update
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -29,6 +33,9 @@ jobs:
             echo "No <!-- PROGRESS --> block found in PR body — skipping"
             exit 0
           fi
+
+          # Pull latest main to avoid non-fast-forward push
+          git pull --rebase origin main
 
           # Append to PROGRESS.md table
           echo "$ENTRY" >> PROGRESS.md

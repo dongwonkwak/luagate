@@ -37,20 +37,33 @@ validate_pending() {
 }
 
 # --- pending review 감지: reviews/ 디렉토리 스캔 ---
+# review.md가 존재하지만 대응하는 result.md가 없는 항목을 찾는다
+# 여러 개면 목록을 표시하고 수동 지정을 요구한다
 find_pending_review() {
   local dir="$1"
-  # review.md가 존재하지만 대응하는 result.md가 없는 항목을 찾는다
+  local pending=()
   for review_file in "$dir"/*-review.md; do
     [ -f "$review_file" ] || continue
     local base
     base="$(basename "$review_file" -review.md)"
     local result_file="$dir/${base}-result.md"
     if [ ! -f "$result_file" ]; then
-      echo "$base"
-      return 0
+      pending+=("$base")
     fi
   done
-  return 1
+  if [ ${#pending[@]} -eq 0 ]; then
+    return 1
+  elif [ ${#pending[@]} -eq 1 ]; then
+    echo "${pending[0]}"
+    return 0
+  else
+    echo "오류: pending review가 여러 개입니다:" >&2
+    for p in "${pending[@]}"; do
+      echo "  - $p" >&2
+    done
+    echo "직접 지정: ./scripts/codex-review.sh <ISSUE> <TYPE>" >&2
+    exit 1
+  fi
 }
 
 # --- 인자 처리 ---
