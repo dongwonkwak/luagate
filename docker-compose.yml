@@ -18,7 +18,7 @@ services:
       - ./conf/scanner-patterns:/conf/scanner-patterns:ro
     environment:
       - LUAGATE_ENV=development
-      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-development-token-at-least-32-bytes-long}
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:?Set LUAGATE_ADMIN_TOKEN in .env or environment}
       - LD_LIBRARY_PATH=/usr/local/openresty/lualib
     depends_on:
       - upstream-mock
@@ -43,3 +43,7 @@ services:
 networks:
   luagate-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1
