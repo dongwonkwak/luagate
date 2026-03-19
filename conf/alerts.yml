@@ -19,7 +19,7 @@ groups:
         annotations:
           summary: "High block rate (> 30%)"
           description: "More than 30% of HTTP requests are being denied for 5 minutes."
-          runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagateHighBlockRate"
+          runbook_url: "docs/runbook/alert-response.md#LuagateHighBlockRate"
 
       - alert: LuagateBlockRateSpike
         expr: |
@@ -32,7 +32,7 @@ groups:
         annotations:
           summary: "Block rate spike (10x above 1h average)"
           description: "Denied request rate in the last 1 minute is 10x higher than the 1-hour average."
-          runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagateBlockRateSpike"
+          runbook_url: "docs/runbook/alert-response.md#LuagateBlockRateSpike"
 
       # ── Latency ──────────────────────────────────────────────────────
       - alert: LuagateHighLatency
@@ -44,7 +44,7 @@ groups:
         annotations:
           summary: "High p99 latency (> 100ms)"
           description: "HTTP response time p99 exceeds 100ms for 5 minutes."
-          runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagateHighLatency"
+          runbook_url: "docs/runbook/alert-response.md#LuagateHighLatency"
 
       # ── Connections ──────────────────────────────────────────────────
       - alert: LuagateActiveConnectionsHigh
@@ -55,7 +55,7 @@ groups:
         annotations:
           summary: "High active HTTP connections (> 1000)"
           description: "Active HTTP connections exceed 1000 for 2 minutes."
-          runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagateActiveConnectionsHigh"
+          runbook_url: "docs/runbook/alert-response.md#LuagateActiveConnectionsHigh"
 
       # ── Data Plane Upstream Errors ─────────────────────────────────
       - alert: LuagateUpstreamErrors
@@ -66,7 +66,7 @@ groups:
         annotations:
           summary: "Data plane upstream 5xx errors detected"
           description: "Upstream 5xx errors on data plane allow-path proxied requests."
-          runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagateUpstreamErrors"
+          runbook_url: "docs/runbook/alert-response.md#LuagateUpstreamErrors"
 
       # ── Policy Reload ────────────────────────────────────────────────
       - alert: LuagatePolicyReloadFailed
@@ -77,7 +77,7 @@ groups:
         annotations:
           summary: "Policy reload failure detected"
           description: "Policy reload has failed in the last 5 minutes."
-          runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagatePolicyReloadFailed"
+          runbook_url: "docs/runbook/alert-response.md#LuagatePolicyReloadFailed"
 
       # ── Service Health ───────────────────────────────────────────────
       - alert: LuagateWorkerDown
@@ -90,4 +90,4 @@ groups:
         annotations:
           summary: "LuaGate target down or policy not loaded"
           description: "Prometheus cannot reach LuaGate scrape target, or policy is not loaded for 1 minute. Note: luagate_policy_loaded requires both HTTP and Stream versions; HTTP-only deployments should verify via /health endpoint."
-          runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagateWorkerDown"
+          runbook_url: "docs/runbook/alert-response.md#LuagateWorkerDown"

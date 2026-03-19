@@ -198,6 +198,10 @@ luagate/
 | [ADR-009](docs/design/adr/ADR-009-ffi-timeout-enforcement.md) | FFI 타임아웃 강제 |
 | [ADR-011](docs/design/adr/ADR-011-mcp-server.md) | MCP 서버 설계 |
 
+### 운영
+
+- [Runbook 인덱스](docs/runbook/README.md) — 운영 시나리오별 대응 절차
+
 ### 개발 가이드
 
 - [AGENTS.md](AGENTS.md) — 코딩 컨벤션, 불변식, 용어집
