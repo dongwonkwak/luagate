@@ -9,12 +9,13 @@
 | [ADR-001](./ADR-001-execution-shared-state-model.md) | 실행/상태 공유 모델 | Accepted | 2026-03-13 | OpenResty workers + shared dict mmap |
 | [ADR-002](./ADR-002-policy-evaluation-conflict-detection.md) | 정책 평가 규칙 + 충돌 감지 | Accepted | 2026-03-13 | priority first-match-wins |
 | [ADR-003](./ADR-003-policy-storage-hot-reload.md) | 정책 저장소 + Hot Reload | Accepted | 2026-03-13 | YAML file-backed + pointer swap |
-| [ADR-004](./ADR-004-log-metrics-admin-security.md) | 로그/메트릭 + 관리면 보안 | Accepted | 2026-03-13 | 28필드 JSON + Bearer token |
-| [ADR-005](./ADR-005-policy-activation-concurrency.md) | 정책 활성화 모델 + 동시성 제어 | Accepted | 2026-03-16 | staged/active 분리 |
+| [ADR-004](./ADR-004-log-metrics-admin-security.md) | 로그/메트릭 + 관리면 보안 | Accepted | 2026-03-13 | 28필드 JSON + Bearer token (log-schema.md 기준) |
+| [ADR-005](./ADR-005-policy-activation-concurrency.md) | 정책 활성화 모델 + 동시성 제어 | Accepted | 2026-03-16 | 저장+활성화 1-step 파이프라인 |
 | [ADR-006](./ADR-006-metrics-cardinality-export-model.md) | 메트릭 Cardinality 제어 | Accepted | 2026-03-15 | low-cardinality labels only |
 | [ADR-007](./ADR-007-log-redaction-and-retention.md) | 로그 Redaction + 보존/파기 | Accepted | 2026-03-15 | /16 IP 마스킹 + 필드별 규칙 |
 | [ADR-008](./ADR-008-multi-instance-policy-sync.md) | 멀티 인스턴스 정책 동기화 | Accepted | 2026-03-18 | CI/CD push + /health 검증 |
 | [ADR-009](./ADR-009-ffi-timeout-enforcement.md) | FFI 타임아웃 강제 | Accepted | 2026-03-18 | detached thread + watchdog |
+| ~~ADR-010~~ | *(OpenTelemetry 트레이싱 — 번호 예약, 미작성)* | — | — | [DON-179](https://linear.app/dongwon/issue/DON-179) |
 | [ADR-011](./ADR-011-mcp-server.md) | MCP 서버 설계 | Accepted | 2026-03-19 | Admin API → MCP tool 노출 |
 
 ## 의존성 관계
@@ -37,11 +38,11 @@ ADR-001 (실행 모델)
 | ADR-002 | [policy-engine.md](../../spec/policy-engine.md) |
 | ADR-003 | [policy-engine.md](../../spec/policy-engine.md), [admin-api.md](../../spec/admin-api.md) |
 | ADR-004 | [log-schema.md](../../spec/log-schema.md), [admin-api.md](../../spec/admin-api.md) |
-| ADR-005 | [admin-api.md](../../spec/admin-api.md), [http-pipeline.md](../../spec/http-pipeline.md) |
+| ADR-005 | [admin-api.md](../../spec/admin-api.md), [http-pipeline.md](../../spec/http-pipeline.md), [stream-pipeline.md](../../spec/stream-pipeline.md) |
 | ADR-006 | [admin-api.md](../../spec/admin-api.md) |
 | ADR-007 | [log-schema.md](../../spec/log-schema.md) |
 | ADR-008 | [architecture.md](../../spec/architecture.md), [admin-api.md](../../spec/admin-api.md) |
-| ADR-009 | [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [http-pipeline.md](../../spec/http-pipeline.md) |
+| ADR-009 | [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [http-pipeline.md](../../spec/http-pipeline.md), [stream-pipeline.md](../../spec/stream-pipeline.md) |
 | ADR-011 | [admin-api.md](../../spec/admin-api.md) |
 
 ## ADR 작성 가이드

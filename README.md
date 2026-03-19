@@ -136,7 +136,7 @@ luagate/
 ├── src/            # Rust FFI 소스 (scanner, decoder, stream)
 ├── conf/           # nginx.conf 및 정책 YAML
 ├── docs/
-│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 001~011)
+│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 001~009, 011)
 │   ├── spec/       # 스펙 문서 (10개)
 │   └── runbook/    # 운영 대응 절차
 ├── tests/          # 단위(busted) + 통합(Test::Nginx) 테스트
