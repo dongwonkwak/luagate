@@ -1,0 +1,6 @@
+# Invalid LuaGate policy: missing required 'version' key
+global:
+  default_action: deny
+rules:
+  - id: missing-version
+    priority: 100

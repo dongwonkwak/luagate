@@ -52,6 +52,26 @@ git worktree add -b <sanitized-linear-gitBranchName-2> ../luagate-don-yyy <integ
 > `<integration-base>`는 현재 작업을 머지할 대상 브랜치의 최신 head를 사용한다 (예: 활성 epic 브랜치).
 > 각 브랜치명은 AGENTS 불변식대로 Linear `gitBranchName`을 사용하고, 한글이 있으면 제거 후 연속 하이픈을 정리한다.
 
+### 3.5. node_modules 심링크 및 설치
+
+worktree에는 `.gitignore`된 `node_modules/`가 복사되지 않는다.
+메인 저장소의 `node_modules/`를 심링크하여 중복 설치를 피한다.
+
+```bash
+# 루트 node_modules — 심링크 (commitlint 등 pre-commit hook용)
+ln -s "$(git rev-parse --show-toplevel)/node_modules" ../luagate-don-xxx/node_modules
+
+# ui/, mcp/ 등 하위 패키지 — 독립 설치 (의존성이 다를 수 있음)
+# 해당 worktree에서 수정하는 패키지만 설치
+cd ../luagate-don-xxx/mcp && npm ci   # mcp 수정 시
+cd ../luagate-don-xxx/ui && npm ci    # ui 수정 시
+```
+
+> **규칙**:
+> - 루트 `node_modules/`는 항상 심링크 (pre-commit hook이 의존)
+> - 하위 패키지(`ui/`, `mcp/`, `e2e/`)는 해당 이슈에서 수정할 때만 `npm ci`
+> - 심링크 대상이 존재하지 않으면 `npm ci`로 fallback
+
 ### 4. 각 worktree에서 implement-issue 실행
 
 - 각 디렉토리에서 독립적으로 작업

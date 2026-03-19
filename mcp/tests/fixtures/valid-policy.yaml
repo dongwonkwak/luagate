@@ -1,0 +1,16 @@
+version: "1"
+global:
+  default_action: deny
+  log_level: info
+http:
+  rules:
+    - id: allow-health
+      description: "Allow health check endpoint"
+      match:
+        path_prefix: /health
+      action: allow
+    - id: block-admin-external
+      description: "Block /admin from external"
+      match:
+        path_prefix: /admin
+      action: deny

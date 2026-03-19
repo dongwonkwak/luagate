@@ -13,6 +13,8 @@ git worktree를 사용하면 각 이슈를 별도 디렉토리에서 독립적�
 4. **메인 저장소 보호** — 메인 저장소에서 worktree 브랜치를 checkout하면 안 됨
 5. **PROGRESS.md 자동 갱신** — PR 머지 시 GitHub Action이 자동 append. PR body에 `<!-- PROGRESS -->` 블록만 포함하면 됨
 
+6. **node_modules 심링크** — worktree 생성 후 루트 `node_modules/`는 메인 저장소에서 심링크, 하위 패키지는 필요 시 `npm ci`
+
 ## 구체적 절차
 
 `parallel-work` 스킬 참조: `.claude/skills/parallel-work/SKILL.md`
