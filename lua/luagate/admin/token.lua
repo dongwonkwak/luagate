@@ -134,18 +134,18 @@ function _M.handle_post_rotate()
 
   -- Store old token with grace period TTL — fail-closed on write error
   if current_token then
-    local ok, set_err = state_dict:set(KEY_OLD_TOKEN, current_token, GRACE_PERIOD_TTL)
+    local ok, set_err = state_dict:safe_set(KEY_OLD_TOKEN, current_token, GRACE_PERIOD_TTL)
     if not ok then
-      ngx.log(ngx.ERR, "[luagate] failed to set grace period token: ", tostring(set_err))
+      ngx.log(ngx.ERR, "[luagate] failed to safe_set grace period token: ", tostring(set_err))
       send_error(500, "internal_error", "Failed to store grace period token")
       return
     end
   end
 
   -- Store new token (no TTL — persists until next rotation or restart)
-  local ok, set_err = state_dict:set(KEY_ACTIVE_TOKEN, new_token)
+  local ok, set_err = state_dict:safe_set(KEY_ACTIVE_TOKEN, new_token)
   if not ok then
-    ngx.log(ngx.ERR, "[luagate] failed to store rotated token: ", tostring(set_err))
+    ngx.log(ngx.ERR, "[luagate] failed to safe_set rotated token: ", tostring(set_err))
     send_error(500, "internal_error", "Failed to store new token")
     return
   end

@@ -23,6 +23,9 @@ local function make_shared_dict()
       end
       return true
     end,
+    safe_set = function(self, key, val, ttl)
+      return self:set(key, val, ttl)
+    end,
     _store = store,
     _ttls = ttls,
   }
@@ -217,6 +220,30 @@ describe("token rotation handler", function()
 
     assert.are.equal(new_token, dict:get("luagate_admin_token"))
     assert.are.equal(old_token, dict:get("luagate_admin_token_old"))
+  end)
+
+  it("fails closed when safe_set returns no memory during grace token write", function()
+    local dict = ctx.get_dict()
+    local old_token = string.rep("b", 32)
+    local new_token = string.rep("c", 32)
+    local original_safe_set = dict.safe_set
+    dict:set("luagate_admin_token", old_token)
+    dict.safe_set = function(_, key, val, ttl)
+      if key == "luagate_admin_token_old" then
+        return nil, "no memory"
+      end
+      return original_safe_set(dict, key, val, ttl)
+    end
+
+    ctx.set_body('{"new_token": "' .. new_token .. '"}')
+    token_mod.handle_post_rotate()
+
+    local body = ctx.get_body()
+    assert.are.equal(500, ctx.get_status())
+    assert.truthy(body)
+    assert.truthy(body:find("internal_error"))
+    assert.are.equal(old_token, dict:get("luagate_admin_token"))
+    assert.is_nil(dict:get("luagate_admin_token_old"))
   end)
 
   it("writes audit log without token values", function()
