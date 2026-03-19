@@ -63,7 +63,7 @@ test.describe("Feature Name", () => {
 복잡한 페이지는 Page Object로 분리한다.
 
 ```typescript
-// e2e/pages/DashboardPage.ts
+// e2e/pages/PoliciesPage.ts
 import { type Page, type Locator, expect } from "@playwright/test";
 
 export class PoliciesPage {
@@ -155,8 +155,10 @@ expect(response.status()).toBe(200);
 ```typescript
 // 커스텀 mock 응답 오버라이드 (특정 테스트에서)
 test("shows error when health check fails", async ({ page }) => {
-  // setupAdminMock 이후 특정 엔드포인트만 오버라이드
-  // 대시보드는 /health와 /api/v1/policies/version을 사용
+  // 1. 기본 mock 설정 (인증 등 다른 엔드포인트 활성화)
+  await setupAdminMock(page);
+
+  // 2. 특정 엔드포인트만 오버라이드 (setupAdminMock 이후)
   await page.route("**/health", (route) =>
     route.fulfill({
       status: 503,
@@ -165,7 +167,10 @@ test("shows error when health check fails", async ({ page }) => {
     }),
   );
 
-  await page.goto("/dashboard");
+  // 3. 로그인 후 대시보드 접근
+  await page.goto("/dashboard/login");
+  await page.fill('input[id="token"]', VALID_TOKEN);
+  await page.click('button[type="submit"]');
   await expect(page.locator("text=unhealthy")).toBeVisible();
 });
 ```
