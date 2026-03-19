@@ -6,7 +6,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 
 | 계층 | 프레임워크 | 범위 | 속도 |
 |------|-----------|------|------|
-| 단위 테스트 | busted (Lua) + cargo test (Rust) | 함수/모듈 | 빠름 |
+| 단위 테스트 | busted (Lua) + cargo test (Rust) + Vitest (React) | 함수/모듈/컴포넌트 | 빠름 |
 | 통합 테스트 | Test::Nginx (HTTP/Stream) | HTTP/TCP 엔드투엔드 | 중간 |
 | E2E 테스트 | Playwright (TypeScript) | 대시보드 UI 유저 플로우 | 중간 |
 | 부하 테스트 | wrk / vegeta | 성능/처리량 | 느림 (선택) |
@@ -19,6 +19,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 | `make test-unit` | Lua + Rust 단위 테스트 | Yes |
 | `make test-unit-lua` | busted 단위 테스트만 | Yes |
 | `make test-unit-rust` | Rust cargo test 단위 테스트만 | Yes |
+| `make ui-test` | Vitest 프론트엔드 단위 테스트 | Yes |
 | `make test-integration-http` | HTTP 통합 (로컬 Test::Nginx 또는 Docker Compose fallback) | Yes |
 | `make test-integration-stream` | Stream 통합 (Test::Nginx::Stream) | Yes |
 | `make test-reload` | Hot reload 전용 테스트 | Yes |
