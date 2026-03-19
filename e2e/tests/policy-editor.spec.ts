@@ -126,6 +126,35 @@ test.describe("Policy Editor", () => {
     ).toBeVisible();
   });
 
+  test("accepts unquoted If-Match when policy version matches", async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async (token) => {
+      const versionResponse = await fetch("/api/v1/policies/version", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const version = await versionResponse.json();
+
+      const saveResponse = await fetch("/api/v1/policies", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/x-yaml",
+          "If-Match": version.etag,
+        },
+        body: 'version: "1.0"\nglobal:\n  default_action: allow\n',
+      });
+
+      return {
+        status: saveResponse.status,
+        body: await saveResponse.json(),
+      };
+    }, VALID_TOKEN);
+
+    expect(result.status).toBe(200);
+    expect(result.body.http_result).toBe("committed");
+  });
+
   test("reload button triggers hot reload", async ({ page }) => {
     await page.click('a[href="/dashboard/policies"]');
     await expect(page.locator("text=Policy Editor")).toBeVisible();

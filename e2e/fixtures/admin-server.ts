@@ -70,6 +70,14 @@ function fulfill401(route: Parameters<Parameters<Page["route"]>[1]>[0]) {
   });
 }
 
+function normalizeEtag(etag: string): string {
+  const trimmed = etag.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
 /**
  * Set up API route interception on the given page.
  * Call this in beforeEach to mock all Admin API endpoints.
@@ -127,7 +135,7 @@ export async function setupAdminMock(page: Page) {
           body: JSON.stringify({ error: "precondition_required", details: ["If-Match header is required"] }),
         });
       }
-      if (ifMatch !== `"${currentEtag}"`) {
+      if (normalizeEtag(ifMatch) !== normalizeEtag(currentEtag)) {
         return route.fulfill({
           status: 409,
           contentType: "application/json",
