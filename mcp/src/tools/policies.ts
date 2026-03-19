@@ -144,7 +144,7 @@ export function registerPolicyTools(server: McpServer, client: AdminClient): voi
   // luagate_rollback_policies — 롤백
   server.tool(
     "luagate_rollback_policies",
-    "이전 정책 YAML로 롤백합니다. 롤백할 YAML과 현재 source_version이 필요합니다.",
+    "이전 정책 YAML로 롤백합니다. 롤백할 YAML과 현재 source_version이 필요합니다. confirm=true일 때만 실행됩니다.",
     {
       policy_yaml: z
         .string()
@@ -152,8 +152,24 @@ export function registerPolicyTools(server: McpServer, client: AdminClient): voi
       expected_source_version: z
         .string()
         .describe("현재 source_version (낙관적 동시성 제어)"),
+      confirm: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("true로 설정해야 실제 롤백을 실행합니다"),
     },
-    async ({ policy_yaml, expected_source_version }) => {
+    async ({ policy_yaml, expected_source_version, confirm }) => {
+      if (!confirm) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "confirm=true를 설정해야 정책이 롤백됩니다. 롤백할 YAML과 source_version을 다시 확인하세요.",
+            },
+          ],
+        };
+      }
+
       try {
         const result = await client.updatePolicies(
           policy_yaml,
