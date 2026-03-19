@@ -50,9 +50,24 @@ luagate_shared_dict_free_bytes{zone="luagate_policy"} 9961472
 luagate_shared_dict_free_bytes{zone="luagate_metrics"} 5000000
 `;
 
+// Spec-compliant 401 body (admin-api.md §2)
+const AUTH_FAILURE_BODY = JSON.stringify({
+  error: "Unauthorized",
+  message: "Invalid or missing Bearer token",
+});
+
 function checkAuth(headers: Record<string, string>): boolean {
   const auth = headers["authorization"] || "";
   return auth === `Bearer ${VALID_TOKEN}`;
+}
+
+function fulfill401(route: Parameters<Parameters<Page["route"]>[1]>[0]) {
+  return route.fulfill({
+    status: 401,
+    contentType: "application/json",
+    headers: { "Cache-Control": "no-store" },
+    body: AUTH_FAILURE_BODY,
+  });
 }
 
 /**
@@ -68,7 +83,7 @@ export async function setupAdminMock(page: Page) {
   await page.route("**/api/v1/policies/version", (route) => {
     const headers = route.request().headers();
     if (!checkAuth(headers)) {
-      return route.fulfill({ status: 401, body: JSON.stringify({ error: "unauthorized" }) });
+      return fulfill401(route);
     }
     return route.fulfill({
       status: 200,
@@ -87,7 +102,7 @@ export async function setupAdminMock(page: Page) {
     if (request.method() === "GET") {
       const headers = route.request().headers();
       if (!checkAuth(headers)) {
-        return route.fulfill({ status: 401, body: JSON.stringify({ error: "unauthorized" }) });
+        return fulfill401(route);
       }
       return route.fulfill({
         status: 200,
@@ -101,7 +116,7 @@ export async function setupAdminMock(page: Page) {
     if (request.method() === "PUT") {
       const headers = route.request().headers();
       if (!checkAuth(headers)) {
-        return route.fulfill({ status: 401, body: JSON.stringify({ error: "unauthorized" }) });
+        return fulfill401(route);
       }
 
       const ifMatch = headers["if-match"];
@@ -129,7 +144,7 @@ export async function setupAdminMock(page: Page) {
           contentType: "application/json",
           body: JSON.stringify({
             error: "validation_failed",
-            stage: "parse",
+            stage: "validate",
             details: ["Missing required 'version' key"],
           }),
         });
@@ -161,7 +176,7 @@ export async function setupAdminMock(page: Page) {
   await page.route("**/api/v1/policies/reload", (route) => {
     const headers = route.request().headers();
     if (!checkAuth(headers)) {
-      return route.fulfill({ status: 401, body: JSON.stringify({ error: "unauthorized" }) });
+      return fulfill401(route);
     }
 
     const prevVersion = currentEtag;
@@ -186,7 +201,7 @@ export async function setupAdminMock(page: Page) {
   await page.route("**/api/v1/status", (route) => {
     const headers = route.request().headers();
     if (!checkAuth(headers)) {
-      return route.fulfill({ status: 401, body: JSON.stringify({ error: "unauthorized" }) });
+      return fulfill401(route);
     }
     return route.fulfill({
       status: 200,
@@ -216,7 +231,7 @@ export async function setupAdminMock(page: Page) {
   await page.route("**/metrics", (route) => {
     const headers = route.request().headers();
     if (!checkAuth(headers)) {
-      return route.fulfill({ status: 401, body: JSON.stringify({ error: "unauthorized" }) });
+      return fulfill401(route);
     }
     return route.fulfill({
       status: 200,
