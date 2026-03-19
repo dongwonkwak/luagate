@@ -21,7 +21,9 @@
 ```bash
 # 256-bit random 토큰 생성 (32바이트 entropy)
 NEW_TOKEN=$(openssl rand -base64 32)
-echo "New token: $NEW_TOKEN"
+# 주의: 토큰을 터미널에 출력하지 않음 (스크롤백 유출 방지)
+# 필요 시 파일로 임시 저장 후 즉시 삭제
+printf '%s' "$NEW_TOKEN" > /tmp/luagate-new-token && chmod 600 /tmp/luagate-new-token
 ```
 
 ### 2. 토큰 교체 (재기동 없음)
@@ -37,8 +39,9 @@ curl -X POST \
 ### 3. 환경변수 갱신
 
 ```bash
-# 로컬
+# 로컬 — 현재 셸 변수도 함께 갱신
 export LUAGATE_ADMIN_TOKEN="$NEW_TOKEN"
+export TOKEN="$NEW_TOKEN"  # runbook 공통 변수
 
 # Docker Compose
 # docker-compose.yml 또는 .env 파일에서 LUAGATE_ADMIN_TOKEN 갱신
@@ -93,5 +96,5 @@ curl -s -o /dev/null -w "%{http_code}" \
 cat /var/log/luagate/audit.log | jq 'select(.event == "auth_failure")'
 
 # 최근 Admin API 접근 이력
-cat /var/log/luagate/audit.log | jq 'select(.event != null)' | tail -20
+cat /var/log/luagate/audit.log | jq -c 'select(.event != null)' | tail -20 | jq .
 ```

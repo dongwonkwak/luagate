@@ -71,6 +71,13 @@ curl -X PUT \
   -H "If-Match: \"$ETAG\"" \
   --data-binary @known_good_policy.yaml \
   http://localhost:9090/api/v1/policies | jq .
+
+# 3) 파일만 복원한 경우 (PUT 미사용 시) reload 트리거 필수
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9090/api/v1/policies/reload | jq .
+# 또는 서버가 기동 실패 상태면 재시작
+docker compose restart luagate  # Docker
+sudo systemctl restart openresty  # systemd
 ```
 
 ### 4. 디스크 풀

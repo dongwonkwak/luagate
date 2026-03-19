@@ -21,11 +21,11 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 # 2. 최근 차단 로그 확인
 cat /var/log/luagate/access.log | \
-  jq 'select(.action == "deny")' | tail -20
+  jq -c 'select(.action == "deny")' | tail -20 | jq .
 
 # 3. 차단 원인 분류
 cat /var/log/luagate/access.log | \
-  jq 'select(.action == "deny") | {src_ip, path_raw, deny_reason, threat_type}' | tail -20
+  jq -c 'select(.action == "deny") | {src_ip, path_raw, deny_reason, threat_type}' | tail -20 | jq .
 ```
 
 ### 판단 기준
@@ -49,7 +49,7 @@ cat /var/log/luagate/access.log | \
 
 # 2. 최근 정책 변경 여부 확인
 cat /var/log/luagate/audit.log | \
-  jq 'select(.event | test("^policy_"))' | tail -5
+  jq -c 'select(.event | test("^policy_"))' | tail -5 | jq .
 
 # 3. 정책 변경이 원인이면 롤백
 # → policy-rollback.md 참조
@@ -142,7 +142,7 @@ tail -50 /var/log/luagate/error.log | grep -i reload
 
 # 3. 감사 로그에서 최근 정책 변경 확인
 cat /var/log/luagate/audit.log | \
-  jq 'select(.event | test("^policy_"))' | tail -5
+  jq -c 'select(.event | test("^policy_"))' | tail -5 | jq .
 
 # 4. 정책 파일 직접 검증
 cat conf/policies.yaml | head -20
