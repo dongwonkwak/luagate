@@ -52,6 +52,12 @@ local function setup_ngx()
       get_body_data = function()
         return request_body
       end,
+      get_headers = function()
+        -- Return active token from shared dict if rotation occurred, else default
+        local active = _G.ngx.shared.luagate_state and _G.ngx.shared.luagate_state:get("luagate_admin_token")
+        local token_val = active or string.rep("x", 32)
+        return { Authorization = "Bearer " .. token_val }
+      end,
     },
     say = function(body)
       response_body = body
