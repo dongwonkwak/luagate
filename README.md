@@ -179,6 +179,8 @@ luagate/
 
 ### ADR
 
+> 전체 목록: [ADR 인덱스](docs/design/adr/README.md)
+
 | 문서 | 결정 |
 |------|------|
 | [ADR-001](docs/design/adr/ADR-001-execution-shared-state-model.md) | 실행/상태 공유 모델 |

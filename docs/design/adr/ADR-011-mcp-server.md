@@ -1,5 +1,7 @@
 # ADR-011: LuaGate MCP 서버 설계
 
+> [← ADR 인덱스로 돌아가기](./README.md)
+
 | 항목 | 내용 |
 |------|------|
 | **Status** | Accepted |

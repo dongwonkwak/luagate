@@ -1,5 +1,7 @@
 # ADR-001: 실행/상태 공유 모델
 
+> [← ADR 인덱스로 돌아가기](./README.md)
+
 | 항목 | 내용 |
 |------|------|
 | **Status** | Accepted |
@@ -106,7 +108,7 @@ OpenResty는 master 프로세스가 N개의 worker 프로세스를 관리하며,
 | `active_http` | number | 현재 활성 HTTP 연결 수 |
 | `active_stream` | number | 현재 활성 TCP 스트림 연결 수 |
 
-3. **C FFI 호출 모델** — Rust/C 공유 라이브러리(`.so`)는 `ffi.load()`로 로드하며,
+1. **C FFI 호출 모델** — Rust/C 공유 라이브러리(`.so`)는 `ffi.load()`로 로드하며,
    worker 프로세스 내부에서 동기 함수 호출로 실행된다.
    IPC(소켓, 파이프 등)를 사용하지 않는다.
    모든 FFI 호출은 동일 worker의 이벤트 루프 내에서 블로킹 없이 완료되어야 한다.

@@ -1,5 +1,7 @@
 # ADR-006: 메트릭 Cardinality 제어 + Export 모델
 
+> [← ADR 인덱스로 돌아가기](./README.md)
+
 | 항목 | 내용 |
 |------|------|
 | **Status** | Accepted |

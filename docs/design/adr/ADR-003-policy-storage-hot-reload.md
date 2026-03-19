@@ -1,5 +1,7 @@
 # ADR-003: 정책 저장소 + Hot Reload Semantics
 
+> [← ADR 인덱스로 돌아가기](./README.md)
+
 | 항목 | 내용 |
 |------|------|
 | **Status** | Accepted |
@@ -36,7 +38,7 @@
 
 ### §3.3 정책 저장소
 
-**Canonical source: YAML 파일 (file-backed)**
+#### Canonical source: YAML 파일 (file-backed)
 
 - 정책의 단일 진실의 원천은 파일시스템의 YAML 파일이다.
 - 기본 경로: `conf/policies.yaml` (Nginx config 디렉토리 기준)
