@@ -4,24 +4,35 @@
 # Git pre-push passes: $1=remote_name $2=remote_url, OIDs on stdin
 set -euo pipefail
 
-# Read stdin to get remote/local OIDs for diff range
-REMOTE_OID=""
-LOCAL_OID=""
+ZERO_OID="0000000000000000000000000000000000000000"
+HAS_PUSH_REFS=0
+SHOULD_RUN_VITEST=0
+
 while IFS=' ' read -r _local_ref local_oid _remote_ref remote_oid; do
-  LOCAL_OID="$local_oid"
-  if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
-    REMOTE_OID="$(git merge-base HEAD main 2>/dev/null || echo HEAD)"
+  HAS_PUSH_REFS=1
+
+  if [ "$local_oid" = "$ZERO_OID" ]; then
+    continue
+  fi
+
+  if [ "$remote_oid" = "$ZERO_OID" ]; then
+    base_oid="$(git merge-base "$local_oid" main 2>/dev/null || echo "$local_oid")"
   else
-    REMOTE_OID="$remote_oid"
+    base_oid="$remote_oid"
+  fi
+
+  if git diff --name-only "$base_oid" "$local_oid" 2>/dev/null | grep -q '^ui/'; then
+    SHOULD_RUN_VITEST=1
+    break
   fi
 done
 
-if [ -z "$REMOTE_OID" ] || [ -z "$LOCAL_OID" ]; then
+if [ "$HAS_PUSH_REFS" -eq 0 ]; then
   echo "  no push refs — skipping vitest"
   exit 0
 fi
 
-if git diff --name-only "$REMOTE_OID" "$LOCAL_OID" 2>/dev/null | grep -q '^ui/'; then
+if [ "$SHOULD_RUN_VITEST" -eq 1 ]; then
   echo "  ui/ changes detected — running vitest..."
   cd ui && npx vitest run
 else
