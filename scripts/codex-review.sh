@@ -2,13 +2,12 @@
 # scripts/codex-review.sh — Codex CLI 리뷰 실행 래퍼
 #
 # 사용법:
-#   ./scripts/codex-review.sh                  # PROGRESS.md에서 PENDING_REVIEW 자동 감지
+#   ./scripts/codex-review.sh                  # .claude/reviews/ 에서 pending review 자동 감지
 #   ./scripts/codex-review.sh DON-97 code      # 이슈/유형 수동 지정
 #
 # 동작:
 #   최초 리뷰: review.md → Codex → result.md 신규 생성
 #   재리뷰:   [x] 항목 필터링 → 스킵 프롬프트 주입 → 날짜 헤더 추가 → result.md에 append
-#   완료 시:  PROGRESS.md의 PENDING_REVIEW → COMPLETED_REVIEW 마커로 교체
 
 set -euo pipefail
 
@@ -37,6 +36,36 @@ validate_pending() {
   fi
 }
 
+# --- pending review 감지: reviews/ 디렉토리 스캔 ---
+# review.md가 존재하지만 대응하는 result.md가 없는 항목을 찾는다
+# 여러 개면 목록을 표시하고 수동 지정을 요구한다
+find_pending_review() {
+  local dir="$1"
+  local pending=()
+  for review_file in "$dir"/*-review.md; do
+    [ -f "$review_file" ] || continue
+    local base
+    base="$(basename "$review_file" -review.md)"
+    local result_file="$dir/${base}-result.md"
+    if [ ! -f "$result_file" ]; then
+      pending+=("$base")
+    fi
+  done
+  if [ ${#pending[@]} -eq 0 ]; then
+    return 1
+  elif [ ${#pending[@]} -eq 1 ]; then
+    echo "${pending[0]}"
+    return 0
+  else
+    echo "오류: pending review가 여러 개입니다:" >&2
+    for p in "${pending[@]}"; do
+      echo "  - $p" >&2
+    done
+    echo "직접 지정: ./scripts/codex-review.sh <ISSUE> <TYPE>" >&2
+    exit 1
+  fi
+}
+
 # --- 인자 처리 ---
 if [ $# -eq 2 ]; then
   ISSUE="$1"
@@ -44,17 +73,17 @@ if [ $# -eq 2 ]; then
   PENDING="${ISSUE}-${TYPE}"
   validate_pending "$PENDING"
 elif [ $# -eq 0 ]; then
-  # worktree 환경에서는 PENDING_REVIEW 마커가 여러 개일 수 있어 자동 감지 불가
+  # worktree 환경에서는 여러 리뷰가 있을 수 있어 자동 감지 불가
   if [ "$WORKTREE_ROOT" != "$MAIN_ROOT" ]; then
     echo "오류: worktree 환경에서는 이슈/유형을 수동 지정해야 합니다." >&2
     echo "직접 지정: ./scripts/codex-review.sh <ISSUE> <TYPE>" >&2
     echo "예시: ./scripts/codex-review.sh DON-97 code" >&2
     exit 1
   fi
-  # Fix #1: pipefail로 인한 무출력 종료 방지 — || true로 grep 실패를 무시
-  PENDING=$(grep '^PENDING_REVIEW:' "${MAIN_ROOT}/PROGRESS.md" 2>/dev/null | tail -1 | awk '{print $2}' || true)
+  # reviews/ 디렉토리에서 pending review 자동 감지
+  PENDING=$(find_pending_review "$REVIEWS_DIR" || true)
   if [ -z "$PENDING" ]; then
-    echo "오류: PROGRESS.md에 PENDING_REVIEW 마커가 없습니다." >&2
+    echo "오류: .claude/reviews/ 에 pending review가 없습니다." >&2
     echo "직접 지정: ./scripts/codex-review.sh <ISSUE> <TYPE>" >&2
     echo "예시: ./scripts/codex-review.sh DON-97 code" >&2
     exit 1
@@ -145,12 +174,4 @@ else
     echo "오류: Codex 실행 실패. result.md는 생성되지 않았습니다." >&2
     exit 1
   fi
-fi
-
-# --- PROGRESS.md 마커 정리: PENDING_REVIEW → COMPLETED_REVIEW ---
-# 항상 MAIN_ROOT의 PROGRESS.md만 갱신 (worktree에서는 PROGRESS.md를 수정하지 않음)
-PROGRESS_FILE="${MAIN_ROOT}/PROGRESS.md"
-if grep -q "^PENDING_REVIEW: ${PENDING}$" "$PROGRESS_FILE" 2>/dev/null; then
-  sed "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" "$PROGRESS_FILE" > "${PROGRESS_FILE}.tmp" && mv "${PROGRESS_FILE}.tmp" "$PROGRESS_FILE"
-  echo "PROGRESS.md 마커 갱신: PENDING_REVIEW → COMPLETED_REVIEW"
 fi

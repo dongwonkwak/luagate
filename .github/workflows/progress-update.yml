@@ -1,0 +1,51 @@
+name: Update PROGRESS.md on PR merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: progress-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update-progress:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract and append progress entry
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          TEMPLATE_ROW='| YYYY-MM-DD | DON-XX | 설명 | `경로` | 비고 |'
+
+          # Extract <!-- PROGRESS ... --> block from PR body
+          ENTRY=$(printf '%s\n' "$PR_BODY" | sed -n '/^<!-- PROGRESS$/,/^-->$/p' | grep '^|' || true)
+          ENTRY=$(printf '%s\n' "$ENTRY" | grep -Fvx "$TEMPLATE_ROW" || true)
+
+          if [ -z "$ENTRY" ]; then
+            echo "No filled PROGRESS entries found in PR body — skipping"
+            exit 0
+          fi
+
+          # Pull latest main to avoid non-fast-forward push
+          git pull --rebase origin main
+
+          # Append to PROGRESS.md table
+          echo "$ENTRY" >> PROGRESS.md
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PROGRESS.md
+          git commit -m "docs(progress): auto-append entry from PR #${{ github.event.pull_request.number }}"
+          git push

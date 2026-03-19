@@ -23,9 +23,16 @@
 - [ ] 통합 테스트 추가/수정
 - [ ] `make test` 통과
 
+## PROGRESS 엔트리
+
+<!-- 아래 블록을 채우면 PR 머지 시 PROGRESS.md에 자동 append 됩니다 -->
+<!-- PROGRESS
+| YYYY-MM-DD | DON-XX | 설명 | `경로` | 비고 |
+-->
+
 ## 체크리스트
 
 - [ ] 관련 스펙 준수 확인 (AGENTS.md 불변식)
 - [ ] ADR 결정과 일치 확인
-- [ ] PROGRESS.md 엔트리 추가 (worktree 시 머지 후 갱신)
+- [ ] `<!-- PROGRESS -->` 블록 작성
 - [ ] 코드와 문서 변경 같은 PR 포함 (same-PR 규칙)

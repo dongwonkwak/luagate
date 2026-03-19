@@ -1,6 +1,6 @@
 ---
 name: request-codex-review
-description: "review.md 파일 생성 + PROGRESS.md PENDING_REVIEW 마커 기입 + 사람에게 실행 명령 안내. codex 자체는 실행하지 않음."
+description: "review.md 파일 생성 + 사람에게 실행 명령 안내. codex 자체는 실행하지 않음."
 trigger: "request-codex-review | codex 리뷰 파일 생성 | 리뷰 프롬프트 생성"
 ---
 
@@ -44,7 +44,7 @@ Codex CLI 리뷰를 위한 프롬프트 파일을 생성하고, 사람에게 실
   📄 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md  ← 이미 존재 (덮어쓰지 않음)
   📄 결과 파일: .claude/reviews/DON-XXX-{type}-result.md  ← 이미 존재 (append됨)
 
-PROGRESS.md에 PENDING_REVIEW 마커를 재기입합니다. 진행할까요?
+진행할까요?
 ```
 
 사람이 승인하면 3단계로 진행. 거부하면 중단.
@@ -66,27 +66,7 @@ PROGRESS.md에 PENDING_REVIEW 마커를 재기입합니다. 진행할까요?
 - `{{ACCEPTANCE_CRITERIA}}` → Linear 이슈 AC 항목
 - `{{RESULT_PATH}}` → `.claude/reviews/DON-XXX-{type}-result.md`
 
-### 4. PROGRESS.md PENDING_REVIEW 마커 기입
-
-**main 환경**: PROGRESS.md 끝에 아래 형식으로 추가한다:
-
-```
-PENDING_REVIEW: DON-XXX-{type}
-```
-
-스크립트(`scripts/codex-review.sh`)가 이 마커를 읽어 리뷰 파일 경로를 자동으로 결정한다.
-
-**worktree 환경**: PROGRESS.md를 수정하지 않는다. 스크립트를 수동 지정으로 실행한다:
-
-```bash
-./scripts/codex-review.sh DON-XXX {type}
-```
-
-> **NOTE (재리뷰 시)**: 이전 `COMPLETED_REVIEW: DON-XXX-{type} (날짜)` 라인이 이미 있더라도
-> 그 아래에 `PENDING_REVIEW: DON-XXX-{type}` 를 추가한다. 스크립트는 `tail -1`로
-> 마지막 마커를 읽으므로 정상 동작한다.
-
-### 5. 사람에게 실행 명령 안내
+### 4. 사람에게 실행 명령 안내
 
 ```
 리뷰 준비 완료.
@@ -94,11 +74,11 @@ PENDING_REVIEW: DON-XXX-{type}
 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md
 결과 파일: .claude/reviews/DON-XXX-{type}-result.md
 
-실행 명령 (스크립트 사용 — 권장):
-  ./scripts/codex-review.sh
+실행 명령:
+  ./scripts/codex-review.sh DON-XXX {type}
 
-⚠️ 직접 실행은 최초 리뷰에만 사용. 재리뷰에서 사용하면 기존 result.md 이력이 덮어씌워집니다:
-  codex exec - < .claude/reviews/DON-XXX-{type}-review.md > .claude/reviews/DON-XXX-{type}-result.md
+⚠️ 재리뷰 시에도 동일하게 이슈/유형을 수동 지정한다.
+  스크립트가 result.md의 [x] 항목을 자동 감지하여 재리뷰 모드로 동작한다.
 
 결과 파일 생성 후 "계속 진행해"라고 말씀해주세요.
 ```

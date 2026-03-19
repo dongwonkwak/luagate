@@ -105,9 +105,9 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 - [ ] 관련 spec/ADR 준수 확인 (AGENTS.md 불변식)
 - [ ] 문서 갱신 (코드와 같은 PR — same-PR 규칙)
 - [ ] `docs/spec/` 또는 `docs/design/adr/` 변경 시 `sync-spec` 스킬 완료 (AGENTS.md 불변식 8)
-- [ ] **Codex 리뷰 완료** (`request-codex-review` 스킬 → 리뷰 결과 반영 → COMPLETED_REVIEW 마커)
+- [ ] **Codex 리뷰 완료** (`request-codex-review` 스킬 → 리뷰 결과 반영)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터 포함
-- [ ] PROGRESS.md append (날짜/이슈/산출물/비고) — worktree 시 main 머지 후 갱신
+- [ ] PR body에 `<!-- PROGRESS -->` 블록 포함 (머지 시 자동 append)
 
 > **AGENTS.md 불변식 확인**: `luagate_` prefix, fail-closed, `ngx.worker.id()`,
 > hot reload 7단계, same-PR, 브랜치 선생성, sync-spec — 이 중 하나라도 위반하면 Done 전환 불가
@@ -142,7 +142,8 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 |------|--------|-------------|
 | 목적 | 상태 추적, 이슈 관리 | 시간순 구현 일지 |
 | 내용 | 완료 코멘트 (산출물 요약 + 파일 경로) | 날짜/이슈/산출물/비고 |
-| 업데이트 시점 | 이슈 Done 전환 시 | 각 이슈 완료 시 append |
+| 업데이트 시점 | 이슈 Done 전환 시 | PR 머지 시 GitHub Action 자동 append |
+| 갱신 방법 | `linear-update` 스킬 | PR body `<!-- PROGRESS -->` 블록 |
 
 ## make 워크플로우
 

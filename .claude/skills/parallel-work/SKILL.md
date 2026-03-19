@@ -23,9 +23,8 @@ trigger: "parallel-work | 병렬 작업 | 동시 작업 | worktree | 여러 이�
 - `blockedBy` 확인 → 의존성 있으면 병렬 불가
 - 파일 충돌 가능성 검토 (같은 파일 수정 여부)
 
-> **NOTE**: worktree에서는 `PROGRESS.md`를 수정하지 않는다.
-> PROGRESS.md 갱신은 main 머지 후 coordinator(CLAUDE.md)가 수행한다.
-> 이로써 병렬 작업 시 PROGRESS.md 충돌을 원천 차단한다.
+> **NOTE**: PROGRESS.md는 PR 머지 시 GitHub Action이 자동 갱신한다.
+> PR body에 `<!-- PROGRESS -->` 블록만 포함하면 된다.
 
 ### 2. 작업 계획 보고 (사람 확인)
 
@@ -85,7 +84,7 @@ git worktree remove <path>
 ## 주의사항
 
 - 같은 파일을 수정하는 이슈는 병렬 작업 금지
-- **worktree에서 PROGRESS.md 수정 금지** — main 머지 후 갱신
+- **PROGRESS.md는 PR 머지 시 자동 갱신** — PR body에 `<!-- PROGRESS -->` 블록 포함
 - worktree 간 브랜치 전환 주의 — 한 worktree에서 다른 worktree의 브랜치를 checkout 불가
 - 메인 저장소에서 worktree 브랜치 checkout 금지
 - 완료 후 worktree 정리 필수
