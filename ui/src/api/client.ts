@@ -1,5 +1,7 @@
-/** Base URL for Admin API requests */
-const BASE_URL = "/api";
+/** Base URL for Admin API requests.
+ *  Dev: omit VITE_ADMIN_API_URL — Vite proxy forwards /api to localhost:9090.
+ *  Prod: leave unset or empty — same-origin /api is used. */
+const BASE_URL: string = import.meta.env.VITE_ADMIN_API_URL || "/api";
 
 /** Response wrapper that includes headers for ETag extraction */
 export interface ApiResponse<T> {
