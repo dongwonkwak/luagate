@@ -66,24 +66,26 @@ test.describe("Feature Name", () => {
 // e2e/pages/DashboardPage.ts
 import { type Page, type Locator, expect } from "@playwright/test";
 
-export class DashboardPage {
+export class PoliciesPage {
   readonly page: Page;
   readonly heading: Locator;
-  readonly statusCard: Locator;
+  readonly saveButton: Locator;
+  readonly editor: Locator;
 
   constructor(page: Page) {
     this.page = page;
-    this.heading = page.locator("h1");
-    this.statusCard = page.locator('[data-testid="status-card"]');
+    this.heading = page.locator("text=Policy Editor");
+    this.saveButton = page.locator("button", { hasText: "Save" });
+    this.editor = page.locator(".monaco-editor textarea");
   }
 
   async goto() {
-    await this.page.goto("/dashboard");
+    await this.page.click('a[href="/dashboard/policies"]');
     await expect(this.heading).toBeVisible();
   }
 
-  async getStatusText(): Promise<string> {
-    return (await this.statusCard.textContent()) ?? "";
+  async waitForEditor() {
+    await this.editor.waitFor({ state: "attached", timeout: 10000 });
   }
 }
 ```
@@ -91,12 +93,18 @@ export class DashboardPage {
 사용 예시:
 
 ```typescript
-import { DashboardPage } from "../pages/DashboardPage";
+import { setupAdminMock, VALID_TOKEN } from "../fixtures/admin-server";
+import { PoliciesPage } from "../pages/PoliciesPage";
 
-test("dashboard shows status", async ({ page }) => {
-  const dashboard = new DashboardPage(page);
-  await dashboard.goto();
-  expect(await dashboard.getStatusText()).toContain("ok");
+test("policy editor loads", async ({ page }) => {
+  await setupAdminMock(page);
+  await page.goto("/dashboard/login");
+  await page.fill('input[id="token"]', VALID_TOKEN);
+  await page.click('button[type="submit"]');
+
+  const policies = new PoliciesPage(page);
+  await policies.goto();
+  await expect(policies.saveButton).toBeDisabled();
 });
 ```
 
@@ -112,9 +120,11 @@ await expect(page.locator("text=Policy Editor")).toBeVisible();
 // 버튼 상태
 await expect(page.locator("button", { hasText: "Save" })).toBeDisabled();
 
-// API 응답 인터셉트 후 확인
+// API 응답 인터셉트 후 확인 (메서드 구분 필수)
 const [response] = await Promise.all([
-  page.waitForResponse("**/api/v1/policies"),
+  page.waitForResponse(
+    (res) => res.url().includes("/api/v1/policies") && res.request().method() === "PUT",
+  ),
   page.locator("button", { hasText: "Save" }).click(),
 ]);
 expect(response.status()).toBe(200);
@@ -144,18 +154,19 @@ expect(response.status()).toBe(200);
 
 ```typescript
 // 커스텀 mock 응답 오버라이드 (특정 테스트에서)
-test("shows error on server failure", async ({ page }) => {
+test("shows error when health check fails", async ({ page }) => {
   // setupAdminMock 이후 특정 엔드포인트만 오버라이드
-  await page.route("**/api/v1/status", (route) =>
+  // 대시보드는 /health와 /api/v1/policies/version을 사용
+  await page.route("**/health", (route) =>
     route.fulfill({
-      status: 500,
+      status: 503,
       contentType: "application/json",
-      body: JSON.stringify({ error: "internal_error", stage: "internal" }),
+      body: JSON.stringify({ status: "unhealthy", reason: "policy not loaded" }),
     }),
   );
 
   await page.goto("/dashboard");
-  await expect(page.locator("text=Error")).toBeVisible();
+  await expect(page.locator("text=unhealthy")).toBeVisible();
 });
 ```
 
