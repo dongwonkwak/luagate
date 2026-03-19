@@ -95,6 +95,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | `parallel-work` | `.claude/skills/parallel-work/` | 여러 이슈 병렬 작업 시 (git worktree) |
 | `new-react-component` | `.claude/skills/new-react-component/` | 새 React 컴포넌트 생성 시 |
 | `new-api-client` | `.claude/skills/new-api-client/` | 새 Admin API 클라이언트 함수 생성 시 |
+| `new-playwright-test` | `.claude/skills/new-playwright-test/` | 새 Playwright E2E 테스트 생성 시 |
 
 ## 이슈 완료 Exit Criteria 체크리스트
 
