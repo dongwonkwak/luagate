@@ -19,8 +19,11 @@ test.describe("Error Handling", () => {
   });
 
   test("handles network error gracefully", async ({ page }) => {
-    // Remove all API mocks to simulate network failure
-    await page.unrouteAll();
+    // Abort only the login validation request so the rest of the mocked API stays hermetic.
+    await page.unroute("**/api/v1/policies/version");
+    await page.route("**/api/v1/policies/version", (route) =>
+      route.abort("failed"),
+    );
 
     await page.goto("/dashboard/login");
     await page.fill('input[id="token"]', VALID_TOKEN);
