@@ -34,7 +34,7 @@ ui/
 - **Base URL**: `import.meta.env.VITE_ADMIN_API_URL || "/api"` (환경변수)
 - **인증**: Bearer token ([admin-auth-contract.md](admin-auth-contract.md) 참조)
   - 토큰 저장: 현재 `localStorage` 사용 중 (인증 저장 방식 ADR 미확정 — `ui-review-checklist.md` 참조)
-  - 401 응답 시: 자동 로그아웃 + 로그인 화면 리다이렉트
+  - 401 응답 시: `apiClient()`는 `ApiError`만 throw하므로 호출자가 명시적으로 401을 처리해야 함 (예: 토큰 삭제 + 로그인 화면 리다이렉트). 자동 로그아웃/리다이렉트는 현재 구현되어 있지 않음
 - **API 클라이언트**: `ui/src/api/client.ts`의 `apiClient<T>()` 래퍼 사용
 - **ETag**: 정책 조회 시 ETag 반환 → PUT 시 `If-Match` 헤더로 전달 (낙관적 동시성)
 - **CORS**: 개발 환경에서는 Vite proxy 사용 (`/api` → `localhost:9090`)
