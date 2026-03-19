@@ -18,6 +18,7 @@ export function ErrorAlert({
         </div>
         {onDismiss && (
           <button
+            aria-label="Dismiss error"
             onClick={onDismiss}
             className="ml-4 text-red-400 hover:text-red-600"
           >
