@@ -578,6 +578,23 @@ if ($request_method = 'OPTIONS') {
 
 > **wildcard origin (`*`) 금지**: Bearer token과 함께 사용 시 보안 취약점.
 
+### 8.2 보안 응답 헤더 (DON-174)
+
+Admin server block의 모든 응답에 아래 헤더를 추가한다:
+
+```nginx
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options        "DENY"    always;
+add_header Referrer-Policy        "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy     "geolocation=(), microphone=()" always;
+add_header Cache-Control          "no-store" always;
+```
+
+- `style-src 'unsafe-inline'`: Tailwind CSS 런타임 스타일 삽입에 필요
+- `worker-src 'self' blob:`: Monaco Editor Web Worker에 필요
+- `Cache-Control: no-store`: Admin API 응답 캐시 방지
+
 ## 9. 의존성
 
 - [ADR-003](../design/adr/ADR-003-policy-storage-hot-reload.md) — 정책 reload 흐름
