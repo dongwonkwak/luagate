@@ -3,6 +3,16 @@
 # Intercepts `gh pr create` commands and runs `make pre-pr` first
 set -euo pipefail
 
+run_pre_pr_gate() {
+  local repo_root
+
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  (
+    cd "$repo_root"
+    make pre-pr
+  ) >&2
+}
+
 # Read the PreToolUse JSON from stdin
 INPUT="$(cat)"
 
@@ -11,7 +21,7 @@ if ! command -v jq >/dev/null 2>&1; then
   # Fallback: use grep to detect gh pr create in raw input
   if echo "$INPUT" | grep -q 'gh pr create'; then
     echo "  pre-PR test gate: gh pr create detected (jq unavailable, using fallback) — running make pre-pr..." >&2
-    if make pre-pr >&2; then
+    if run_pre_pr_gate; then
       exit 0
     else
       echo '{"decision":"block","reason":"make pre-pr failed — fix test failures before creating PR"}'
@@ -27,7 +37,7 @@ COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" ||
 # Check if this is a `gh pr create` command
 if echo "$COMMAND" | grep -q 'gh pr create'; then
   echo "  pre-PR test gate: gh pr create detected — running make pre-pr..." >&2
-  if make pre-pr >&2; then
+  if run_pre_pr_gate; then
     # All tests passed — allow the command
     exit 0
   else
