@@ -112,6 +112,8 @@ test("policy editor loads", async ({ page }) => {
   await page.goto("/dashboard/login");
   await page.fill('input[id="token"]', VALID_TOKEN);
   await page.click('button[type="submit"]');
+  // 로그인 완료 후 대시보드 이동 대기 (flaky 방지)
+  await expect(page).toHaveURL(/\/dashboard$/);
 
   const policies = new PoliciesPage(page);
   await policies.goto();
@@ -157,7 +159,7 @@ expect(response.status()).toBe(200);
 | `page.waitForTimeout(ms)` | flaky 테스트 원인 | `expect(locator).toBeVisible()` 등 조건 대기 |
 | URL 하드코딩 (`http://localhost:9090`) | 환경별 차이 | `page.goto("/dashboard")` (baseURL 자동 적용) |
 | `page.waitForSelector()` | deprecated | `locator.waitFor()` 또는 `expect(locator)` |
-| `test.only()` 커밋 | 다른 테스트 skip | CI에서 감지됨, 커밋 전 제거 |
+| `test.only()` 커밋 | 다른 테스트 skip | 커밋 전 반드시 제거 (`forbidOnly` 미설정 상태) |
 
 ## 7. Admin API Mock 패턴
 
