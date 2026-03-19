@@ -134,6 +134,16 @@ local function make_ngx(overrides)
           return 1, nil
         end,
       },
+      luagate_metrics = {
+        _data = {},
+        incr = function(self, key, delta, default)
+          self._data[key] = (self._data[key] or default or 0) + delta
+          return self._data[key], nil
+        end,
+        get = function(self, key)
+          return self._data[key]
+        end,
+      },
     },
     WARN = 5,
     ERR = 4,
@@ -1146,7 +1156,58 @@ describe("handler.preread - radix tree CIDR integration", function()
     package.loaded["luagate.stream.ffi"] = _stream_ffi_module
   end)
 
-  it("radix_build 실패 시 WARN 로그만, 처리 계속", function()
+  it("radix_build 실패 시 LKG 유지, version 미갱신 (ADR-009)", function()
+    -- First call: build succeeds -> tree exists
+    local first_tree = { _type = "first_tree" }
+    local free_calls = {}
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return first_tree, nil
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = function(tree)
+        table.insert(free_calls, tree)
+      end,
+    }
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
+    -- First call succeeded, tree was built (may have freed a prior test's tree)
+    local free_count_after_first = #free_calls
+
+    -- Second call: new version, radix_build fails
+    test_version_counter = test_version_counter + 100
+    local ver2 = "v-radix-lkg-" .. test_version_counter
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver2
+      end
+      return nil
+    end
+
     package.loaded["luagate.stream.ffi"] = {
       detect_protocol = function()
         return "raw", nil, false
@@ -1154,6 +1215,40 @@ describe("handler.preread - radix tree CIDR integration", function()
       extract_sni = _stream_ffi_module.extract_sni,
       radix_build = function()
         return nil, "radix_build_fail:-1"
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = function(tree)
+        table.insert(free_calls, tree)
+      end,
+    }
+
+    handler.preread()
+
+    -- LKG: old tree should NOT be freed after the second call
+    assert.equals(free_count_after_first, #free_calls)
+
+    -- Should have continued to evaluation
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("deny", ctx.action)
+    assert.equals("denied", ctx.request_state)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("radix_build timeout 시 per-worker leak 카운터 증가 (ADR-009)", function()
+    -- First: build a tree so we have LKG
+    local first_tree = { _type = "leak_test_tree" }
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return first_tree, nil
       end,
       radix_lookup = function()
         return nil, nil
@@ -1177,10 +1272,343 @@ describe("handler.preread - radix tree CIDR integration", function()
 
     handler.preread()
 
-    -- Should have continued to evaluation (deny via default)
+    -- Now: new version with timeout error (-5)
+    test_version_counter = test_version_counter + 1
+    local ver2 = "v-radix-leak-" .. test_version_counter
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver2
+      end
+      return nil
+    end
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return nil, "timeout:-5"
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    handler.preread()
+
+    -- Per-worker leak counter should have been incremented
+    local leak_count = ngx_mock.shared.luagate_metrics:get("ffi:timeout:leak:0")
+    assert.equals(1, leak_count)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("radix_build 실패 후 다음 요청에서 rebuild 재시도 (ADR-009)", function()
+    -- Call 1: build fails
+    local fail_ver = "v-radix-retry-" .. (test_version_counter + 200)
+    test_version_counter = test_version_counter + 200
+
+    local build_call_count = 0
+    local retry_tree = { _type = "retry_tree" }
+
+    local current_build_fn = function()
+      build_call_count = build_call_count + 1
+      if build_call_count == 1 then
+        return nil, "radix_build_fail:-1"
+      end
+      return retry_tree, nil
+    end
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return current_build_fn()
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return fail_ver
+      end
+      return nil
+    end
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    -- First request: build fails
+    handler.preread()
+    assert.equals(1, build_call_count)
+
+    -- Second request: same version -> should retry since version wasn't updated
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return fail_ver
+      end
+      return nil
+    end
+
+    handler.preread()
+    assert.equals(2, build_call_count) -- Retried!
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("cold start radix_build 실패 시 non-CIDR proxy 규칙은 evaluator가 처리 (ADR-009)", function()
+    -- Simulate cold start: first clear any existing radix tree by loading
+    -- a policy with no CIDR rules (this sets _radix_tree = nil in module).
+    test_version_counter = test_version_counter + 1
+    local clear_ver = "v-clear-tree-" .. test_version_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return clear_ver
+      end
+      return nil
+    end
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {}, -- no CIDR rules -> clears _radix_tree
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+    handler.preread() -- clears _radix_tree to nil
+
+    -- Now simulate cold start: radix_build fails with no LKG tree
+    local build_err_logged = false
+    local logged_messages = {}
+    ngx_mock.log = function(level, ...)
+      local parts = { ... }
+      local msg = table.concat(parts, "")
+      logged_messages[#logged_messages + 1] = { level = level, msg = msg }
+      if msg:find("radix_build failed") then
+        build_err_logged = true
+      end
+    end
+
+    -- Force a fresh version to trigger rebuild
+    test_version_counter = test_version_counter + 1
+    local cold_ver = "v-cold-start-" .. test_version_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return cold_ver
+      end
+      return nil
+    end
+    -- Reset ctx for next preread call
+    ngx_mock.ctx = {}
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return nil, "timeout:-5"
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = { { id = "compiled-non-cidr" } },
+    }
+    -- Evaluator returns proxy for a non-CIDR rule match —
+    -- proves evaluator decision is respected even when radix_build fails
+    _evaluator_stub.evaluate_stream_result = {
+      action = "proxy",
+      matched_rule = "compiled-non-cidr",
+      decision_source = "rule",
+      upstream = "backend:8080",
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    -- Non-CIDR proxy rule is respected even when radix_build fails
+    assert.equals("proxy", ctx.action)
+    assert.equals("proxied", ctx.request_state)
+    assert.equals("backend:8080", ctx.upstream)
+    assert.is_true(build_err_logged, "radix_build failure should be logged")
+
+    -- Verify ERR-level log for cold start (no LKG tree)
+    local found_err_log = false
+    for _, entry in ipairs(logged_messages) do
+      if entry.msg:find("no LKG tree available") and entry.level == ngx_mock.ERR then
+        found_err_log = true
+      end
+    end
+    assert.is_true(found_err_log, "cold start radix_build failure should log at ERR level")
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("cold start radix_build 실패 + CIDR-only 규칙 -> evaluator default deny (ADR-009)", function()
+    -- First clear any existing radix tree
+    test_version_counter = test_version_counter + 1
+    local clear_ver = "v-clear-tree2-" .. test_version_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return clear_ver
+      end
+      return nil
+    end
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {}, -- no CIDR rules -> clears _radix_tree
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+    handler.preread() -- clears _radix_tree to nil
+
+    -- Now cold start: radix_build fails, all rules are CIDR-based
+    test_version_counter = test_version_counter + 1
+    local cold_ver = "v-cold-cidr-" .. test_version_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return cold_ver
+      end
+      return nil
+    end
+    ngx_mock.ctx = {}
+
+    local captured_request_ctx = nil
+    -- Override evaluator to capture request_ctx and verify radix_match_index
+    package.loaded["luagate.policy.evaluator"] = {
+      get_policy = function()
+        return {
+          global = { default_action = "deny" },
+          rules = {},
+          stream_rules = {
+            { id = "cidr-rule-1", scope = { src_ip_cidr = "192.168.0.0/16" }, action = "proxy" },
+            { id = "cidr-rule-2", scope = { src_ip_cidr = "172.16.0.0/12" }, action = "proxy" },
+          },
+          _compiled_stream = { { id = "cidr-compiled-1" }, { id = "cidr-compiled-2" } },
+        }
+      end,
+      evaluate_stream = function(_rules, req_ctx)
+        captured_request_ctx = req_ctx
+        -- No radix_match_index -> no CIDR rule matches -> default deny
+        return { action = "deny", matched_rule = nil, decision_source = "default" }
+      end,
+    }
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return nil, "build_error"
+      end,
+      radix_lookup = function()
+        error("radix_lookup should not be called when tree is nil")
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    handler.preread()
+
     local ctx = ngx_mock.ctx.luagate_stream
     assert.equals("deny", ctx.action)
     assert.equals("denied", ctx.request_state)
+    -- Verify evaluator received nil radix_match_index (no tree -> no lookup)
+    assert.is_not_nil(captured_request_ctx, "evaluator should have been called")
+    assert.is_nil(
+      captured_request_ctx.radix_match_index,
+      "radix_match_index should be nil when radix_build fails on cold start"
+    )
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+    package.loaded["luagate.policy.evaluator"] = nil
+  end)
+
+  it("radix_lookup 에러 시 fail-closed deny (불변식)", function()
+    -- Build a tree successfully first
+    local lookup_tree = { _type = "lookup_fail_tree" }
+    test_version_counter = test_version_counter + 1
+    local ver = "v-lookup-fail-" .. test_version_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver
+      end
+      return nil
+    end
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return lookup_tree, nil
+      end,
+      radix_lookup = function()
+        return nil, "ffi_timeout:-5"
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("radix_lookup_error", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+    assert.equals("deny", ngx_mock.var.luagate_stream_action)
 
     -- Restore
     package.loaded["luagate.stream.ffi"] = _stream_ffi_module

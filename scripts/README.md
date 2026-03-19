@@ -66,7 +66,9 @@ COMPLETED_REVIEW: DON-97-code (2026-03-14)
 
 `git worktree`(Claude Code `isolation: "worktree"`)에서 실행할 때:
 
-- `PROGRESS.md`, `.claude/reviews/` 는 main repo root에서 읽고 쓴다.
+- PROGRESS.md 마커 갱신은 항상 main repo root의 PROGRESS.md에서만 수행한다.
+- worktree에서는 PROGRESS.md를 수정하지 않는다 (충돌 방지).
+- `.claude/reviews/`는 worktree 내 파일을 우선 탐색한다.
 - `codex exec` 는 현재 worktree의 코드를 대상으로 실행한다.
 - non-worktree에서는 두 경로가 동일하므로 기존 동작과 100% 호환된다.
 - **무인자 실행 불가**: worktree에서는 `PENDING_REVIEW` 마커가 여러 개일 수 있어 자동 감지를 차단한다. 반드시 `./scripts/codex-review.sh DON-XX type` 으로 수동 지정해야 한다.

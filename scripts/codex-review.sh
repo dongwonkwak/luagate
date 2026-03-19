@@ -148,11 +148,8 @@ else
 fi
 
 # --- PROGRESS.md 마커 정리: PENDING_REVIEW → COMPLETED_REVIEW ---
-# worktree 환경에서는 worktree의 PROGRESS.md를 우선 갱신
+# 항상 MAIN_ROOT의 PROGRESS.md만 갱신 (worktree에서는 PROGRESS.md를 수정하지 않음)
 PROGRESS_FILE="${MAIN_ROOT}/PROGRESS.md"
-if [ "$WORKTREE_ROOT" != "$MAIN_ROOT" ] && [ -f "${WORKTREE_ROOT}/PROGRESS.md" ]; then
-  PROGRESS_FILE="${WORKTREE_ROOT}/PROGRESS.md"
-fi
 if grep -q "^PENDING_REVIEW: ${PENDING}$" "$PROGRESS_FILE" 2>/dev/null; then
   sed "s/^PENDING_REVIEW: ${PENDING}$/COMPLETED_REVIEW: ${PENDING} ($(date '+%Y-%m-%d'))/" "$PROGRESS_FILE" > "${PROGRESS_FILE}.tmp" && mv "${PROGRESS_FILE}.tmp" "$PROGRESS_FILE"
   echo "PROGRESS.md 마커 갱신: PENDING_REVIEW → COMPLETED_REVIEW"

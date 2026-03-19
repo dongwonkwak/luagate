@@ -101,7 +101,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 - [ ] `docs/spec/` 또는 `docs/design/adr/` 변경 시 `sync-spec` 스킬 완료 (AGENTS.md 불변식 8)
 - [ ] **Codex 리뷰 완료** (`request-codex-review` 스킬 → 리뷰 결과 반영 → COMPLETED_REVIEW 마커)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터 포함
-- [ ] PROGRESS.md append (날짜/이슈/산출물/비고)
+- [ ] PROGRESS.md append (날짜/이슈/산출물/비고) — worktree 시 main 머지 후 갱신
 
 > **AGENTS.md 불변식 확인**: `luagate_` prefix, fail-closed, `ngx.worker.id()`,
 > hot reload 7단계, same-PR, 브랜치 선생성, sync-spec — 이 중 하나라도 위반하면 Done 전환 불가

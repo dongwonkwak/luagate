@@ -76,4 +76,4 @@
 - [ ] ✅ `<!-- ADR 필요 -->` 마커: 2개 이상의 대안이 있거나 설계 결정 필요 시
 - [ ] ✅ 새 API 엔드포인트: `docs/spec/admin-api.md` 갱신
 - [ ] ✅ 로그 스키마 변경: `docs/spec/log-schema.md` 갱신
-- [ ] ⚠️ PROGRESS.md 업데이트 (날짜/이슈/산출물/비고)
+- [ ] ⚠️ PROGRESS.md 업데이트 (날짜/이슈/산출물/비고) — worktree 시 main 머지 후 갱신

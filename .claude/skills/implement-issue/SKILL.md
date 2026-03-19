@@ -96,7 +96,7 @@ linear-update 스킬:
 sync-spec 스킬 (스펙 변경 시):
   - docs/spec/ 변경분 → Linear 문서 동기화
 
-PROGRESS.md 갱신
+PROGRESS.md 갱신 (worktree 환경이면 건너뛰기 — main 머지 후 갱신)
 ```
 
 ## 에러 정책
@@ -115,4 +115,4 @@ PROGRESS.md 갱신
 - [ ] 관련 spec/ADR 준수 (AGENTS.md 불변식)
 - [ ] 문서 갱신 (same-PR 규칙)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터
-- [ ] PROGRESS.md append
+- [ ] PROGRESS.md append (worktree 시 머지 후 갱신)
