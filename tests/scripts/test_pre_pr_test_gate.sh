@@ -62,7 +62,17 @@ OUTPUT="$(echo "$INPUT" | bash "$HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 assert_exit_code "gh pr create with flags → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "gh pr create with flags → detected" "pre-PR test gate" "$OUTPUT"
 
-# ── Test 6: Command containing 'gh' but not 'gh pr create' → pass through
+# ── Test 6: gh pr create with multiple spaces → still detected ──────────
+echo ""
+echo "-- Test: gh pr create with multiple spaces --"
+
+INPUT='{"tool_name":"Bash","tool_input":{"command":"gh    pr    create --title \"spaced\""}}'
+OUTPUT="$(echo "$INPUT" | bash "$HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+
+assert_exit_code "gh pr create with multiple spaces → exit 0" 0 "$EXIT_CODE"
+assert_output_contains "gh pr create with multiple spaces → detected" "pre-PR test gate" "$OUTPUT"
+
+# ── Test 7: Command containing 'gh' but not 'gh pr create' → pass through
 echo ""
 echo "-- Test: gh issue list (not pr create) --"
 
@@ -72,7 +82,7 @@ OUTPUT="$(echo "$INPUT" | bash "$HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 assert_exit_code "gh issue list → exit 0" 0 "$EXIT_CODE"
 assert_output_not_contains "gh issue list → no pre-PR message" "pre-PR test gate" "$OUTPUT"
 
-# ── Test 7: Malformed JSON → exit 0 (graceful handling) ─────────────────
+# ── Test 8: Malformed JSON → exit 0 (graceful handling) ─────────────────
 echo ""
 echo "-- Test: malformed JSON --"
 
@@ -80,7 +90,7 @@ OUTPUT="$(echo "not-json" | bash "$HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "malformed JSON → exit 0" 0 "$EXIT_CODE"
 
-# ── Test 8: make pre-pr failure → outputs block decision ────────────────
+# ── Test 9: make pre-pr failure → outputs block decision ────────────────
 echo ""
 echo "-- Test: make pre-pr failure → block decision JSON --"
 
@@ -100,7 +110,7 @@ assert_output_contains "make pre-pr fail → reason message" "make pre-pr failed
 
 rm -rf "$TMPDIR_GATE"
 
-# ── Test 9: jq unavailable → fallback grep detection ────────────────────
+# ── Test 10: jq unavailable → fallback grep detection ───────────────────
 echo ""
 echo "-- Test: jq unavailable fallback --"
 
@@ -125,7 +135,7 @@ for dir in "${DIRS[@]}"; do
   if [ -x "$dir/jq" ]; then continue; fi
   FILTERED_PATH="$FILTERED_PATH:$dir"
 done
-INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title \"test\""}}'
+INPUT='{"tool_name":"Bash","tool_input":{"command":"gh    pr    create --title \"test\""}}'
 OUTPUT="$(echo "$INPUT" | PATH="$FILTERED_PATH" bash "$HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "jq unavailable → exit 0" 0 "$EXIT_CODE"
