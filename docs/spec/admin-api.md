@@ -145,7 +145,8 @@ GET /health
   "active_http_version": "a3f2c1d4e5b6...",
   "active_stream_version": "a3f2c1d4e5b6...",
   "policy_loaded_at": "2026-03-18T10:30:00Z",
-  "ffi_watchdog_leak_count": 0
+  "ffi_watchdog_leak_count": [0, 0, 0, 0],
+  "ffi_watchdog_timeouts": 0
 }
 ```
 
@@ -156,7 +157,8 @@ GET /health
 | `active_http_version` | string\|null | HTTP 서브시스템 active 정책 버전 |
 | `active_stream_version` | string\|null | Stream 서브시스템 active 정책 버전 |
 | `policy_loaded_at` | string\|null | 마지막 성공적 정책 로드 시각 (ISO-8601 UTC) |
-| `ffi_watchdog_leak_count` | integer | 현재 worker의 detached thread leak 카운터. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) 참조 |
+| `ffi_watchdog_leak_count` | array\<integer\> | Per-worker detached thread leak 카운터 배열 (인덱스 = worker id). [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
+| `ffi_watchdog_timeouts` | integer | 전체 worker의 leak count 합산. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
 
 > 멀티 인스턴스 환경에서 외부 모니터링은 각 인스턴스의 `source_version`, `active_http_version`, `active_stream_version`이 CI/CD가 계산한 `target_version`과 모두 일치하는지 확인해야 한다 ([ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.3).
 
@@ -166,7 +168,15 @@ GET /health
 {"status": "unhealthy", "reason": "policy not loaded"}
 ```
 
-> 503 응답 조건: 정책 미로드 (`http:active_version`이 없거나 `"none"`).
+또는 FFI leak 임곗값 초과 시:
+
+```json
+{"status": "unhealthy", "reason": "ffi_thread_leak_threshold_exceeded", "ffi_watchdog_leak_count": [0, 0, 12, 0], "ffi_watchdog_timeouts": 12}
+```
+
+> **503 응답 조건** (우선순위 순):
+> 1. FFI leak 임곗값 초과: 임의 worker의 `ffi_watchdog_leak_count[i]` > 10 (기본 임곗값). `reason: "ffi_thread_leak_threshold_exceeded"` ([ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3)
+> 2. 정책 미로드: `http:active_version`이 없거나 `"none"`. `reason: "policy not loaded"`
 
 ---
 
