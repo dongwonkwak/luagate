@@ -183,4 +183,4 @@ PR에 `chatgpt-codex-connector` review thread 가 달린 뒤 후속 수정/답�
 
 - pre-commit: `stylua --check`, `luacheck`, `clang-format --check`, `shellcheck`, `markdownlint`, `prettier --check` (ui/, mcp/), `eslint` (ui/)
 - commit-msg: `commitlint` (Conventional Commits 형식 강제)
-- pre-push: `make test-unit` (lua/|tests/ 변경 시) + `luacheck` 전체 + `vitest` (ui/) + `tsc -b` (ui/) + `tsc --noEmit` (mcp/) + `mcp tests` (mcp/ 변경 시: tsc + npm test) + `cargo test` (src/) + `cargo clippy` (src/) + `conf/ change warning` (conf/|Dockerfile 변경 시: 통합 테스트 경고 출력)
+- pre-push: `make test-unit` (lua/|tests/ 변경 시) + `luacheck` 전체 + `vitest` (ui/) + `tsc -b` (ui/) + `tsc --noEmit` (mcp/) + `mcp tests` (mcp/ 변경 시: npm test) + `cargo test` (src/) + `cargo clippy` (src/) + `conf/ change warning` (conf/|Dockerfile 변경 시: 통합 테스트 경고 출력)

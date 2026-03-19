@@ -60,14 +60,20 @@ skip_suite() {
   SKIP=$((SKIP + 1))
 }
 
+fail_missing() {
+  local name="$1" tool="$2"
+  echo ""
+  echo "  [$name] FAIL ($tool not found — required for changed files)" >&2
+  FAIL=$((FAIL + 1))
+  FAILURES="$FAILURES  - $name ($tool not found)\n"
+}
+
 # ── Lua unit tests ──────────────────────────────────────────────────────────
 if [ "$HAS_LUA" -eq 1 ]; then
   if command -v busted >/dev/null 2>&1; then
     run_suite "lua-unit" make test-unit-lua
   else
-    echo ""
-    echo "  [lua-unit] SKIP (busted not found)"
-    SKIP=$((SKIP + 1))
+    fail_missing "lua-unit" "busted"
   fi
 else
   skip_suite "lua-unit"
@@ -78,11 +84,9 @@ if [ "$HAS_RUST" -eq 1 ]; then
   run_suite "rust-test" make test-unit-rust
   if command -v cargo >/dev/null 2>&1; then
     # shellcheck disable=SC2016
-    run_suite "rust-clippy" bash -c 'for d in src/decoder src/scanner src/stream; do [ -f "$d/Cargo.toml" ] && (cd "$d" && cargo clippy -- -D warnings) || exit 1; done'
+    run_suite "rust-clippy" bash -c 'for d in src/decoder src/scanner src/stream; do if [ -f "$d/Cargo.toml" ]; then (cd "$d" && cargo clippy -- -D warnings) || exit 1; fi; done'
   else
-    echo ""
-    echo "  [rust-clippy] SKIP (cargo not found)"
-    SKIP=$((SKIP + 1))
+    fail_missing "rust-clippy" "cargo"
   fi
 else
   skip_suite "rust-test"
@@ -95,10 +99,8 @@ if [ "$HAS_UI" -eq 1 ]; then
     run_suite "ui-vitest" bash -c 'cd ui && npx vitest run'
     run_suite "ui-tsc" bash -c 'cd ui && npx tsc -b'
   else
-    echo ""
-    echo "  [ui-vitest] SKIP (npx not found)"
-    echo "  [ui-tsc] SKIP (npx not found)"
-    SKIP=$((SKIP + 2))
+    fail_missing "ui-vitest" "npx"
+    fail_missing "ui-tsc" "npx"
   fi
 else
   skip_suite "ui-vitest"
@@ -108,11 +110,9 @@ fi
 # ── MCP tests ───────────────────────────────────────────────────────────────
 if [ "$HAS_MCP" -eq 1 ]; then
   if command -v npx >/dev/null 2>&1; then
-    run_suite "mcp-test" bash -c 'cd mcp && npx tsc --noEmit && npm test'
+    run_suite "mcp-test" bash -c 'cd mcp && npm test'
   else
-    echo ""
-    echo "  [mcp-test] SKIP (npx not found)"
-    SKIP=$((SKIP + 1))
+    fail_missing "mcp-test" "npx"
   fi
 else
   skip_suite "mcp-test"

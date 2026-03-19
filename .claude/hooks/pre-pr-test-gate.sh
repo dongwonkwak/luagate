@@ -6,8 +6,23 @@ set -euo pipefail
 # Read the PreToolUse JSON from stdin
 INPUT="$(cat)"
 
+# Require jq for JSON parsing — block if unavailable
+if ! command -v jq >/dev/null 2>&1; then
+  # Fallback: use grep to detect gh pr create in raw input
+  if echo "$INPUT" | grep -q 'gh pr create'; then
+    echo "  pre-PR test gate: gh pr create detected (jq unavailable, using fallback) — running make pre-pr..." >&2
+    if make pre-pr >&2; then
+      exit 0
+    else
+      echo '{"decision":"block","reason":"make pre-pr failed — fix test failures before creating PR"}'
+      exit 0
+    fi
+  fi
+  exit 0
+fi
+
 # Extract the command field from the Bash tool input
-COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" || COMMAND=""
 
 # Check if this is a `gh pr create` command
 if echo "$COMMAND" | grep -q 'gh pr create'; then
@@ -17,7 +32,7 @@ if echo "$COMMAND" | grep -q 'gh pr create'; then
     exit 0
   else
     # Tests failed — block the command
-    jq -n '{decision: "block", reason: "make pre-pr failed — fix test failures before creating PR"}'
+    jq -n '{"decision":"block","reason":"make pre-pr failed — fix test failures before creating PR"}'
     exit 0
   fi
 fi

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/mcp-test-wrapper.sh — pre-push hook wrapper for MCP tests
-# Runs tsc --noEmit + npm test only when mcp/ files have changed
+# Runs npm test only when mcp/ files have changed
+# NOTE: tsc --noEmit is handled by tsc-mcp-wrapper.sh (no duplication)
 # Git pre-push passes: $1=remote_name $2=remote_url, OIDs on stdin
 set -euo pipefail
 
@@ -41,8 +42,8 @@ if [ "$SHOULD_RUN" -eq 1 ]; then
     echo "WARN: npx not found, skipping MCP tests (install Node.js)" >&2
     exit 0
   fi
-  echo "  mcp/ changes detected — running MCP tests (tsc + npm test)..."
-  cd mcp && npx tsc --noEmit && npm test
+  echo "  mcp/ changes detected — running MCP tests (npm test)..."
+  cd mcp && npm test
 else
   echo "  no mcp/ changes — skipping MCP tests"
 fi

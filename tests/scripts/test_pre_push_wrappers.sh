@@ -12,6 +12,25 @@ MCP_WRAPPER="$PROJECT_ROOT/scripts/mcp-test-wrapper.sh"
 UNIT_WRAPPER="$PROJECT_ROOT/scripts/test-unit-wrapper.sh"
 CONF_WRAPPER="$PROJECT_ROOT/scripts/conf-change-wrapper.sh"
 
+# Create mock bin for npm/npx/busted/make to prevent real tool execution
+MOCK_BIN="$(mktemp -d)"
+for cmd in npm npx busted make; do
+  cat > "$MOCK_BIN/$cmd" <<'SCRIPT'
+#!/bin/bash
+echo "  [mock] $0 $*" >&2
+exit 0
+SCRIPT
+  chmod +x "$MOCK_BIN/$cmd"
+done
+SAVED_PATH="$PATH"
+export PATH="$MOCK_BIN:$PATH"
+
+cleanup_mocks() {
+  export PATH="$SAVED_PATH"
+  rm -rf "$MOCK_BIN"
+}
+trap cleanup_mocks EXIT
+
 echo "== test_pre_push_wrappers.sh =="
 
 # ============================================================================
@@ -24,8 +43,7 @@ echo "=== mcp-test-wrapper.sh ==="
 echo ""
 echo "-- Test: mcp-wrapper no push refs --"
 
-OUTPUT="$(echo -n "" | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(echo -n "" | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "mcp: no push refs → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "mcp: no push refs → skip message" "no push refs" "$OUTPUT"
@@ -37,8 +55,7 @@ setup_git_sandbox
 CURRENT_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature 0000000000000000000000000000000000000000 refs/heads/feature $CURRENT_OID" \
-  | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "mcp: delete ref → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "mcp: delete ref → no mcp changes" "no mcp/ changes" "$OUTPUT"
@@ -58,8 +75,7 @@ git commit -q -m "add other file"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "mcp: no mcp changes → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "mcp: no mcp changes → skip message" "no mcp/ changes" "$OUTPUT"
@@ -80,12 +96,10 @@ git commit -q -m "add mcp file"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$MCP_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
-# It will detect mcp/ changes. It may fail if npx is not found, but should
-# at least print the detection message or the warning.
-assert_output_matches "mcp: mcp changes → detected or warned" "(mcp/ changes detected|npx not found)" "$OUTPUT"
+assert_exit_code "mcp: mcp changes → exit 0" 0 "$EXIT_CODE"
+assert_output_contains "mcp: mcp changes → detected" "mcp/ changes detected" "$OUTPUT"
 
 cleanup_git_sandbox
 
@@ -99,8 +113,7 @@ echo "=== test-unit-wrapper.sh ==="
 echo ""
 echo "-- Test: unit-wrapper no push refs --"
 
-OUTPUT="$(echo -n "" | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(echo -n "" | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "unit: no push refs → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "unit: no push refs → skip message" "no push refs" "$OUTPUT"
@@ -118,8 +131,7 @@ git commit -q -m "add other file"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "unit: no lua changes → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "unit: no lua changes → skip message" "no lua/ or tests/ changes" "$OUTPUT"
@@ -140,9 +152,9 @@ git commit -q -m "add lua file"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" || true
+  | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
-assert_output_matches "unit: lua changes → detected or warned" "(lua/ or tests/ changes detected|busted not found)" "$OUTPUT"
+assert_output_contains "unit: lua changes → detected" "lua/ or tests/ changes detected" "$OUTPUT"
 
 cleanup_git_sandbox
 
@@ -160,9 +172,9 @@ git commit -q -m "add test file"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" || true
+  | bash "$UNIT_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
-assert_output_matches "unit: tests/ changes → detected or warned" "(lua/ or tests/ changes detected|busted not found)" "$OUTPUT"
+assert_output_contains "unit: tests/ changes → detected" "lua/ or tests/ changes detected" "$OUTPUT"
 
 cleanup_git_sandbox
 
@@ -176,8 +188,7 @@ echo "=== conf-change-wrapper.sh ==="
 echo ""
 echo "-- Test: conf-wrapper no push refs --"
 
-OUTPUT="$(echo -n "" | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(echo -n "" | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "conf: no push refs → exit 0" 0 "$EXIT_CODE"
 
@@ -194,8 +205,7 @@ git commit -q -m "add other file"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "conf: no conf changes → exit 0" 0 "$EXIT_CODE"
 assert_output_not_contains "conf: no conf changes → no WARNING" "WARNING" "$OUTPUT"
@@ -216,8 +226,7 @@ git commit -q -m "add conf"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "conf: conf changes → exit 0 (advisory only)" 0 "$EXIT_CODE"
 assert_output_contains "conf: conf changes → WARNING" "WARNING" "$OUTPUT"
@@ -238,8 +247,7 @@ git commit -q -m "add Dockerfile"
 FEATURE_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature $FEATURE_OID refs/heads/feature $BASE_OID" \
-  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "conf: Dockerfile changes → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "conf: Dockerfile changes → WARNING" "WARNING" "$OUTPUT"
@@ -253,8 +261,7 @@ setup_git_sandbox
 CURRENT_OID="$(git rev-parse HEAD)"
 
 OUTPUT="$(echo "refs/heads/feature 0000000000000000000000000000000000000000 refs/heads/feature $CURRENT_OID" \
-  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" || true
-EXIT_CODE=$?
+  | bash "$CONF_WRAPPER" origin https://example.com 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "conf: delete ref → exit 0" 0 "$EXIT_CODE"
 assert_output_not_contains "conf: delete ref → no WARNING" "WARNING" "$OUTPUT"

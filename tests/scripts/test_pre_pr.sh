@@ -15,7 +15,7 @@ echo "== test_pre_pr.sh =="
 
 # Create a mock bin directory with fake tools that always succeed
 MOCK_BIN="$(mktemp -d)"
-for cmd in make npx busted cargo; do
+for cmd in make npx busted cargo npm; do
   cat > "$MOCK_BIN/$cmd" <<'SCRIPT'
 #!/bin/bash
 # Mock command — always succeeds
@@ -38,8 +38,7 @@ echo ""
 echo "-- Test: no changes detected --"
 setup_git_sandbox
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "no changes → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "no changes → 'nothing to test' message" "nothing to test" "$OUTPUT"
@@ -56,8 +55,7 @@ echo "-- lua code" > lua/test.lua
 git add lua/test.lua
 git commit -q -m "add lua file"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "lua change → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "lua change → rust-test SKIP" "[rust-test] SKIP" "$OUTPUT"
@@ -82,8 +80,7 @@ echo "fn main() {}" > src/lib.rs
 git add src/lib.rs
 git commit -q -m "add rust file"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "rust change → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "rust change → lua-unit SKIP" "[lua-unit] SKIP (no relevant changes)" "$OUTPUT"
@@ -104,8 +101,7 @@ echo "export default {}" > ui/App.tsx
 git add ui/App.tsx
 git commit -q -m "add ui file"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "ui change → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "ui change → lua-unit SKIP" "[lua-unit] SKIP (no relevant changes)" "$OUTPUT"
@@ -125,8 +121,7 @@ echo "console.log('mcp')" > mcp/index.ts
 git add mcp/index.ts
 git commit -q -m "add mcp file"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "mcp change → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "mcp change → lua-unit SKIP" "[lua-unit] SKIP (no relevant changes)" "$OUTPUT"
@@ -146,8 +141,7 @@ echo "worker_processes 1;" > conf/nginx.conf
 git add conf/nginx.conf
 git commit -q -m "add conf file"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "conf change → exit 0" 0 "$EXIT_CODE"
 assert_output_contains "conf change → WARNING present" "WARNING: conf/ or Dockerfile" "$OUTPUT"
@@ -166,7 +160,7 @@ echo "FROM nginx" > Dockerfile
 git add Dockerfile
 git commit -q -m "add Dockerfile"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_output_contains "Dockerfile change → WARNING present" "WARNING: conf/ or Dockerfile" "$OUTPUT"
 
@@ -183,8 +177,7 @@ echo "export {}" > ui/Comp.tsx
 git add lua/mod.lua ui/Comp.tsx
 git commit -q -m "add lua and ui files"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "multi change → exit 0" 0 "$EXIT_CODE"
 assert_output_not_contains "multi change → lua-unit detected" "[lua-unit] SKIP (no relevant changes)" "$OUTPUT"
@@ -204,7 +197,7 @@ echo "describe('test', function() end)" > tests/unit/new_spec.lua
 git add tests/unit/new_spec.lua
 git commit -q -m "add test file"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_output_not_contains "tests/ change → lua-unit detected" "[lua-unit] SKIP (no relevant changes)" "$OUTPUT"
 assert_output_contains "tests/ change → lua-unit PASS" "[lua-unit] PASS" "$OUTPUT"
@@ -221,7 +214,7 @@ echo "-- test" > lua/summary.lua
 git add lua/summary.lua
 git commit -q -m "add file for summary test"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_output_matches "summary has PASS/FAIL/SKIP" "PASS:.*FAIL:.*SKIP:" "$OUTPUT"
 
@@ -241,7 +234,7 @@ fi
 exit 0
 SCRIPT
 chmod +x "$FAIL_BIN/make"
-for cmd in npx busted cargo; do
+for cmd in npx busted cargo npm; do
   cat > "$FAIL_BIN/$cmd" <<'SCRIPT2'
 #!/bin/bash
 exit 0
@@ -285,8 +278,7 @@ echo "worker 1;" > conf/nginx.conf
 git add lua/mod.lua src/lib.rs ui/App.tsx mcp/index.ts conf/nginx.conf
 git commit -q -m "add all"
 
-OUTPUT="$(bash "$PRE_PR" 2>&1)" || true
-EXIT_CODE=$?
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
 
 assert_exit_code "all areas → exit 0" 0 "$EXIT_CODE"
 assert_output_not_contains "all areas → lua-unit not skipped" "[lua-unit] SKIP (no relevant changes)" "$OUTPUT"
@@ -296,6 +288,57 @@ assert_output_not_contains "all areas → mcp-test not skipped" "[mcp-test] SKIP
 assert_output_contains "all areas → conf WARNING" "WARNING: conf/ or Dockerfile" "$OUTPUT"
 
 cleanup_git_sandbox
+
+# ── Test 13: Missing runner with changes → FAIL ─────────────────────────
+echo ""
+echo "-- Test: missing runner fails --"
+
+# Create a wrapper script that sources pre-pr.sh with busted hidden
+# We override `command` in a subshell to pretend busted is absent
+NOBUSTED_BIN="$(mktemp -d)"
+for cmd in make npx cargo npm; do
+  cat > "$NOBUSTED_BIN/$cmd" <<'SCRIPT'
+#!/bin/bash
+exit 0
+SCRIPT
+  chmod +x "$NOBUSTED_BIN/$cmd"
+done
+
+setup_git_sandbox
+git checkout -q -b feature-nobusted
+mkdir -p lua
+echo "-- lua" > lua/mod.lua
+git add lua/mod.lua
+git commit -q -m "add lua file"
+
+SAVED_PATH="$PATH"
+# Remove MOCK_BIN (has busted), prepend NOBUSTED_BIN (no busted)
+# Filter out dirs containing busted, but ensure essential binaries remain accessible
+FILTERED_PATH="$NOBUSTED_BIN"
+# Ensure bash and git are always accessible by linking them into NOBUSTED_BIN
+for cmd in bash git grep sed cat echo env; do
+  real_path="$(command -v "$cmd" 2>/dev/null || true)"
+  if [ -n "$real_path" ] && [ ! -e "$NOBUSTED_BIN/$cmd" ]; then
+    ln -sf "$real_path" "$NOBUSTED_BIN/$cmd"
+  fi
+done
+IFS=: read -ra DIRS <<< "$PATH"
+for dir in "${DIRS[@]}"; do
+  if [ "$dir" = "$MOCK_BIN" ]; then continue; fi
+  if [ -x "$dir/busted" ]; then continue; fi
+  FILTERED_PATH="$FILTERED_PATH:$dir"
+done
+export PATH="$FILTERED_PATH"
+OUTPUT="$(bash "$PRE_PR" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+export PATH="$SAVED_PATH"
+
+assert_exit_code "missing busted → exit 1" 1 "$EXIT_CODE"
+assert_output_contains "missing busted → FAIL message" "[lua-unit] FAIL" "$OUTPUT"
+assert_output_contains "missing busted → busted not found" "busted not found" "$OUTPUT"
+
+cleanup_git_sandbox
+rm -rf "$NOBUSTED_BIN"
+unset FILTERED_PATH DIRS
 
 # ── Summary ──────────────────────────────────────────────────────────────
 print_summary "test_pre_pr.sh"

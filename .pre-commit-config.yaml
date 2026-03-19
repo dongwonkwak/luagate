@@ -152,7 +152,7 @@ repos:
         pass_filenames: false
 
       - id: mcp-test
-        name: MCP tests (tsc + npm test)
+        name: MCP tests (npm test)
         language: system
         entry: scripts/mcp-test-wrapper.sh
         stages: [pre-push]
