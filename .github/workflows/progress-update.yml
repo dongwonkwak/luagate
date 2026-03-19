@@ -66,5 +66,5 @@ jobs:
             --base main \
             --head "$BRANCH"
 
-          # Enable auto-merge if available
-          gh pr merge "$BRANCH" --auto --squash 2>/dev/null || true
+          # Fail the workflow if the follow-up PR cannot be queued for auto-merge.
+          gh pr merge "$BRANCH" --auto --squash
