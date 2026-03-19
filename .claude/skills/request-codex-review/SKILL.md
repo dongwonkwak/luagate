@@ -68,13 +68,19 @@ PROGRESS.md에 PENDING_REVIEW 마커를 재기입합니다. 진행할까요?
 
 ### 4. PROGRESS.md PENDING_REVIEW 마커 기입
 
-PROGRESS.md 끝에 아래 형식으로 추가한다:
+**main 환경**: PROGRESS.md 끝에 아래 형식으로 추가한다:
 
 ```
 PENDING_REVIEW: DON-XXX-{type}
 ```
 
 스크립트(`scripts/codex-review.sh`)가 이 마커를 읽어 리뷰 파일 경로를 자동으로 결정한다.
+
+**worktree 환경**: PROGRESS.md를 수정하지 않는다. 스크립트를 수동 지정으로 실행한다:
+
+```bash
+./scripts/codex-review.sh DON-XXX {type}
+```
 
 > **NOTE (재리뷰 시)**: 이전 `COMPLETED_REVIEW: DON-XXX-{type} (날짜)` 라인이 이미 있더라도
 > 그 아래에 `PENDING_REVIEW: DON-XXX-{type}` 를 추가한다. 스크립트는 `tail -1`로
