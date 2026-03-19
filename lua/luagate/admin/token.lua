@@ -125,11 +125,13 @@ function _M.handle_post_rotate()
     current_token = os.getenv("LUAGATE_ADMIN_TOKEN")
   end
 
-  -- Store old token with grace period TTL
+  -- Store old token with grace period TTL — fail-closed on write error
   if current_token then
     local ok, set_err = state_dict:set(KEY_OLD_TOKEN, current_token, GRACE_PERIOD_TTL)
     if not ok then
       ngx.log(ngx.ERR, "[luagate] failed to set grace period token: ", tostring(set_err))
+      send_error(500, "internal_error", "Failed to store grace period token")
+      return
     end
   end
 

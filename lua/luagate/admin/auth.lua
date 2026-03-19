@@ -174,31 +174,38 @@ function _M.verify()
   end
 
   -- 3. Constant-time comparison (security-patterns.md: never use ==)
-  -- Check order: rotated token (shared dict) → env-loaded token → grace period old token
   local state_dict = ngx.shared and ngx.shared.luagate_state
+  local rotation_occurred = false
 
-  -- 3a. Check rotated token from shared dict (if rotation has occurred)
   if state_dict then
     local rotated_token = state_dict:get("luagate_admin_token")
-    if rotated_token and constant_time_compare(provided, rotated_token) then
-      return true
-    end
 
-    -- 3b. Check grace period old token (valid for 30s after rotation)
-    local old_token = state_dict:get("luagate_admin_token_old")
-    if old_token and constant_time_compare(provided, old_token) then
+    if rotated_token then
+      rotation_occurred = true
+
+      -- 3a. Check rotated (current active) token
+      if constant_time_compare(provided, rotated_token) then
+        return true
+      end
+
+      -- 3b. Check grace period old token (valid for 30s after rotation, TTL-managed)
+      local old_token = state_dict:get("luagate_admin_token_old")
+      if old_token and constant_time_compare(provided, old_token) then
+        return true
+      end
+    end
+  end
+
+  -- 3c. Env-loaded token: only valid if no rotation has occurred.
+  -- After rotation, env token is no longer accepted (it was moved to grace period).
+  if not rotation_occurred then
+    if constant_time_compare(provided, _admin_token) then
       return true
     end
   end
 
-  -- 3c. Check env-loaded token (original, always valid unless rotated)
-  if not constant_time_compare(provided, _admin_token) then
-    _reject("invalid_token")
-    return false
-  end
-
-  -- 4. Authenticated
-  return true
+  _reject("invalid_token")
+  return false
 end
 
 --- Reset the module state (for testing only).
