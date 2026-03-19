@@ -414,6 +414,11 @@ function _M.handle_put_policies()
     -- Same hash — no change needed, cleanup temp
     os.remove(tmp_path)
 
+    -- Nginx core also evaluates If-Match preconditions for successful writes.
+    -- Echo the validated source-version ETag on the success response so the
+    -- application-level optimistic lock does not get overridden with 412.
+    ngx.header["ETag"] = '"' .. if_match .. '"'
+
     if
       not audit_or_reject("policy_update_success", {
         trigger = "api",
@@ -548,6 +553,10 @@ function _M.handle_put_policies()
   then
     return
   end
+
+  -- Preserve the validated precondition token on the response to avoid Nginx
+  -- core turning a successful application-level PUT into 412.
+  ngx.header["ETag"] = '"' .. if_match .. '"'
 
   send_json(200, {
     previous_http_version = result.previous_http_version,

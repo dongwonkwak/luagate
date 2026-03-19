@@ -41,8 +41,9 @@ RUN apk add --no-cache \
       LUA_INCDIR=/usr/local/openresty/luajit/include/luajit-2.1 \
  && apk del .build-deps
 
-# Copy Rust FFI shared libraries
-COPY --from=rust-builder /build/artifacts/ /usr/local/openresty/lualib/
+# Copy Rust FFI shared libraries into the system loader path so ffi.load()
+# resolves them without container-specific environment overrides.
+COPY --from=rust-builder /build/artifacts/ /usr/local/lib/
 
 # Copy Lua modules into a dedicated subdir — preserves bundled resty/* libs
 COPY lua/luagate /usr/local/openresty/lualib/luagate/

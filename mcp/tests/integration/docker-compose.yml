@@ -1,6 +1,7 @@
 # Run from repo root: docker compose -f mcp/tests/integration/docker-compose.yml up
-# Network: mcp-test-runner uses host network to access luagate via 127.0.0.1:9190
-# which satisfies the Admin API IP allowlist (nginx.conf: allow 127.0.0.1)
+# mcp-test-runner uses host network to access luagate via 127.0.0.1:9190.
+# Docker forwards published-port traffic to the container from the bridge gateway,
+# so the luagate service must use the same fixed gateway allowlisted in nginx.conf.
 services:
   luagate:
     build:
@@ -9,15 +10,26 @@ services:
     ports:
       - "127.0.0.1:9190:9090"
     volumes:
-      - ../../../policies/luagate.yaml:/conf/policies.yaml:ro
+      - ../../../policies/luagate.yaml:/fixtures/luagate.yaml:ro
       - ../../../conf/scanner-patterns:/conf/scanner-patterns:ro
     environment:
       - LUAGATE_ADMIN_TOKEN=integration-test-token-minimum-32bytes!
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /conf
+        cp /fixtures/luagate.yaml /conf/policies.yaml
+        chmod 0777 /conf
+        chmod 0666 /conf/policies.yaml
+        exec openresty -g 'daemon off;'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 2s
       timeout: 5s
       retries: 10
+    networks:
+      - mcp-test-net
 
   mcp-test-runner:
     image: node:20-slim
@@ -33,3 +45,11 @@ services:
       - LUAGATE_ADMIN_TOKEN=integration-test-token-minimum-32bytes!
       - MCP_CLIENT_NAME=integration-test
     command: ["sh", "-c", "npm ci && npm run test:integration"]
+
+networks:
+  mcp-test-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1

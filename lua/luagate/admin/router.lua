@@ -21,6 +21,7 @@ local policies = require("luagate.admin.policies")
 
 local _M = {}
 local EMPTY_JSON_ARRAY = cjson.empty_array or setmetatable({}, { __jsontype = "array" })
+local LUAGATE_VERSION = "0.1.0"
 
 -- ---------------------------------------------------------------------------
 -- Constants
@@ -222,6 +223,37 @@ local function handle_health()
   end
 end
 
+--- GET /api/v1/status — detailed server status.
+-- Exposes a minimal status snapshot derived from shared dict state.
+-- Uptime is approximated from the last successful policy load timestamp when
+-- available, which is the earliest startup-time signal currently persisted.
+local function handle_status()
+  local policy_dict = ngx.shared.luagate_policy
+  local http_version = policy_dict and policy_dict:get("http:active_version")
+  local stream_version = policy_dict and policy_dict:get("stream:active_version")
+  local loaded_at_epoch = policy_dict and policy_dict:get("policy_loaded_at")
+
+  local ok, worker_count = pcall(ngx.worker.count)
+  if not ok or not worker_count or worker_count < 1 then
+    worker_count = 1
+  end
+
+  local uptime_seconds = 0
+  if loaded_at_epoch and loaded_at_epoch > 0 then
+    uptime_seconds = math.max(0, math.floor(ngx.now() - loaded_at_epoch))
+  end
+
+  send_json(200, {
+    luagate_version = LUAGATE_VERSION,
+    uptime_seconds = uptime_seconds,
+    worker_count = worker_count,
+    active_http_version = http_version or "none",
+    active_stream_version = stream_version or "none",
+    last_reload_at = format_iso8601(loaded_at_epoch),
+    last_reload_status = loaded_at_epoch and "success" or "unknown",
+  })
+end
+
 --- GET /metrics — Prometheus text exposition format.
 -- Reads from luagate_metrics, luagate_stream_metrics, luagate_connections zones.
 -- Also exposes shared dict capacity/free_space for all 5 zones.
@@ -360,6 +392,9 @@ local ROUTES = {
   },
   ["/metrics"] = {
     GET = handle_metrics,
+  },
+  ["/api/v1/status"] = {
+    GET = handle_status,
   },
   ["/api/v1/policies"] = {
     GET = policies.handle_get_policies,
