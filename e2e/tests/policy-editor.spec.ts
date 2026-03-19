@@ -43,7 +43,8 @@ test.describe("Policy Editor", () => {
 
     // Modify editor content by selecting all and typing
     await editor.focus();
-    await page.keyboard.press("Meta+a");
+    const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
+    await page.keyboard.press(selectAll);
     await page.keyboard.type(
       'version: "1.0"\nglobal:\n  default_action: allow\n',
       { delay: 10 },
@@ -72,7 +73,8 @@ test.describe("Policy Editor", () => {
 
     // Type invalid YAML (no version key)
     await editor.focus();
-    await page.keyboard.press("Meta+a");
+    const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
+    await page.keyboard.press(selectAll);
     await page.keyboard.type("global:\n  default_action: deny\n", {
       delay: 10,
     });

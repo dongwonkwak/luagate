@@ -105,7 +105,14 @@ export async function setupAdminMock(page: Page) {
       }
 
       const ifMatch = headers["if-match"];
-      if (ifMatch && ifMatch !== `"${currentEtag}"`) {
+      if (!ifMatch) {
+        return route.fulfill({
+          status: 428,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "precondition_required", details: ["If-Match header is required"] }),
+        });
+      }
+      if (ifMatch !== `"${currentEtag}"`) {
         return route.fulfill({
           status: 409,
           contentType: "application/json",
@@ -205,8 +212,12 @@ export async function setupAdminMock(page: Page) {
     });
   });
 
-  // GET /metrics
+  // GET /metrics — Bearer auth required (admin-api.md §6)
   await page.route("**/metrics", (route) => {
+    const headers = route.request().headers();
+    if (!checkAuth(headers)) {
+      return route.fulfill({ status: 401, body: JSON.stringify({ error: "unauthorized" }) });
+    }
     return route.fulfill({
       status: 200,
       contentType: "text/plain",
