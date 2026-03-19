@@ -9,7 +9,7 @@ LOCAL_OID=""
 while IFS=' ' read -r _local_ref local_oid _remote_ref remote_oid; do
   LOCAL_OID="$local_oid"
   if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
-    REMOTE_OID="$(git merge-base HEAD main 2>/dev/null || echo HEAD)"
+    REMOTE_OID="$(git merge-base "$local_oid" main 2>/dev/null || echo "$local_oid")"
   else
     REMOTE_OID="$remote_oid"
   fi
