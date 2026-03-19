@@ -515,6 +515,8 @@ pre-commit hook이 실패하여 커밋이 되지 않았습니다.
 - clang-format: C 코드 포매팅
 - shellcheck: 쉘 스크립트 린트
 - markdownlint: 마크다운 린트
+- prettier: TypeScript/React/CSS 포매팅 (ui/, mcp/)
+- eslint: TypeScript/React 린트 (ui/)
 
 git status --porcelain 으로 변경된 파일만 확인하고, 해당 파일의 pre-commit hook 오류만 수정하세요.
 git commit / git push 는 하지 마세요.
@@ -550,6 +552,10 @@ pre-push hook이 실패하여 push가 되지 않았습니다.
 - make test-unit: Lua 단위 테스트 통과
 - clang-tidy: C 코드 정적 분석
 - luacheck: Lua 린트 전체
+- vitest: UI 단위 테스트 (ui/)
+- tsc: TypeScript 타입 체크 (ui/, mcp/)
+- cargo test: Rust 단위 테스트 (src/)
+- cargo clippy: Rust 린트 (src/)
 
 최근 커밋에서 변경된 파일만 확인하고, 해당 파일의 pre-push hook 오류만 수정하세요.
 수정 후 git add + git commit 으로 fix 커밋을 만드세요. git push 는 하지 마세요.
