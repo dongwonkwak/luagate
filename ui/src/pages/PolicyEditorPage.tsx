@@ -24,12 +24,12 @@ export function PolicyEditorPage() {
 
   useEffect(() => {
     if (policyData) {
-      // Only overwrite editor if there are no unsaved changes
+      // Preserve the draft and its base ETag while there are unsaved changes.
       if (!isDirty) {
         setEditorValue(policyData.yaml);
+        setServerYaml(policyData.yaml);
+        setCurrentEtag(policyData.etag);
       }
-      setServerYaml(policyData.yaml);
-      setCurrentEtag(policyData.etag);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [policyData]);
