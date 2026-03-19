@@ -165,7 +165,7 @@ ui-test:
 # ── E2E (Playwright) ──────────────────────────────────────────────────────
 e2e:
 	@echo "==> Running Playwright E2E tests..."
-	cd e2e && npm run test
+	cd e2e && npm ci && npm run test
 
 e2e-ui:
 	@echo "==> Running Playwright E2E tests (UI mode)..."

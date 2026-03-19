@@ -10,5 +10,6 @@ export default defineConfig({
       process.env.PLAYWRIGHT_BASE_URL || "http://localhost:9090/dashboard",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    video: "retain-on-failure",
   },
 });
