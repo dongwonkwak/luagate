@@ -28,7 +28,7 @@ Authorization: Bearer <token>
 
 - 환경변수 `LUAGATE_ADMIN_TOKEN` 또는 파일(마운트) 방식으로 주입
 - 최소 32바이트 entropy (256-bit random)
-- 재기동 없는 교체: `POST /api/v1/admin/token/rotate` (§5 참조)
+- 재기동 없는 교체: `POST /api/v1/admin/token/rotate` (§6.7 참조)
 - 토큰은 로그/응답 바디에 절대 포함하지 않음
 
 인증 실패 응답:

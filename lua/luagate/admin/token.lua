@@ -30,12 +30,12 @@ local KEY_OLD_TOKEN = "luagate_admin_token_old"
 -- ---------------------------------------------------------------------------
 
 --- Send a JSON error response.
-local function send_error(status, code, message)
+local function send_error(status, code, message, stage)
   ngx.status = status
   ngx.header["Content-Type"] = "application/json"
   local body = cjson.encode({
     error = code,
-    stage = "token_rotation",
+    stage = stage or "token_rotation",
     details = { message },
   })
   ngx.say(body or '{"error":"encode_failed"}')
@@ -111,13 +111,6 @@ function _M.handle_post_rotate()
     return
   end
 
-  -- Audit-first: log before mutation (audit drop = mutation reject)
-  local audit_ok = audit_log("token_rotated")
-  if not audit_ok then
-    send_error(500, "internal_error", "Audit log failed — mutation rejected")
-    return
-  end
-
   -- Get current active token: shared dict first, then env-loaded fallback
   local current_token = state_dict:get(KEY_ACTIVE_TOKEN)
   if not current_token then
@@ -140,6 +133,16 @@ function _M.handle_post_rotate()
   if not ok then
     ngx.log(ngx.ERR, "[luagate] failed to store rotated token: ", tostring(set_err))
     send_error(500, "internal_error", "Failed to store new token")
+    return
+  end
+
+  -- Audit after successful mutation (audit drop = rollback + reject)
+  local audit_ok = audit_log("token_rotated")
+  if not audit_ok then
+    -- Rollback: remove new token, restore old
+    state_dict:delete(KEY_ACTIVE_TOKEN)
+    state_dict:delete(KEY_OLD_TOKEN)
+    send_error(500, "audit_write_failed", "Audit log failed — mutation rolled back", "audit")
     return
   end
 
