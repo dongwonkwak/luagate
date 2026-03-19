@@ -342,3 +342,40 @@ COMPLETED_REVIEW: DON-155-code (2026-03-18)
 COMPLETED_REVIEW: DON-171-code (2026-03-19)
 
 COMPLETED_REVIEW: DON-203-code (2026-03-19)
+
+COMPLETED_REVIEW: DON-204-code (2026-03-19)
+
+COMPLETED_REVIEW: DON-161-code (2026-03-19)
+
+COMPLETED_REVIEW: DON-190-design (2026-03-19)
+
+COMPLETED_REVIEW: DON-174-code (2026-03-19)
+
+COMPLETED_REVIEW: DON-169-code (2026-03-19)
+
+COMPLETED_REVIEW: DON-200-code (2026-03-19)
+
+## Phase 2-Reliability: /health per-worker FFI leak + 503 임곗값 (DON-204)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-19 | DON-204 | /health per-worker FFI leak 배열 + 503 임곗값 전환 (ADR-009 Phase 3) | `lua/luagate/admin/router.lua`, `conf/nginx.conf`, `docs/spec/admin-api.md`, `docs/spec/http-pipeline.md`, `tests/unit/admin/router_spec.lua` | Codex 리뷰 2건 + PR 리뷰 반영. 723 tests. PR #49 |
+
+## Phase 2-Dashboard: frontend-developer agent + skills (DON-161+164+162+163)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-19 | DON-161 | frontend-developer 에이전트 파일 생성 | `.claude/agents/frontend-developer.md` | React 대시보드 UI 전담 에이전트 |
+| 2026-03-19 | DON-164 | frontend-conventions.md 지식 파일 생성 | `.claude/knowledge/frontend-conventions.md` | React 19/Vite 6/Tailwind 3 기준 |
+| 2026-03-19 | DON-162 | new-react-component 스킬 생성 | `.claude/skills/new-react-component/SKILL.md` | 컴포넌트 뼈대 + 체크리스트 |
+| 2026-03-19 | DON-163 | new-api-client 스킬 생성 | `.claude/skills/new-api-client/SKILL.md` | 5개 엔드포인트 예시 + Prometheus 파싱 |
+| 2026-03-19 | — | AGENTS.md + CLAUDE.md 동기화 | `AGENTS.md`, `CLAUDE.md` | Codex 리뷰 7+3건 + PR 리뷰 반영. PR #50 |
+
+## Phase 2 병렬 작업 (DON-190 + DON-174 + DON-169 + DON-200)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-19 | DON-190 | ADR-011: LuaGate MCP 서버 설계 | `docs/design/adr/ADR-011-mcp-server.md` | stdio transport, TypeScript sidecar, 7 Tools. Codex design 리뷰 3회. PR #52 |
+| 2026-03-19 | DON-174 | CSP + 보안 헤더 추가 (Admin server block) | `conf/nginx.conf`, `.claude/knowledge/security-patterns.md`, `docs/spec/admin-api.md`, `docs/design/adr/ADR-004-log-metrics-admin-security.md` | 6개 헤더, 포트 8080→9090 수정. Codex code 리뷰 4회. PR #53 |
+| 2026-03-19 | DON-169 | CI codex-review.yml ui/e2e 패턴 추가 | `.github/workflows/codex-review.yml` | frontend→ui_ts/ui_api/ui_root/e2e/ui_ci 5개 카테고리. Codex code 리뷰 2회 + PR 리뷰 반영. PR #51 |
+| 2026-03-19 | DON-200 | frontend-unit.yml 워크플로우 (Vitest) | `.github/workflows/frontend-unit.yml`, `ui/package.json`, `ui/vite.config.ts`, `ui/src/App.test.tsx`, `Makefile`, `docs/spec/test-strategy.md`, `.claude/knowledge/frontend-conventions.md` | Vitest + @testing-library/react. Codex code 리뷰 4회. PR #54 |
