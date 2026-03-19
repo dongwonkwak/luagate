@@ -86,6 +86,9 @@ local function make_ngx(overrides)
       id = function()
         return 0
       end,
+      count = function()
+        return 1
+      end,
     },
     now = function()
       return 1700000100.5
@@ -253,7 +256,7 @@ describe("router.dispatch", function()
       assert.are.equal("ok", body.status)
     end)
 
-    it("GET /health -> 200 with ADR-008 version fields", function()
+    it("GET /health -> 200 with ADR-008 version fields + per-worker leak array", function()
       _G.ngx.var.uri = "/health"
       _G.ngx.shared.luagate_policy = make_shared_dict({
         ["http:active_version"] = "abc123",
@@ -276,14 +279,18 @@ describe("router.dispatch", function()
       assert.are.equal("abc123", body.active_http_version)
       assert.are.equal("abc123", body.active_stream_version)
       assert.is_string(body.policy_loaded_at)
-      assert.are.equal(0, body.ffi_watchdog_leak_count)
+      assert.is_table(body.ffi_watchdog_leak_count)
+      assert.are.equal(0, body.ffi_watchdog_timeouts)
     end)
 
-    it("GET /health -> 200 with ffi_watchdog_leak_count from metrics dict", function()
+    it("GET /health -> 200 with per-worker ffi_watchdog_leak_count array", function()
       _G.ngx.var.uri = "/health"
       _G.ngx.shared.luagate_metrics = make_shared_dict({
         ["ffi:timeout:leak:0"] = 3,
       })
+      _G.ngx.worker.count = function()
+        return 1
+      end
       _G.ngx.req.get_method = function()
         return "GET"
       end
@@ -294,7 +301,133 @@ describe("router.dispatch", function()
       local said = _G.ngx._get_said()
       local dkjson = require("dkjson")
       local body = dkjson.decode(said[1])
-      assert.are.equal(3, body.ffi_watchdog_leak_count)
+      assert.is_table(body.ffi_watchdog_leak_count)
+      assert.are.equal(3, body.ffi_watchdog_leak_count[1])
+      assert.are.equal(3, body.ffi_watchdog_timeouts)
+    end)
+
+    it("GET /health -> 200 with multi-worker leak counts below threshold", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_metrics = make_shared_dict({
+        ["ffi:timeout:leak:0"] = 2,
+        ["ffi:timeout:leak:1"] = 5,
+        ["ffi:timeout:leak:2"] = 0,
+        ["ffi:timeout:leak:3"] = 3,
+      })
+      _G.ngx.worker.count = function()
+        return 4
+      end
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("ok", body.status)
+      assert.is_table(body.ffi_watchdog_leak_count)
+      assert.are.equal(4, #body.ffi_watchdog_leak_count)
+      assert.are.equal(2, body.ffi_watchdog_leak_count[1])
+      assert.are.equal(5, body.ffi_watchdog_leak_count[2])
+      assert.are.equal(0, body.ffi_watchdog_leak_count[3])
+      assert.are.equal(3, body.ffi_watchdog_leak_count[4])
+      assert.are.equal(10, body.ffi_watchdog_timeouts)
+    end)
+
+    it("GET /health -> 503 when any worker exceeds FFI leak threshold", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_metrics = make_shared_dict({
+        ["ffi:timeout:leak:0"] = 2,
+        ["ffi:timeout:leak:1"] = 11, -- exceeds threshold of 10
+        ["ffi:timeout:leak:2"] = 0,
+      })
+      _G.ngx.worker.count = function()
+        return 3
+      end
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(503, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("unhealthy", body.status)
+      assert.are.equal("ffi_thread_leak_threshold_exceeded", body.reason)
+      assert.are.equal(13, body.ffi_watchdog_timeouts)
+      assert.are.equal(11, body.ffi_watchdog_leak_count[2])
+    end)
+
+    it("GET /health -> 503 FFI leak takes priority over policy-not-loaded", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_policy = make_shared_dict({}) -- no policy
+      _G.ngx.shared.luagate_metrics = make_shared_dict({
+        ["ffi:timeout:leak:0"] = 15,
+      })
+      _G.ngx.worker.count = function()
+        return 1
+      end
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(503, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("ffi_thread_leak_threshold_exceeded", body.reason)
+    end)
+
+    it("GET /health -> graceful degradation when metrics dict is nil", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_metrics = nil
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("ok", body.status)
+      assert.is_table(body.ffi_watchdog_leak_count)
+      assert.are.equal(0, #body.ffi_watchdog_leak_count)
+      assert.are.equal(0, body.ffi_watchdog_timeouts)
+    end)
+
+    it("GET /health -> graceful degradation when worker.count fails", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_metrics = make_shared_dict({
+        ["ffi:timeout:leak:0"] = 5,
+      })
+      _G.ngx.worker.count = function()
+        error("not available in init phase")
+      end
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("ok", body.status)
+      -- Falls back to current worker only
+      assert.is_table(body.ffi_watchdog_leak_count)
+      assert.are.equal(1, #body.ffi_watchdog_leak_count)
+      assert.are.equal(5, body.ffi_watchdog_leak_count[1])
+      assert.are.equal(5, body.ffi_watchdog_timeouts)
     end)
 
     it("GET /health -> 503 + {status:unhealthy} (정책 미로드 상태)", function()

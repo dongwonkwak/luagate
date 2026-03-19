@@ -25,6 +25,10 @@ local _M = {}
 -- Constants
 -- ---------------------------------------------------------------------------
 
+-- ADR-009 Phase 3: per-worker FFI leak threshold for health degradation.
+-- If any worker's leak count exceeds this value, /health returns 503.
+local FFI_LEAK_THRESHOLD = 10
+
 -- Latency histogram bucket boundaries (must match collector.lua)
 local LATENCY_BUCKETS = { 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000 }
 
@@ -134,10 +138,46 @@ local function format_iso8601(epoch)
   return os.date("!%Y-%m-%dT%H:%M:%SZ", math.floor(epoch))
 end
 
+--- Collect per-worker FFI leak counts from shared dict.
+-- Reads ffi:timeout:leak:<wid> for each worker (0..worker_count-1).
+-- @return table  per-worker leak count array (1-indexed, index = wid + 1)
+-- @return number total sum of all leak counts
+-- @return number max leak count across all workers
+local function collect_ffi_leak_counts()
+  local metrics_dict = ngx.shared.luagate_metrics
+  if not metrics_dict then
+    return {}, 0, 0
+  end
+
+  local ok, worker_count = pcall(ngx.worker.count)
+  if not ok or not worker_count or worker_count < 1 then
+    -- Graceful degradation: fall back to current worker only
+    local wid = ngx.worker.id()
+    local val = tonumber(metrics_dict:get("ffi:timeout:leak:" .. wid)) or 0
+    return { val }, val, val
+  end
+
+  local counts = {}
+  local total = 0
+  local max_leak = 0
+  for wid = 0, worker_count - 1 do
+    local val = tonumber(metrics_dict:get("ffi:timeout:leak:" .. wid)) or 0
+    counts[wid + 1] = val
+    total = total + val
+    if val > max_leak then
+      max_leak = val
+    end
+  end
+
+  return counts, total, max_leak
+end
+
 --- GET /health — health check (auth exempted, handled by auth.verify).
--- Returns 200 if policy loaded, 503 if not.
+-- Returns 200 if policy loaded and no FFI leak threshold exceeded.
+-- Returns 503 if FFI leak threshold exceeded or policy not loaded.
 -- ADR-008 §8.2: includes source_version, active_http_version,
 -- active_stream_version, policy_loaded_at for multi-instance monitoring.
+-- ADR-009 Phase 3: per-worker FFI leak array + 503 threshold.
 local function handle_health()
   local policy_dict = ngx.shared.luagate_policy
   local http_version = policy_dict and policy_dict:get("http:active_version")
@@ -145,21 +185,25 @@ local function handle_health()
   local source_version = policy_dict and policy_dict:get("source_version")
   local loaded_at_epoch = policy_dict and policy_dict:get("policy_loaded_at")
 
-  -- ADR-009: per-worker FFI watchdog leak counter for health degradation
-  local metrics_dict = ngx.shared.luagate_metrics
-  local ffi_leak_count = 0
-  if metrics_dict then
-    local wid = ngx.worker.id()
-    ffi_leak_count = tonumber(metrics_dict:get("ffi:timeout:leak:" .. wid)) or 0
-  end
+  -- ADR-009 Phase 3: per-worker FFI watchdog leak counts
+  local leak_counts, ffi_timeouts, max_leak = collect_ffi_leak_counts()
 
   local body = {
     source_version = source_version,
     active_http_version = http_version,
     active_stream_version = stream_version,
     policy_loaded_at = format_iso8601(loaded_at_epoch),
-    ffi_watchdog_leak_count = ffi_leak_count,
+    ffi_watchdog_leak_count = leak_counts,
+    ffi_watchdog_timeouts = ffi_timeouts,
   }
+
+  -- ADR-009: FFI leak threshold check takes priority over policy check
+  if max_leak > FFI_LEAK_THRESHOLD then
+    body.status = "unhealthy"
+    body.reason = "ffi_thread_leak_threshold_exceeded"
+    send_json(503, body)
+    return
+  end
 
   if http_version and http_version ~= "none" then
     body.status = "ok"
