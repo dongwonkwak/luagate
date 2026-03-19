@@ -21,14 +21,13 @@ test.describe("Authentication Flow", () => {
     // Should redirect to dashboard
     await expect(page).toHaveURL(/\/dashboard$/);
 
-    // Should show SystemStatusPage content (not just "LuaGate" text)
-    await expect(page.locator("text=System Status")).toBeVisible({ timeout: 5000 }).catch(() => {
-      // Fallback: at minimum verify we're on the dashboard, not login
-      return expect(page.locator("text=LuaGate")).toBeVisible();
-    });
-
-    // Verify sidebar navigation is visible (authenticated state)
-    await expect(page.locator('a[href="/dashboard/policies"]')).toBeVisible();
+    // Verify authenticated dashboard state: sidebar nav must be visible
+    await expect(
+      page.locator('a[href="/dashboard/policies"]'),
+    ).toBeVisible({ timeout: 5000 });
+    await expect(
+      page.locator('a[href="/dashboard/metrics"]'),
+    ).toBeVisible();
   });
 
   test("login fails with invalid token — shows error", async ({ page }) => {
