@@ -27,6 +27,7 @@ CLAUDE.md는 Claude Code의 **coordinator** 역할을 정의한다.
 | `implementer` | `.claude/agents/implementer.md` | Lua/FFI/설정 파일 구현 + 문서 업데이트 |
 | `security-reviewer` | `.claude/agents/security-reviewer.md` | 보안 관련 코드/ADR 검증 |
 | `tester` | `.claude/agents/tester.md` | 새 기능 구현 후 테스트 작성 |
+| `frontend-developer` | `.claude/agents/frontend-developer.md` | React 대시보드 UI 구현 (Admin API 연동) |
 
 > **doc-sync**: `.claude/agents/doc-sync.md` → `.claude/skills/doc-sync/SKILL.md` 로 전환됨.
 > ADR 추가/변경 후 doc-sync skill을 invoke한다.
@@ -50,6 +51,8 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | FFI 모듈 변경 | implementer + security-reviewer → tester |
 | 정책 엔진 변경 | implementer → tester → (설계 변경 시) architect |
 | 문서만 변경 | doc-sync skill (직접 편집) |
+| UI 컴포넌트/페이지 | frontend-developer → tester |
+| UI + API 변경 동시 | implementer + frontend-developer → tester |
 
 ## 이슈 개발 지시 처리
 
@@ -74,6 +77,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | 정책/zone 관련 | `architecture.md` (zone map + hot reload 7단계) |
 | 프로덕션 제한 확인 | `known-limitations-detail.md` |
 | 병렬 작업 (worktree) | `parallel-work.md` |
+| UI 컴포넌트 구현 | `frontend-conventions.md` + `ui-review-checklist.md` |
 
 ## skills 목록
 
@@ -89,6 +93,8 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | `doc-sync` | `.claude/skills/doc-sync/` | ADR 추가/변경 후 |
 | `pr-review-context` | `.claude/skills/pr-review-context/` | PR 생성 직후 Codex 심화 리뷰 컨텍스트 생성 시 |
 | `parallel-work` | `.claude/skills/parallel-work/` | 여러 이슈 병렬 작업 시 (git worktree) |
+| `new-react-component` | `.claude/skills/new-react-component/` | 새 React 컴포넌트 생성 시 |
+| `new-api-client` | `.claude/skills/new-api-client/` | 새 Admin API 클라이언트 함수 생성 시 |
 
 ## 이슈 완료 Exit Criteria 체크리스트
 
