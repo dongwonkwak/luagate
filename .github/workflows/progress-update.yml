@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update-progress:
@@ -23,6 +24,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract and append progress entry
+        id: extract
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -34,18 +36,35 @@ jobs:
 
           if [ -z "$ENTRY" ]; then
             echo "No filled PROGRESS entries found in PR body — skipping"
+            echo "has_entry=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Pull latest main to avoid non-fast-forward push
-          git pull --rebase origin main
+          echo "has_entry=true" >> "$GITHUB_OUTPUT"
 
           # Append to PROGRESS.md table
           echo "$ENTRY" >> PROGRESS.md
 
-          # Commit and push
+      - name: Create PR for PROGRESS.md update
+        if: steps.extract.outputs.has_entry == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          BRANCH="auto/progress-pr-${PR_NUMBER}"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add PROGRESS.md
-          git commit -m "docs(progress): auto-append entry from PR #${{ github.event.pull_request.number }}"
-          git push
+          git commit -m "docs(progress): auto-append entry from PR #${PR_NUMBER}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "docs(progress): auto-append entry from PR #${PR_NUMBER}" \
+            --body "PROGRESS.md 자동 갱신 (PR #${PR_NUMBER} 머지 시 트리거)" \
+            --base main \
+            --head "$BRANCH"
+
+          # Fail the workflow if the follow-up PR cannot be queued for auto-merge.
+          gh pr merge "$BRANCH" --auto --squash
