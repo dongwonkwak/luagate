@@ -66,7 +66,7 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 | `luagate_stream_metrics` | Stream 메트릭 (ADR-004) | 단순 카운터: `stream:metrics:*` | 각 worker (incr) | 키 단위 |
 | `luagate_metrics` | HTTP 메트릭 | 단순 카운터: `metrics:*` + Histogram: `latency:*` (ADR-006 §3.2 참조) | 각 worker (incr) | 키 단위 |
 | `luagate_connections` | 활성 연결 수 | 단순 카운터: `active_http`, `active_stream` | 해당 worker | 키 단위 |
-| `luagate_state` | Reload/health 플래그 | **State**: `state:reload_flag`, `state:health` — version 필드 없음 | reload worker | 키 단위 |
+| `luagate_state` | Reload/health 플래그 + token rotation | **State**: `state:reload_flag`, `state:health`; **Token**: `luagate_admin_token` (rotated active), `luagate_admin_token_old` (grace period, TTL=30s) | reload worker / token rotate | 키 단위 |
 | `luagate_admin_ratelimit` | Admin API IP별 sliding window rate limit 카운터 | 단순 카운터: `rl:<ip>:<slot>` | 각 worker (incr) | 키 단위 |
 
 > **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):

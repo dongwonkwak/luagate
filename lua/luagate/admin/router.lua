@@ -18,6 +18,7 @@ local cjson = require("cjson.safe")
 local auth = require("luagate.admin.auth")
 local ratelimit = require("luagate.admin.ratelimit")
 local policies = require("luagate.admin.policies")
+local token = require("luagate.admin.token")
 
 local _M = {}
 local EMPTY_JSON_ARRAY = cjson.empty_array or setmetatable({}, { __jsontype = "array" })
@@ -405,6 +406,9 @@ local ROUTES = {
   },
   ["/api/v1/policies/reload"] = {
     POST = policies.handle_post_reload,
+  },
+  ["/api/v1/admin/token/rotate"] = {
+    POST = token.handle_post_rotate,
   },
 }
 

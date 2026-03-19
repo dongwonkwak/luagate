@@ -576,3 +576,144 @@ describe("auth._constant_time_compare", function()
     assert.is_false(ctc(a, b))
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Token rotation + grace period tests
+-- ---------------------------------------------------------------------------
+describe("auth.verify — token rotation", function()
+  local ENV_TOKEN = string.rep("E", 32)
+  local ROTATED_TOKEN = string.rep("R", 32)
+  local OLD_TOKEN = string.rep("O", 32)
+  local previous_env_override
+
+  before_each(function()
+    previous_env_override = _env_override
+    _env_override = { LUAGATE_ADMIN_TOKEN = ENV_TOKEN }
+  end)
+
+  after_each(function()
+    _env_override = previous_env_override
+  end)
+
+  local function make_shared_dict(store)
+    return {
+      get = function(_, key)
+        return store[key]
+      end,
+      set = function(_, key, val)
+        store[key] = val
+        return true
+      end,
+    }
+  end
+
+  local function setup_rotated_ngx(opts)
+    local exited_with = nil
+    local dict_store = opts.dict_store or {}
+    local mock = make_ngx({})
+
+    mock.shared = {
+      luagate_state = make_shared_dict(dict_store),
+    }
+    mock.var.uri = "/api/v1/status"
+    mock.req.get_method = function()
+      return "GET"
+    end
+    mock.req.get_headers = function()
+      return { Authorization = opts.auth_header }
+    end
+    mock.exit = function(code)
+      exited_with = code
+    end
+
+    _G.ngx = mock
+
+    package.loaded["luagate.admin.auth"] = nil
+    local rot_auth = require("luagate.admin.auth")
+    rot_auth.init()
+
+    return rot_auth, function()
+      return exited_with
+    end
+  end
+
+  it("accepts rotated token after rotation", function()
+    local rot_auth, get_exit = setup_rotated_ngx({
+      auth_header = "Bearer " .. ROTATED_TOKEN,
+      dict_store = { luagate_admin_token = ROTATED_TOKEN },
+    })
+    local result = rot_auth.verify()
+    assert.is_true(result)
+    assert.is_nil(get_exit())
+  end)
+
+  it("rejects env token after rotation has occurred", function()
+    local rot_auth2, get_exit = setup_rotated_ngx({
+      auth_header = "Bearer " .. ENV_TOKEN,
+      dict_store = { luagate_admin_token = ROTATED_TOKEN },
+    })
+    rot_auth2.verify()
+    assert.are.equal(401, get_exit())
+  end)
+
+  it("accepts grace period old token during TTL window", function()
+    local rot_auth3, get_exit = setup_rotated_ngx({
+      auth_header = "Bearer " .. OLD_TOKEN,
+      dict_store = {
+        luagate_admin_token = ROTATED_TOKEN,
+        luagate_admin_token_old = OLD_TOKEN,
+      },
+    })
+    local result = rot_auth3.verify()
+    assert.is_true(result)
+    assert.is_nil(get_exit())
+  end)
+
+  it("rejects expired grace token (nil in dict = TTL expired)", function()
+    local rot_auth4, get_exit = setup_rotated_ngx({
+      auth_header = "Bearer " .. OLD_TOKEN,
+      dict_store = {
+        luagate_admin_token = ROTATED_TOKEN,
+        -- luagate_admin_token_old absent (expired)
+      },
+    })
+    rot_auth4.verify()
+    assert.are.equal(401, get_exit())
+  end)
+
+  it("accepts env token when no rotation has occurred (shared dict empty)", function()
+    local rot_auth5, get_exit = setup_rotated_ngx({
+      auth_header = "Bearer " .. ENV_TOKEN,
+      dict_store = {}, -- no rotation
+    })
+    local result = rot_auth5.verify()
+    assert.is_true(result)
+    assert.is_nil(get_exit())
+  end)
+
+  it("accepts env token when ngx.shared is nil (no shared dict available)", function()
+    local exited_with = nil
+    local mock = make_ngx({})
+    mock.shared = nil
+    mock.var.uri = "/api/v1/status"
+    mock.req.get_method = function()
+      return "GET"
+    end
+    mock.req.get_headers = function()
+      return { Authorization = "Bearer " .. ENV_TOKEN }
+    end
+    mock.exit = function(code)
+      exited_with = code
+    end
+
+    _G.ngx = mock
+
+    package.loaded["luagate.admin.auth"] = nil
+    local rot_auth6 = require("luagate.admin.auth")
+    rot_auth6.init()
+
+    local result = rot_auth6.verify()
+    assert.is_true(result)
+    assert.is_nil(exited_with)
+  end)
+end)
