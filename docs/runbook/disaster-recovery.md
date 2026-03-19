@@ -51,19 +51,23 @@ sudo systemctl restart openresty
 
 ### 3. policies.yaml 손상
 
-LKG(Last-Known-Good) 메커니즘이 자동으로 이전 버전으로 롤백한다.
-수동 복구가 필요한 경우:
+LKG(Last-Known-Good)는 active pointer를 유지하는 메커니즘이며, 자동 파일 롤백은 하지 않는다.
+canonical file(`conf/policies.yaml`)이 손상된 경우 수동 복구가 필요하다:
 
 ```bash
 # Git에서 마지막 정상 정책 복원
 git checkout HEAD -- conf/policies.yaml
 
 # 또는 Admin API로 정상 정책 재배포
+# 1) 현재 ETag 조회
+ETAG=$(curl -sI -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9090/api/v1/policies | grep -i etag | awk '{print $2}' | tr -d '\r"')
+
+# 2) 정상 정책 PUT (ETag에 인용부호 포함)
 curl -X PUT \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/x-yaml" \
-  -H "If-Match: \"$(curl -sI -H "Authorization: Bearer $TOKEN" \
-    http://localhost:9090/api/v1/policies | grep -i etag | awk '{print $2}' | tr -d '\r')\"" \
+  -H "If-Match: \"$ETAG\"" \
   --data-binary @known_good_policy.yaml \
   http://localhost:9090/api/v1/policies | jq .
 ```

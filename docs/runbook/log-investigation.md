@@ -72,7 +72,7 @@ cat /var/log/luagate/access.log | \
 
 # 기본 동작(default_action)으로 처리된 요청
 cat /var/log/luagate/access.log | \
-  jq 'select(.decision_source == "default_action")'
+  jq 'select(.decision_source == "nginx_core")'
 ```
 
 ## 근본 원인 분석
@@ -90,7 +90,7 @@ cat /var/log/luagate/access.log | jq "select(.request_id == \"$REQUEST_ID\")"
 ```bash
 # 가장 많이 차단된 경로 Top 10
 cat /var/log/luagate/access.log | \
-  jq 'select(.action == "deny") | .path' | sort | uniq -c | sort -rn | head -10
+  jq 'select(.action == "deny") | .path_raw' | sort | uniq -c | sort -rn | head -10
 ```
 
 ### 감사 로그 분석
@@ -98,7 +98,7 @@ cat /var/log/luagate/access.log | \
 ```bash
 # Admin API 정책 변경 이력
 cat /var/log/luagate/audit.log | \
-  jq 'select(.action == "policy_update" or .action == "policy_reload")'
+  jq 'select(.event == "policy_reload_success" or .event == "policy_reload_failure")'
 ```
 
 ## 재발 방지
@@ -116,5 +116,5 @@ cat /var/log/luagate/access.log | \
 
 # HTTP 상태 코드 분포
 cat /var/log/luagate/access.log | \
-  jq '.status' | sort | uniq -c | sort -rn
+  jq '.response_status' | sort | uniq -c | sort -rn
 ```

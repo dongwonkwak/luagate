@@ -83,8 +83,8 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 ```bash
 # 감사 로그에서 인증 실패 조회
-cat /var/log/luagate/audit.log | jq 'select(.action == "auth_failure")'
+cat /var/log/luagate/audit.log | jq 'select(.event == "auth_failure")'
 
 # 최근 Admin API 접근 이력
-cat /var/log/luagate/audit.log | jq 'select(.action != null)' | tail -20
+cat /var/log/luagate/audit.log | jq 'select(.event != null)' | tail -20
 ```

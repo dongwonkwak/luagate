@@ -69,7 +69,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ## 근본 원인 분석
 
 1. 롤백한 정책과 문제 정책을 `diff`로 비교
-2. `audit.log`에서 정책 변경 이력 확인 (action: `policy_update`)
+2. `audit.log`에서 정책 변경 이력 확인 (event: `policy_reload_success`/`policy_reload_failure`)
 3. 정책 검증 파이프라인(CI)에서 누락된 케이스 확인
 
 ## 재발 방지

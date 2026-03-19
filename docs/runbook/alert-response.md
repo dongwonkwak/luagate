@@ -25,7 +25,7 @@ cat /var/log/luagate/access.log | \
 
 # 3. 차단 원인 분류
 cat /var/log/luagate/access.log | \
-  jq 'select(.action == "deny") | {src_ip, path, deny_reason, threat_type}' | tail -20
+  jq 'select(.action == "deny") | {src_ip, path_raw, deny_reason, threat_type}' | tail -20
 ```
 
 ### 판단 기준
@@ -49,7 +49,7 @@ cat /var/log/luagate/access.log | \
 
 # 2. 최근 정책 변경 여부 확인
 cat /var/log/luagate/audit.log | \
-  jq 'select(.action == "policy_update" or .action == "policy_reload")' | tail -5
+  jq 'select(.event == "policy_reload_success" or .event == "policy_reload_failure")' | tail -5
 
 # 3. 정책 변경이 원인이면 롤백
 # → policy-rollback.md 참조
@@ -142,10 +142,10 @@ tail -50 /var/log/luagate/error.log | grep -i reload
 
 # 3. 감사 로그에서 최근 정책 변경 확인
 cat /var/log/luagate/audit.log | \
-  jq 'select(.action == "policy_update" or .action == "policy_reload")' | tail -5
+  jq 'select(.event == "policy_reload_success" or .event == "policy_reload_failure")' | tail -5
 
 # 4. 정책 파일 직접 검증
-cat /etc/luagate/policies.yaml | head -20
+cat conf/policies.yaml | head -20
 
 # 5. 수동 reload 시도
 curl -X POST -H "Authorization: Bearer $TOKEN" \
