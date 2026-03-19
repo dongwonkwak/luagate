@@ -126,6 +126,10 @@ docs(spec): update http-pipeline stream preread section [DON-90]
 - **FFI 함수명**: `luagate_<module>_<action>`
 - **shared dict zone명**: `luagate_` prefix 필수
 - **정책 캐시**: `ngx.ctx`에 저장 금지 — module-level upvalue 사용
+- **Git hooks**: `make install-hooks` 후 적용
+  - pre-commit: `stylua`, `luacheck`, `clang-format`, `shellcheck`, `markdownlint`, `prettier` (ui/, mcp/), `eslint` (ui/)
+  - commit-msg: `commitlint`
+  - pre-push: `test-unit`, `luacheck`, `vitest` (ui/), `tsc` (ui/, mcp/), `cargo test` (src/), `cargo clippy` (src/)
 
 ---
 

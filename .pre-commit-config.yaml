@@ -71,6 +71,24 @@ repos:
           )$
         pass_filenames: true
 
+  # ── Frontend: prettier ────────────────────────────────────────────────────
+      - id: prettier
+        name: prettier (TypeScript/React/CSS format check)
+        language: system
+        entry: scripts/prettier-wrapper.sh
+        types_or: [ts, tsx, css]
+        files: ^(ui|mcp)/src/
+        pass_filenames: true
+
+  # ── Frontend: eslint ──────────────────────────────────────────────────────
+      - id: eslint
+        name: eslint (TypeScript/React lint)
+        language: system
+        entry: scripts/eslint-wrapper.sh
+        types_or: [ts, tsx]
+        files: ^ui/src/
+        pass_filenames: true
+
 # ── commit-msg hook ────────────────────────────────────────────────────────
   - repo: local
     hooks:
@@ -95,5 +113,40 @@ repos:
         name: luacheck (full project lint)
         language: system
         entry: scripts/luacheck-full-wrapper.sh
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: vitest
+        name: vitest (UI unit tests)
+        language: system
+        entry: scripts/vitest-wrapper.sh
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: tsc-ui
+        name: tsc -b (UI type check)
+        language: system
+        entry: scripts/tsc-ui-wrapper.sh
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: tsc-mcp
+        name: tsc --noEmit (MCP type check)
+        language: system
+        entry: scripts/tsc-mcp-wrapper.sh
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: cargo-test
+        name: cargo test (Rust unit tests)
+        language: system
+        entry: scripts/cargo-test-wrapper.sh
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy (Rust lint)
+        language: system
+        entry: scripts/cargo-clippy-wrapper.sh
         stages: [pre-push]
         pass_filenames: false

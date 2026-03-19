@@ -178,6 +178,6 @@ PR에 `chatgpt-codex-connector` review thread 가 달린 뒤 후속 수정/답�
 
 ## pre-commit / post-commit hook 규칙
 
-- pre-commit: `stylua --check`, `luacheck`, `clang-format --check`, `shellcheck`, `markdownlint`
+- pre-commit: `stylua --check`, `luacheck`, `clang-format --check`, `shellcheck`, `markdownlint`, `prettier --check` (ui/, mcp/), `eslint` (ui/)
 - commit-msg: `commitlint` (Conventional Commits 형식 강제)
-- pre-push: `make test-unit` + `luacheck` 전체
+- pre-push: `make test-unit` + `luacheck` 전체 + `vitest` (ui/) + `tsc -b` (ui/) + `tsc --noEmit` (mcp/) + `cargo test` (src/) + `cargo clippy` (src/)
