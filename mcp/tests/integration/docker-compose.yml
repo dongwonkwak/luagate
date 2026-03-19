@@ -1,7 +1,8 @@
+# Run from repo root: docker compose -f mcp/tests/integration/docker-compose.yml up
 services:
   luagate:
     build:
-      context: ../../
+      context: ../../../
       dockerfile: Dockerfile
     ports:
       - "9090:9090"
@@ -14,9 +15,10 @@ services:
       retries: 10
 
   mcp-test-runner:
-    build:
-      context: ../../mcp
-      dockerfile: ../mcp/Dockerfile.test
+    image: node:20-slim
+    working_dir: /app
+    volumes:
+      - ../../../mcp:/app
     depends_on:
       luagate:
         condition: service_healthy
@@ -24,4 +26,4 @@ services:
       - LUAGATE_ADMIN_URL=http://luagate:9090
       - LUAGATE_ADMIN_TOKEN=integration-test-token
       - MCP_CLIENT_NAME=integration-test
-    command: npm run test:integration
+    command: ["sh", "-c", "npm ci && npm run test:integration"]
