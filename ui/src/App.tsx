@@ -1,17 +1,41 @@
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./hooks/useAuth";
+import { Layout } from "./components/Layout";
+import { LoginPage } from "./pages/LoginPage";
+import { SystemStatusPage } from "./pages/SystemStatusPage";
+import { PolicyEditorPage } from "./pages/PolicyEditorPage";
+import { MetricsDashboardPage } from "./pages/MetricsDashboardPage";
+import { AuditLogPage } from "./pages/AuditLogPage";
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) {
+    return <Navigate to="/dashboard/login" replace />;
+  }
+  return <>{children}</>;
+}
+
 function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-            LuaGate Dashboard
-          </h1>
-        </div>
-      </header>
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <p className="text-gray-600">Dashboard is ready.</p>
-      </main>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/dashboard/login" element={<LoginPage />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Layout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<SystemStatusPage />} />
+          <Route path="policies" element={<PolicyEditorPage />} />
+          <Route path="metrics" element={<MetricsDashboardPage />} />
+          <Route path="logs" element={<AuditLogPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

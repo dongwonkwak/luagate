@@ -379,3 +379,11 @@ COMPLETED_REVIEW: DON-200-code (2026-03-19)
 | 2026-03-19 | DON-174 | CSP + 보안 헤더 추가 (Admin server block) | `conf/nginx.conf`, `.claude/knowledge/security-patterns.md`, `docs/spec/admin-api.md`, `docs/design/adr/ADR-004-log-metrics-admin-security.md` | 6개 헤더, 포트 8080→9090 수정. Codex code 리뷰 4회. PR #53 |
 | 2026-03-19 | DON-169 | CI codex-review.yml ui/e2e 패턴 추가 | `.github/workflows/codex-review.yml` | frontend→ui_ts/ui_api/ui_root/e2e/ui_ci 5개 카테고리. Codex code 리뷰 2회 + PR 리뷰 반영. PR #51 |
 | 2026-03-19 | DON-200 | frontend-unit.yml 워크플로우 (Vitest) | `.github/workflows/frontend-unit.yml`, `ui/package.json`, `ui/vite.config.ts`, `ui/src/App.test.tsx`, `Makefile`, `docs/spec/test-strategy.md`, `.claude/knowledge/frontend-conventions.md` | Vitest + @testing-library/react. Codex code 리뷰 4회. PR #54 |
+
+## Phase 2 병렬 작업 (DON-158 + DON-172 + DON-191)
+
+| 날짜 | 이슈 | 제목 | 산출물 | 비고 |
+|------|------|------|--------|------|
+| 2026-03-19 | DON-158 | React 관리 대시보드 UI 구현 | `ui/src/pages/`, `ui/src/hooks/`, `ui/src/components/`, `ui/src/types/` | Login, SystemStatus, PolicyEditor(Monaco), Metrics(Recharts), AuditLog(Soon). Codex 리뷰 5회. PR #57 |
+| 2026-03-19 | DON-172 | Docker Compose UI 서비스 + .env.example | `docker-compose.yml`, `conf/nginx.conf`, `.env.example` | nginx 0.0.0.0 + 고정 subnet, LUAGATE_ADMIN_TOKEN 필수. Codex 리뷰 3회. PR #55 |
+| 2026-03-19 | DON-191 | MCP 서버 구현 — Admin API를 MCP tools로 노출 | `mcp/` (TypeScript sidecar, 7 tools, stdio transport) | ADR-011 기반. 후속: DON-208(dry-run), DON-209(audit 통합). Codex 리뷰 4회. PR #56 |
