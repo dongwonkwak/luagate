@@ -227,15 +227,16 @@ mock하지 않은 엔드포인트는 실제 서버로 요청이 전달되어 테
 `playwright.config.ts`에 `webServer` 설정이 없으므로, 테스트 전에 UI 개발 서버를 수동 기동해야 한다:
 
 ```bash
-# 1. UI 개발 서버 기동 (별도 터미널)
+# 1. UI 개발 서버 기동 (별도 터미널, 기본 포트 5173)
 cd ui && npm run dev
 
-# 2. 테스트 실행
-cd e2e && npx playwright test tests/<feature>.spec.ts
+# 2. 테스트 실행 (baseURL을 Vite dev server에 맞춤)
+cd e2e && PLAYWRIGHT_BASE_URL=http://localhost:5173/dashboard \
+  npx playwright test tests/<feature>.spec.ts
 ```
 
-> `PLAYWRIGHT_BASE_URL`이 기본 `http://localhost:9090/dashboard`이므로,
-> 개발 서버 포트가 다르면 환경변수로 오버라이드한다.
+> `playwright.config.ts`의 기본 `baseURL`은 `http://localhost:9090/dashboard` (프로덕션/Docker 기준).
+> Vite dev server는 포트 5173이므로 로컬 개발 시 반드시 `PLAYWRIGHT_BASE_URL`을 오버라이드한다.
 
 ## 참조
 
