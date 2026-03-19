@@ -6,7 +6,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 
 | 계층 | 프레임워크 | 범위 | 속도 |
 |------|-----------|------|------|
-| 단위 테스트 | busted (Lua) + cargo test (Rust) | 함수/모듈 | 빠름 |
+| 단위 테스트 | busted (Lua) + cargo test (Rust) + Vitest (React) | 함수/모듈/컴포넌트 | 빠름 |
 | 통합 테스트 | Test::Nginx (HTTP/Stream) | HTTP/TCP 엔드투엔드 | 중간 |
 | E2E 테스트 | Playwright (TypeScript) | 대시보드 UI 유저 플로우 | 중간 |
 | 부하 테스트 | wrk / vegeta | 성능/처리량 | 느림 (선택) |
@@ -19,6 +19,7 @@ LuaGate의 테스트 전략은 세 계층으로 구성된다:
 | `make test-unit` | Lua + Rust 단위 테스트 | Yes |
 | `make test-unit-lua` | busted 단위 테스트만 | Yes |
 | `make test-unit-rust` | Rust cargo test 단위 테스트만 | Yes |
+| `make ui-test` | Vitest 프론트엔드 단위 테스트 | Yes |
 | `make test-integration-http` | HTTP 통합 (로컬 Test::Nginx 또는 Docker Compose fallback) | Yes |
 | `make test-integration-stream` | Stream 통합 (Test::Nginx::Stream) | Yes |
 | `make test-reload` | Hot reload 전용 테스트 | Yes |
@@ -447,11 +448,11 @@ stages:
 | 워크플로우 | 내용 | PR blocking |
 |-----------|------|------------|
 | `frontend-quality.yml` | ESLint + Prettier + tsc + Vite build | Yes |
-| `frontend-unit.yml` | Vitest 단위 테스트 | Yes (예정) |
+| `frontend-unit.yml` | Vitest 단위 테스트 | Yes |
 | `frontend-e2e.yml` | Playwright E2E 테스트 | Yes (예정) |
 
 - Path filter: `ui/**` 또는 `.github/workflows/frontend-*.yml` 변경 시에만 실행
-- `frontend-quality-status` job이 항상 떠서 PR blocking 가능
+- `frontend-quality-status`, `frontend-unit-status` job이 항상 떠서 PR blocking 가능
 
 <!-- ADR 필요 -->
 > **TODO**: 카오스 엔지니어링(worker 강제 종료, shared dict 초과) 테스트 전략 수립 시 ADR 필요
