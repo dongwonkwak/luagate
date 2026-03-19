@@ -35,7 +35,7 @@
 | 방법 | 필요 도구 |
 |------|----------|
 | **권장 (Nix)** | [Nix](https://nixos.org/download) + [direnv](https://direnv.net/) |
-| Docker (데모) | Docker 24+ + Docker Compose v2 |
+| Docker (데모) | Docker 24+, Docker Compose v2 |
 | 수동 | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, Node.js 20+ |
 
 ### 1) 데모 실행 (Docker)
