@@ -46,7 +46,12 @@ function parsePrometheusText(text: string): ParsedMetric[] {
         if (existing) {
           existing.values.push({ labels, value: parseFloat(match[3] ?? "0") });
         } else {
-          const newMetric: ParsedMetric = { name: metricName, help: "", type: "", values: [{ labels, value: parseFloat(match[3] ?? "0") }] };
+          const newMetric: ParsedMetric = {
+            name: metricName,
+            help: "",
+            type: "",
+            values: [{ labels, value: parseFloat(match[3] ?? "0") }],
+          };
           metrics.push(newMetric);
           metricMap.set(metricName, newMetric);
         }

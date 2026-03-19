@@ -28,10 +28,9 @@ export function useReloadPolicies() {
 
   return useMutation({
     mutationFn: async () => {
-      const { data } = await apiClient<ReloadResponse>(
-        "/v1/policies/reload",
-        { method: "POST" },
-      );
+      const { data } = await apiClient<ReloadResponse>("/v1/policies/reload", {
+        method: "POST",
+      });
       return data;
     },
     onSuccess: () => {

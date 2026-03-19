@@ -24,7 +24,12 @@ export function AuditLogPage() {
         // Audit endpoint may not be implemented yet (404)
         if (e instanceof Error && e.message.includes("404")) {
           setEndpointMissing(true);
-          return { entries: [], total: 0, offset: 0, limit: PAGE_SIZE } as AuditResponse;
+          return {
+            entries: [],
+            total: 0,
+            offset: 0,
+            limit: PAGE_SIZE,
+          } as AuditResponse;
         }
         throw e;
       }
@@ -48,9 +53,7 @@ export function AuditLogPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-900">Audit Logs</h2>
-        <p className="text-sm text-gray-500">
-          {total} total entries
-        </p>
+        <p className="text-sm text-gray-500">{total} total entries</p>
       </div>
 
       {endpointMissing && entries.length === 0 ? (
@@ -84,7 +87,10 @@ export function AuditLogPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {entries.map((entry, i) => (
-                <tr key={`${entry.timestamp}-${i}`} className="hover:bg-gray-50">
+                <tr
+                  key={`${entry.timestamp}-${i}`}
+                  className="hover:bg-gray-50"
+                >
                   <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-600">
                     {new Date(entry.timestamp).toLocaleString()}
                   </td>

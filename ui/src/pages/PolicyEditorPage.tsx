@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import Editor from "@monaco-editor/react";
-import { usePolicies, useUpdatePolicies, useReloadPolicies } from "../hooks/usePolicies";
+import {
+  usePolicies,
+  useUpdatePolicies,
+  useReloadPolicies,
+} from "../hooks/usePolicies";
 import { ErrorAlert } from "../components/ErrorAlert";
 
 export function PolicyEditorPage() {
@@ -32,7 +36,10 @@ export function PolicyEditorPage() {
 
   const handleSave = async () => {
     if (!currentEtag) {
-      setMessage({ type: "error", text: "No ETag available. Refresh policies first." });
+      setMessage({
+        type: "error",
+        text: "No ETag available. Refresh policies first.",
+      });
       return;
     }
 

@@ -3,8 +3,8 @@ import { useState, useCallback } from "react";
 const TOKEN_KEY = "luagate_admin_token";
 
 export function useAuth() {
-  const [token, setTokenState] = useState<string | null>(
-    () => localStorage.getItem(TOKEN_KEY),
+  const [token, setTokenState] = useState<string | null>(() =>
+    localStorage.getItem(TOKEN_KEY),
   );
 
   const login = useCallback((newToken: string) => {

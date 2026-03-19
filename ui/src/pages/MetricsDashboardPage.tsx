@@ -37,7 +37,9 @@ export function MetricsDashboardPage() {
 
   if (isLoading) return <p className="text-gray-500">Loading metrics...</p>;
   if (error) {
-    return <ErrorAlert title="Failed to load metrics" message={error.message} />;
+    return (
+      <ErrorAlert title="Failed to load metrics" message={error.message} />
+    );
   }
   if (!metrics || metrics.length === 0) {
     return <p className="text-gray-500">No metrics available.</p>;

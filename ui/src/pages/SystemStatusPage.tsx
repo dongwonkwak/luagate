@@ -24,10 +24,7 @@ export function SystemStatusPage() {
 
   if (health.error) {
     return (
-      <ErrorAlert
-        title="Health Check Failed"
-        message={health.error.message}
-      />
+      <ErrorAlert title="Health Check Failed" message={health.error.message} />
     );
   }
 
