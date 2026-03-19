@@ -311,7 +311,15 @@ function _M.preread()
       else
         -- Failure/timeout: keep old tree (LKG), do NOT update version
         -- so next request retries rebuild (ADR-009 §radix_build hot reload)
-        ngx.log(ngx.WARN, "[luagate-stream] radix_build failed: ", tostring(build_err), ", keeping LKG radix tree")
+        -- Use ERR level when no LKG tree exists (cold start) for visibility;
+        -- WARN when LKG tree is available (degraded but functional).
+        local log_level = _radix_tree and ngx.WARN or ngx.ERR
+        ngx.log(
+          log_level,
+          "[luagate-stream] radix_build failed: ",
+          tostring(build_err),
+          _radix_tree and ", keeping LKG radix tree" or ", no LKG tree available (cold start)"
+        )
         -- Increment per-worker leak counter on timeout (ADR-009 Layer 2)
         if build_err and tostring(build_err):find("%-5") then
           local metrics_dict = ngx.shared.luagate_metrics
