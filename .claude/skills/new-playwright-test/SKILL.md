@@ -35,12 +35,10 @@ e2e/
 import { test, expect } from "@playwright/test";
 import { setupAdminMock, VALID_TOKEN } from "../fixtures/admin-server";
 
-test.describe("Feature Name", () => {
+// 인증이 필요한 페이지 테스트 — beforeEach에서 로그인
+test.describe("Feature Name (authenticated)", () => {
   test.beforeEach(async ({ page }) => {
-    // 1. API mock 설정 (매 테스트마다 상태 초기화)
     await setupAdminMock(page);
-
-    // 2. 로그인
     await page.goto("/dashboard/login");
     await page.fill('input[id="token"]', VALID_TOKEN);
     await page.click('button[type="submit"]');
@@ -49,6 +47,18 @@ test.describe("Feature Name", () => {
 
   test("should do something", async ({ page }) => {
     // 테스트 본문
+  });
+});
+
+// 비인증/인증 실패 시나리오 — 로그인 없이 mock만 설정
+test.describe("Feature Name (unauthenticated)", () => {
+  test.beforeEach(async ({ page }) => {
+    await setupAdminMock(page);
+  });
+
+  test("redirects to login when not authenticated", async ({ page }) => {
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL(/\/dashboard\/login/);
   });
 });
 ```
@@ -171,7 +181,7 @@ test("shows error when health check fails", async ({ page }) => {
   await page.goto("/dashboard/login");
   await page.fill('input[id="token"]', VALID_TOKEN);
   await page.click('button[type="submit"]');
-  await expect(page.locator("text=unhealthy")).toBeVisible();
+  await expect(page.locator("text=Health Check Failed")).toBeVisible();
 });
 ```
 
@@ -196,7 +206,7 @@ test("shows error when health check fails", async ({ page }) => {
 ## 체크리스트
 
 - [ ] `e2e/tests/<feature>.spec.ts` 생성
-- [ ] `beforeEach`에서 `setupAdminMock(page)` + 로그인
+- [ ] `beforeEach`에서 `setupAdminMock(page)` (인증 필요 시 로그인도 추가)
 - [ ] `page.waitForTimeout()` 미사용
 - [ ] URL 하드코딩 없음 (baseURL 활용)
 - [ ] 각 테스트 독립 실행 가능
