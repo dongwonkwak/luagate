@@ -8,6 +8,9 @@ services:
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:9190:9090"
+    volumes:
+      - ../../../policies/luagate.yaml:/conf/policies.yaml:ro
+      - ../../../conf/scanner-patterns:/conf/scanner-patterns:ro
     environment:
       - LUAGATE_ADMIN_TOKEN=integration-test-token-minimum-32bytes!
     healthcheck:
