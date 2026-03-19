@@ -94,7 +94,7 @@ ui/
 
 ## 7. 테스트 컨벤션
 
-- **단위 테스트**: 추후 결정 (Vitest 후보, 현재 미설치)
+- **단위 테스트**: Vitest + @testing-library/react (`ui/package.json` devDependencies)
 - **E2E 테스트**: Playwright (`e2e/` — scaffold만 존재)
-- **테스트 파일 위치**: 컴포넌트와 같은 디렉토리의 `__tests__/` 하위
+- **테스트 파일 위치**: 소스 파일과 같은 디렉토리에 `*.test.tsx` 배치 (예: `src/App.test.tsx`)
 - **Mock**: API 호출은 직접 mock 또는 MSW (미설치 후보) 사용

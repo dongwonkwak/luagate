@@ -451,7 +451,7 @@ stages:
 | `frontend-e2e.yml` | Playwright E2E 테스트 | Yes (예정) |
 
 - Path filter: `ui/**` 또는 `.github/workflows/frontend-*.yml` 변경 시에만 실행
-- `frontend-quality-status` job이 항상 떠서 PR blocking 가능
+- `frontend-quality-status`, `frontend-unit-status` job이 항상 떠서 PR blocking 가능
 
 <!-- ADR 필요 -->
 > **TODO**: 카오스 엔지니어링(worker 강제 종료, shared dict 초과) 테스트 전략 수립 시 ADR 필요
