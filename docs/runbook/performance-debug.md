@@ -107,7 +107,7 @@ sudo perf script | ./FlameGraph/stackcollapse-perf.pl | \
 ## 관련 메트릭/로그 쿼리
 
 ```bash
-# 느린 요청 Top 10 (response time 기준)
+# 느린 요청 Top 10 (latency_ms 기준)
 cat /var/log/luagate/access.log | \
-  jq '{path, status, action, timestamp}' | tail -100
+  jq -s 'sort_by(-.latency_ms) | .[0:10] | .[] | {path_raw, response_status, action, latency_ms, timestamp}'
 ```

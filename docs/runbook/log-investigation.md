@@ -70,9 +70,9 @@ cat /var/log/luagate/access.log | \
 cat /var/log/luagate/access.log | \
   jq 'select(.matched_rule_id == "allow-health")'
 
-# 기본 동작(default_action)으로 처리된 요청
+# 정책 엔진에 의해 판정된 요청 (default_action 포함)
 cat /var/log/luagate/access.log | \
-  jq 'select(.decision_source == "nginx_core")'
+  jq 'select(.decision_source == "policy_engine")'
 ```
 
 ## 근본 원인 분석
@@ -98,7 +98,7 @@ cat /var/log/luagate/access.log | \
 ```bash
 # Admin API 정책 변경 이력
 cat /var/log/luagate/audit.log | \
-  jq 'select(.event == "policy_reload_success" or .event == "policy_reload_failure")'
+  jq 'select(.event | test("^policy_"))'
 ```
 
 ## 재발 방지

@@ -60,8 +60,8 @@ git checkout HEAD -- conf/policies.yaml
 
 # 또는 Admin API로 정상 정책 재배포
 # 1) 현재 ETag 조회
-ETAG=$(curl -sI -H "Authorization: Bearer $TOKEN" \
-  http://localhost:9090/api/v1/policies | grep -i etag | awk '{print $2}' | tr -d '\r"')
+ETAG=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9090/api/v1/policies/version | jq -r '.etag')
 
 # 2) 정상 정책 PUT (ETag에 인용부호 포함)
 curl -X PUT \
@@ -81,11 +81,9 @@ df -h
 # 로그 파일 크기 확인
 du -sh /var/log/luagate/*
 
-# 오래된 로그 정리 (logrotate 강제 실행)
+# 오래된 로그 정리 (logrotate 강제 실행만 허용 — ADR-007 §4)
+# 주의: 수동 삭제 금지. 특히 audit.log는 logrotate를 통해서만 파기
 sudo logrotate -f /etc/logrotate.d/luagate
-
-# 또는 직접 정리 (보존 기간 확인 후)
-# access.log: 90일, audit.log: 1년 보존 (ADR-007 §4)
 ```
 
 ### 5. FFI .so 파일 문제

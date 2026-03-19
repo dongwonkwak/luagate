@@ -52,18 +52,21 @@ kubectl create secret generic luagate-admin-token \
 
 ### 4. 교체 확인
 
-```bash
-# 이전 토큰으로 접근 시 401 확인
-curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $TOKEN" \
-  http://localhost:9090/api/v1/status
-# 기대값: 401
+> **참고**: 이전 토큰은 30초 grace period 동안 계속 유효하다.
 
-# 새 토큰으로 접근 확인
+```bash
+# 새 토큰으로 즉시 접근 확인
 curl -s -o /dev/null -w "%{http_code}" \
   -H "Authorization: Bearer $NEW_TOKEN" \
   http://localhost:9090/api/v1/status
 # 기대값: 200
+
+# 30초 후 이전 토큰 만료 확인
+sleep 35
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9090/api/v1/status
+# 기대값: 401
 ```
 
 ## 근본 원인 분석
