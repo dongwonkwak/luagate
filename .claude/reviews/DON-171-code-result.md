@@ -13,3 +13,9 @@
 - [x] The new base-URL matrix has no automated coverage. There is no UI test file under `ui/`, `e2e/tests/` is still empty (`e2e/tests/.gitkeep` only), and this PR adds no check for the `VITE_ADMIN_API_URL` branches. That leaves the `make ui-dev` proxy path and the production `/api` path unverified, which is why the empty-string regression above slips through.
       → 해결자: Claude Code
       → 해결 방식: DON-200 (Vitest CI) 범위. `||` 변경으로 빈 문자열 regression 해소. E2E는 DON-166 범위
+
+---
+
+## 재리뷰 (2026-03-19)
+
+미해결 항목 없음
