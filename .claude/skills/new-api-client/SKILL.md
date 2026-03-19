@@ -30,7 +30,7 @@ import { apiClient, ApiResponse, ApiError } from "./client";
 - Bearer token: 현재 `localStorage.getItem("luagate_admin_token")` 사용 중 (인증 저장 방식 ADR 미확정 — `ui-review-checklist.md` 참조)
 - `apiClient` 래퍼가 자동으로 `Authorization` 헤더 추가
 - 401 응답 시: 자동 로그아웃 + 로그인 리다이렉트 처리 필요
-- 계약: [admin-auth-contract.md](../../.claude/knowledge/admin-auth-contract.md) 참조
+- 계약: `.claude/knowledge/admin-auth-contract.md` 참조
 
 ### 에러 타입
 
@@ -66,12 +66,11 @@ export interface HealthResponse {
   reason?: string;
 }
 
-/** /health는 /api prefix 밖이므로 직접 fetch */
+/** /health는 /api prefix 밖이므로 직접 fetch.
+ *  Dev: Vite proxy에 /health → localhost:9090/health 매핑 필요 (vite.config.ts).
+ *  Prod: same-origin이므로 상대 경로 "/health" 그대로 사용. */
 export async function getHealth(): Promise<HealthResponse> {
-  const baseOrigin = import.meta.env.VITE_ADMIN_API_URL
-    ? new URL(import.meta.env.VITE_ADMIN_API_URL).origin
-    : "";
-  const response = await fetch(`${baseOrigin}/health`);
+  const response = await fetch("/health");
   if (!response.ok) throw new ApiError(response.status, response.statusText, "");
   return response.json();
 }
@@ -80,16 +79,15 @@ export async function getHealth(): Promise<HealthResponse> {
 ### GET /metrics (Prometheus 텍스트)
 
 ```typescript
-/** /metrics는 /api prefix 밖이므로 직접 fetch */
+/** /metrics는 /api prefix 밖이므로 직접 fetch.
+ *  Dev: Vite proxy에 /metrics → localhost:9090/metrics 매핑 필요.
+ *  Prod: same-origin 상대 경로 사용. */
 export async function getMetrics(): Promise<string> {
-  const baseOrigin = import.meta.env.VITE_ADMIN_API_URL
-    ? new URL(import.meta.env.VITE_ADMIN_API_URL).origin
-    : "";
   const token = localStorage.getItem("luagate_admin_token");
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const response = await fetch(`${baseOrigin}/metrics`, { headers });
+  const response = await fetch("/metrics", { headers });
   if (!response.ok) throw new ApiError(response.status, response.statusText, "");
   return response.text();
 }
