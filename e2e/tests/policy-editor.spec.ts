@@ -88,6 +88,44 @@ test.describe("Policy Editor", () => {
     await expect(page.locator('[role="alert"], .bg-red-50')).toBeVisible();
   });
 
+  test("consecutive saves use updated ETag", async ({ page }) => {
+    await page.click('a[href="/dashboard/policies"]');
+    await expect(page.locator("text=Policy Editor")).toBeVisible();
+
+    const editor = page.locator(".monaco-editor textarea");
+    await editor.waitFor({ state: "attached", timeout: 10000 });
+    const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
+
+    // First save
+    await editor.focus();
+    await page.keyboard.press(selectAll);
+    await page.keyboard.type(
+      'version: "1.0"\nglobal:\n  default_action: allow\n',
+      { delay: 10 },
+    );
+    const saveButton = page.locator("button", { hasText: "Save" });
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+    await expect(
+      page.locator("text=Policy saved successfully"),
+    ).toBeVisible();
+
+    // Second save — must use updated ETag from first save response
+    await editor.focus();
+    await page.keyboard.press(selectAll);
+    await page.keyboard.type(
+      'version: "1.0"\nglobal:\n  default_action: deny\n',
+      { delay: 10 },
+    );
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+
+    // Should succeed (not 409) — proves ETag was correctly updated
+    await expect(
+      page.locator("text=Policy saved successfully"),
+    ).toBeVisible();
+  });
+
   test("reload button triggers hot reload", async ({ page }) => {
     await page.click('a[href="/dashboard/policies"]');
     await expect(page.locator("text=Policy Editor")).toBeVisible();
