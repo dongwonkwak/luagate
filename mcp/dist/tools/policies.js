@@ -130,7 +130,7 @@ export function registerPolicyTools(server, client) {
             .describe("현재 source_version (낙관적 동시성 제어)"),
     }, async ({ policy_yaml, expected_source_version }) => {
         try {
-            const result = await client.updatePolicies(policy_yaml, expected_source_version);
+            const result = await client.updatePolicies(policy_yaml, expected_source_version, "luagate_rollback_policies");
             return {
                 content: [
                     {

@@ -19,7 +19,7 @@ export declare class AdminClient {
     /** GET /api/v1/policies/version */
     getPolicyVersions(): Promise<PolicyVersionResponse>;
     /** PUT /api/v1/policies — update with If-Match */
-    updatePolicies(yaml: string, expectedSourceVersion: string): Promise<PolicyUpdateResponse>;
+    updatePolicies(yaml: string, expectedSourceVersion: string, toolName?: string): Promise<PolicyUpdateResponse>;
     /**
      * Validate policy YAML locally (parse check).
      * Note: Admin API does not yet support dry_run parameter.

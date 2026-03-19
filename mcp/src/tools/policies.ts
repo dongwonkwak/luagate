@@ -166,6 +166,7 @@ export function registerPolicyTools(server: McpServer, client: AdminClient): voi
         const result = await client.updatePolicies(
           policy_yaml,
           expected_source_version,
+          "luagate_rollback_policies",
         );
         return {
           content: [

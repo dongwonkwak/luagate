@@ -70,8 +70,8 @@ export class AdminClient {
         return data;
     }
     /** PUT /api/v1/policies — update with If-Match */
-    async updatePolicies(yaml, expectedSourceVersion) {
-        const { data } = await this.request("PUT", "/api/v1/policies", "luagate_update_policies", {
+    async updatePolicies(yaml, expectedSourceVersion, toolName = "luagate_update_policies") {
+        const { data } = await this.request("PUT", "/api/v1/policies", toolName, {
             body: yaml,
             contentType: "application/x-yaml",
             extraHeaders: { "If-Match": `"${expectedSourceVersion}"` },

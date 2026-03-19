@@ -116,11 +116,12 @@ export class AdminClient {
   async updatePolicies(
     yaml: string,
     expectedSourceVersion: string,
+    toolName = "luagate_update_policies",
   ): Promise<PolicyUpdateResponse> {
     const { data } = await this.request<PolicyUpdateResponse>(
       "PUT",
       "/api/v1/policies",
-      "luagate_update_policies",
+      toolName,
       {
         body: yaml,
         contentType: "application/x-yaml",
