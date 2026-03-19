@@ -1,15 +1,16 @@
-version: "1.0"
+version: "1"
 global:
   default_action: deny
-rules:
-  - id: allow-health
-    priority: 100
-    match:
-      path: /health
-    action: allow
-  - id: block-sqli
-    priority: 200
-    match:
-      path: /api/*
-    action: deny
-    threat_type: sqli
+  log_level: info
+http:
+  rules:
+    - id: allow-health
+      description: "Allow health check endpoint"
+      match:
+        path_prefix: /health
+      action: allow
+    - id: block-admin-external
+      description: "Block /admin from external"
+      match:
+        path_prefix: /admin
+      action: deny
