@@ -59,7 +59,7 @@ worktree에는 `.gitignore`된 `node_modules/`가 복사되지 않는다.
 
 ```bash
 # 루트 node_modules — 심링크 (commitlint 등 pre-commit hook용)
-ln -s /home/dongwon/project/luagate/node_modules ../luagate-don-xxx/node_modules
+ln -s "$(git rev-parse --show-toplevel)/node_modules" ../luagate-don-xxx/node_modules
 
 # ui/, mcp/ 등 하위 패키지 — 독립 설치 (의존성이 다를 수 있음)
 # 해당 worktree에서 수정하는 패키지만 설치
