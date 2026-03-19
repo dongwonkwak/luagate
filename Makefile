@@ -84,6 +84,12 @@ lint:
 	    (cd "$$crate_dir" && cargo clippy -- -D warnings) || exit 1; \
 	  fi; \
 	done
+	@echo "==> Prometheus rules lint..."
+	@if command -v promtool >/dev/null 2>&1; then \
+	  promtool check rules conf/alerts.yml; \
+	else \
+	  echo "  (promtool not found — skipping alerting rules validation)"; \
+	fi
 	@echo "==> Markdown lint..."
 	markdownlint docs/
 

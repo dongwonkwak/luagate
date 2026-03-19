@@ -39,6 +39,42 @@ services:
       - luagate-net
     restart: unless-stopped
 
+  # ── Observability (dev only) ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: luagate-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./conf/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./conf/alerts.yml:/etc/prometheus/alerts.yml:ro
+    environment:
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:?Set LUAGATE_ADMIN_TOKEN}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /run/secrets
+        chmod 0700 /run/secrets
+        printf '%s\n' "$$LUAGATE_ADMIN_TOKEN" > /run/secrets/admin_token
+        exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml
+    networks:
+      luagate-net:
+        ipv4_address: 172.29.0.10
+    depends_on:
+      - luagate
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: luagate-alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - luagate-net
+    restart: unless-stopped
+
 networks:
   luagate-net:
     driver: bridge

@@ -1,0 +1,23 @@
+# Prometheus dev configuration for LuaGate
+# Used with docker-compose prometheus service
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: luagate
+    metrics_path: /metrics
+    bearer_token_file: /run/secrets/admin_token
+    static_configs:
+      - targets:
+          - luagate:9090
