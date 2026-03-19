@@ -1,5 +1,7 @@
 # ADR-001: 실행/상태 공유 모델
 
+> [← ADR 인덱스로 돌아가기](./README.md)
+
 | 항목 | 내용 |
 |------|------|
 | **Status** | Accepted |
@@ -23,9 +25,9 @@ OpenResty는 master 프로세스가 N개의 worker 프로세스를 관리하며,
 이 구조에서 다음 문제를 해결해야 한다:
 
 1. **상태 공유**: worker 간 정책 버전, 메트릭 카운터, 활성 연결 수를 공유해야 한다.
-2. **C FFI 통합**: Rust/C로 작성된 고성능 모듈(스캐너, 파서)을 Lua에서 호출해야 한다.
+2. **Rust FFI 통합**: Rust로 작성된 고성능 모듈(스캐너, 파서)을 Lua에서 호출해야 한다.
 3. **배포 단위**: 수평 확장 전략을 명확히 정의해야 한다.
-4. **실패 정책**: worker 또는 C FFI 호출 실패 시 시스템 동작을 정의해야 한다.
+4. **실패 정책**: worker 또는 Rust FFI 호출 실패 시 시스템 동작을 정의해야 한다.
 
 ---
 
@@ -106,7 +108,9 @@ OpenResty는 master 프로세스가 N개의 worker 프로세스를 관리하며,
 | `active_http` | number | 현재 활성 HTTP 연결 수 |
 | `active_stream` | number | 현재 활성 TCP 스트림 연결 수 |
 
-3. **C FFI 호출 모델** — Rust/C 공유 라이브러리(`.so`)는 `ffi.load()`로 로드하며,
+<!-- markdownlint-disable MD029 -->
+
+3. **Rust FFI 호출 모델** — Rust cdylib 공유 라이브러리(`.so`)는 `ffi.load()`로 로드하며,
    worker 프로세스 내부에서 동기 함수 호출로 실행된다.
    IPC(소켓, 파이프 등)를 사용하지 않는다.
    모든 FFI 호출은 동일 worker의 이벤트 루프 내에서 블로킹 없이 완료되어야 한다.
@@ -115,7 +119,7 @@ OpenResty는 master 프로세스가 N개의 worker 프로세스를 관리하며,
 
 #### FFI 실패 분류
 
-C FFI 실패는 두 가지 유형으로 엄격히 구분한다:
+Rust FFI 실패는 두 가지 유형으로 엄격히 구분한다:
 
 | 실패 유형 | 정의 | 탐지 방법 |
 |-----------|------|-----------|
@@ -124,7 +128,7 @@ C FFI 실패는 두 가지 유형으로 엄격히 구분한다:
 
 | 실패 시나리오 | 유형 | 대응 |
 |--------------|------|------|
-| C FFI 함수 오류 코드/NULL 반환 | Lua 예외 | `pcall`로 포착 → fail-closed (deny) 후 오류 로그 기록 |
+| Rust FFI 함수 오류 코드/NULL 반환 | Lua 예외 | `pcall`로 포착 → fail-closed (deny) 후 오류 로그 기록 |
 | Rust panic (panic = "abort") | Native crash | worker 프로세스 abort → Nginx master가 자동 재시작 |
 | segfault / SIGABRT | Native crash | worker 프로세스 종료 → Nginx master가 자동 재시작 |
 | shared dict 쓰기 실패 (용량 초과) | Lua 예외 | 메트릭 손실 허용, 오류 로그 기록, 요청은 계속 처리 |
@@ -146,7 +150,7 @@ C FFI 실패는 두 가지 유형으로 엄격히 구분한다:
 ### 긍정적 결과
 
 - **단순성**: IPC 없이 mmap 공유로 worker 간 상태 동기화, 구현 복잡도 낮음
-- **성능**: C FFI 호출이 동일 프로세스 내 함수 호출이므로 오버헤드 최소
+- **성능**: Rust FFI 호출이 동일 프로세스 내 함수 호출이므로 오버헤드 최소
 - **신뢰성**: Nginx master-worker 모델이 worker 재시작을 자동 처리
 
 ### 부정적 결과
@@ -155,7 +159,7 @@ C FFI 실패는 두 가지 유형으로 엄격히 구분한다:
   메트릭/카운터는 인스턴스별 집계이므로, 전체 집계는 외부 시스템(Prometheus 등)이 담당
 - **shared dict 용량**: mmap 크기는 Nginx 설정에서 정적으로 결정됨.
   런타임 확장 불가 → 초기 용량 설계 중요
-- **블로킹 FFI 위험**: C FFI 함수가 블로킹하면 worker 전체가 블로킹됨.
+- **블로킹 FFI 위험**: Rust FFI 함수가 블로킹하면 worker 전체가 블로킹됨.
   모든 `.so` 함수는 시간 제한(< 1ms) 준수 필요
 
 ### 향후 고려
