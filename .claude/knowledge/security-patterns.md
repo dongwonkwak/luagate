@@ -61,7 +61,7 @@ end
 
 ## Admin API 보안 계약
 
-- **바인딩**: `127.0.0.1:8080` 전용 (외부 노출 금지)
+- **바인딩**: `127.0.0.1:9090` 전용 (외부 노출 금지)
 - **인증**: `Authorization: Bearer <token>` (환경변수 `LUAGATE_ADMIN_TOKEN`)
 - **타이밍 안전 비교**: 토큰 비교 시 `string.len` 기반 단순 비교 금지, constant-time compare 사용
 
