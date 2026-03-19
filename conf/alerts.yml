@@ -25,6 +25,7 @@ groups:
         expr: |
           rate(luagate_http_requests_denied_total[1m])
           > 10 * rate(luagate_http_requests_denied_total[1h])
+          and rate(luagate_http_requests_denied_total[1h]) > 0
         for: 1m
         labels:
           severity: critical
