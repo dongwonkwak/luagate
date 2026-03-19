@@ -82,8 +82,8 @@ scripts/
 2. Claude Code: request-codex-review 스킬 재실행
    └─ review.md는 덮어쓰지 않음 (이미 존재)
 
-3. 사람: Codex 실행
-   └─ ./scripts/codex-review.sh
+3. 사람: Codex 실행 (재리뷰 시에도 이슈/유형 수동 지정)
+   └─ ./scripts/codex-review.sh DON-XXX {type}
    └─ 스크립트가 result.md의 [x] 항목을 자동 감지
    └─ 기해결 항목은 Codex에 스킵 지시 전달
    └─ result.md에 "## 재리뷰 (YYYY-MM-DD)" 헤더 추가 후 append
@@ -98,12 +98,12 @@ scripts/
 자세한 사용법은 [`scripts/README.md`](../../scripts/README.md) 참조.
 
 ```bash
-# .claude/reviews/ 에서 pending review 자동 감지
-./scripts/codex-review.sh
-
-# 수동 지정
+# 이슈/유형 지정 (최초 리뷰 + 재리뷰 모두)
 ./scripts/codex-review.sh DON-97 code
 ./scripts/codex-review.sh DON-97 design
+
+# pending review가 1개뿐이면 자동 감지도 가능
+./scripts/codex-review.sh
 ```
 
 ### C. Worktree 환경에서 리뷰

@@ -74,11 +74,11 @@ Codex CLI 리뷰를 위한 프롬프트 파일을 생성하고, 사람에게 실
 리뷰 파일: .claude/reviews/DON-XXX-{type}-review.md
 결과 파일: .claude/reviews/DON-XXX-{type}-result.md
 
-실행 명령 (스크립트 사용 — 권장):
-  ./scripts/codex-review.sh
+실행 명령:
+  ./scripts/codex-review.sh DON-XXX {type}
 
-⚠️ 직접 실행은 최초 리뷰에만 사용. 재리뷰에서 사용하면 기존 result.md 이력이 덮어씌워집니다:
-  codex exec - < .claude/reviews/DON-XXX-{type}-review.md > .claude/reviews/DON-XXX-{type}-result.md
+⚠️ 재리뷰 시에도 동일하게 이슈/유형을 수동 지정한다.
+  스크립트가 result.md의 [x] 항목을 자동 감지하여 재리뷰 모드로 동작한다.
 
 결과 파일 생성 후 "계속 진행해"라고 말씀해주세요.
 ```
