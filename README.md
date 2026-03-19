@@ -188,6 +188,10 @@ luagate/
 | [ADR-006](docs/design/adr/ADR-006-metrics-cardinality-export-model.md) | 메트릭 Cardinality 제어 + Export 모델 |
 | [ADR-007](docs/design/adr/ADR-007-log-redaction-and-retention.md) | 로그 Redaction 정책 + 보존/파기 기간 |
 
+### 운영
+
+- [Runbook 인덱스](docs/runbook/README.md) — 운영 시나리오별 대응 절차
+
 ### 개발 가이드
 
 - [AGENTS.md](AGENTS.md) — 코딩 컨벤션, 불변식, 용어집
