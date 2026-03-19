@@ -341,11 +341,19 @@ function _M.preread()
   end
 
   -- Radix lookup: pre-filter by src_ip if tree is available
+  -- fail-closed: radix_lookup error/timeout -> deny (AGENTS.md, rust-ffi-modules.md §2)
   local radix_match_index = nil
   if _radix_tree then
     local idx, lookup_err = stream_ffi.radix_lookup(_radix_tree, ctx.src_ip)
     if lookup_err then
-      ngx.log(ngx.WARN, "[luagate-stream] radix_lookup error: ", lookup_err)
+      ngx.log(ngx.ERR, "[luagate-stream] radix_lookup failed: ", lookup_err, ", fail-closed")
+      ctx.deny_reason = "radix_lookup_error"
+      ctx.decision_source = "policy_engine"
+      ctx.request_state = "denied"
+      ngx.var.luagate_stream_action = "deny"
+      ngx.var.luagate_decision_source = "policy_engine"
+      ngx.var.luagate_request_state = "denied"
+      return ngx.exit(ngx.ERROR)
     else
       radix_match_index = idx -- nil if no match, number if matched
     end

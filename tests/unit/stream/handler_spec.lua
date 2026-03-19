@@ -1566,6 +1566,53 @@ describe("handler.preread - radix tree CIDR integration", function()
     package.loaded["luagate.stream.ffi"] = _stream_ffi_module
     package.loaded["luagate.policy.evaluator"] = nil
   end)
+
+  it("radix_lookup 에러 시 fail-closed deny (불변식)", function()
+    -- Build a tree successfully first
+    local lookup_tree = { _type = "lookup_fail_tree" }
+    test_version_counter = test_version_counter + 1
+    local ver = "v-lookup-fail-" .. test_version_counter
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver
+      end
+      return nil
+    end
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return lookup_tree, nil
+      end,
+      radix_lookup = function()
+        return nil, "ffi_timeout:-5"
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+
+    handler.preread()
+
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("radix_lookup_error", ctx.deny_reason)
+    assert.equals("denied", ctx.request_state)
+    assert.equals(ngx_mock.ERROR, ngx_mock._get_exited())
+    assert.equals("deny", ngx_mock.var.luagate_stream_action)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
 end)
 
 -- ===========================================================================

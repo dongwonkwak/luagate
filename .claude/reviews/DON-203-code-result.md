@@ -9,3 +9,11 @@
 - [x] `tests/unit/stream/handler_spec.lua:1383`-`1420`의 "cold start" 테스트는 실제 cold start를 검증하지 못합니다. 같은 describe 안에서 `handler` 모듈을 재로드하지 않아 앞선 테스트가 만든 module-level `_radix_tree`가 남을 수 있고(`tests/unit/stream/handler_spec.lua:1007`-`1009`), assertion도 evaluator를 기본 `deny`로 고정해 빌드 실패 후 정책 평가가 계속되어도 그대로 통과합니다.
       → 해결자: Claude Code
       → 해결 방식: cold start 테스트를 2개로 분리: (1) non-CIDR proxy 규칙 → evaluator가 proxy 허용 확인 (2) CIDR-only 규칙 + build 실패 → radix_match_index nil 검증 + default deny. 고유 version 문자열 사용으로 rebuild 강제
+
+---
+
+## 재리뷰 (2026-03-19)
+
+- [x] `lua/luagate/stream/handler.lua:346`-`349`에서 `stream_ffi.radix_lookup()`가 `ffi_timeout`/`radix_lookup_fail`를 반환해도 WARN만 남기고 정책 평가를 계속합니다. `docs/spec/rust-ffi-modules.md §2`와 AGENTS.md의 fail-closed 불변식은 FFI timeout/internal error를 연결 종료로 처리하도록 요구하므로, 이 경로는 여전히 스펙 위반입니다. `tests/unit/stream/handler_spec.lua`에도 `radix_lookup` 실패 시 deny를 강제하는 검증이 없습니다.
+      → 해결자: Claude Code
+      → 해결 방식: radix_lookup 에러 시 ERR 로그 + fail-closed deny (ngx.exit(ERROR)). 테스트 추가로 검증
