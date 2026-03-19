@@ -26,11 +26,14 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          TEMPLATE_ROW='| YYYY-MM-DD | DON-XX | 설명 | `경로` | 비고 |'
+
           # Extract <!-- PROGRESS ... --> block from PR body
-          ENTRY=$(echo "$PR_BODY" | sed -n '/^<!-- PROGRESS$/,/^-->$/p' | grep '^|' || true)
+          ENTRY=$(printf '%s\n' "$PR_BODY" | sed -n '/^<!-- PROGRESS$/,/^-->$/p' | grep '^|' || true)
+          ENTRY=$(printf '%s\n' "$ENTRY" | grep -Fvx "$TEMPLATE_ROW" || true)
 
           if [ -z "$ENTRY" ]; then
-            echo "No <!-- PROGRESS --> block found in PR body — skipping"
+            echo "No filled PROGRESS entries found in PR body — skipping"
             exit 0
           fi
 
