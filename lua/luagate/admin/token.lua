@@ -52,6 +52,7 @@ end
 
 --- Write audit log for token rotation event.
 -- Token values are NEVER logged (ADR-004 ss6.2).
+-- Returns true on success, false on failure (audit-first: failure = reject mutation).
 local function audit_log(event, actor_ip)
   local record = cjson.encode({
     timestamp = ngx.utctime(),
@@ -59,7 +60,12 @@ local function audit_log(event, actor_ip)
     actor_ip = actor_ip or ngx.var.remote_addr or "unknown",
     path = "/api/v1/admin/token/rotate",
   })
-  ngx.log(ngx.ERR, "[luagate:audit] ", record or '{"event":"' .. event .. '"}')
+  if not record then
+    ngx.log(ngx.ERR, "[luagate] audit log encode failed for event: ", event)
+    return false
+  end
+  ngx.log(ngx.ERR, "[luagate:audit] ", record)
+  return true
 end
 
 -- ---------------------------------------------------------------------------
@@ -105,15 +111,25 @@ function _M.handle_post_rotate()
     return
   end
 
-  -- Get current active token (from shared dict or env-loaded)
-  local current_token = state_dict:get(KEY_ACTIVE_TOKEN)
+  -- Audit-first: log before mutation (audit drop = mutation reject)
+  local audit_ok = audit_log("token_rotated")
+  if not audit_ok then
+    send_error(500, "internal_error", "Audit log failed — mutation rejected")
+    return
+  end
 
-  -- Store old token with grace period TTL (only if there is one)
+  -- Get current active token: shared dict first, then env-loaded fallback
+  local current_token = state_dict:get(KEY_ACTIVE_TOKEN)
+  if not current_token then
+    -- First rotation: env-loaded token is the current one
+    current_token = os.getenv("LUAGATE_ADMIN_TOKEN")
+  end
+
+  -- Store old token with grace period TTL
   if current_token then
     local ok, set_err = state_dict:set(KEY_OLD_TOKEN, current_token, GRACE_PERIOD_TTL)
     if not ok then
       ngx.log(ngx.ERR, "[luagate] failed to set grace period token: ", tostring(set_err))
-      -- Continue anyway — grace period is best-effort
     end
   end
 
@@ -124,9 +140,6 @@ function _M.handle_post_rotate()
     send_error(500, "internal_error", "Failed to store new token")
     return
   end
-
-  -- Audit log (no token values!)
-  audit_log("token_rotated")
 
   send_json(200, {
     status = "rotated",

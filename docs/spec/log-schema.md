@@ -384,6 +384,18 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
+**토큰 교체 (`token_rotated`):**
+```json
+{
+  "timestamp": "2026-03-19T12:00:00Z",
+  "event": "token_rotated",
+  "actor_ip": "127.0.0.1",
+  "path": "/api/v1/admin/token/rotate"
+}
+```
+
+> 토큰 값은 절대 로그에 포함하지 않음 (ADR-004 §6.2).
+
 **서버 기동/종료 (`startup` / `shutdown`):**
 ```json
 {

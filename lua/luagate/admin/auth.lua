@@ -175,7 +175,7 @@ function _M.verify()
 
   -- 3. Constant-time comparison (security-patterns.md: never use ==)
   -- Check order: rotated token (shared dict) → env-loaded token → grace period old token
-  local state_dict = ngx.shared.luagate_state
+  local state_dict = ngx.shared and ngx.shared.luagate_state
 
   -- 3a. Check rotated token from shared dict (if rotation has occurred)
   if state_dict then
