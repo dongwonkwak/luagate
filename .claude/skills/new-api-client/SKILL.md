@@ -54,6 +54,13 @@ export class ApiError extends Error {
 
 > **주의**: `/health`와 `/metrics`는 `/api` prefix 하위가 아님.
 > `apiClient()`는 `BASE_URL`(`/api`)을 자동 부여하므로 직접 `fetch` 사용 필요.
+> 개발 환경에서는 `vite.config.ts`에 아래 proxy 설정 추가 필수:
+>
+> ```typescript
+> // vite.config.ts server.proxy에 추가
+> "/health": { target: "http://localhost:9090" },
+> "/metrics": { target: "http://localhost:9090" },
+> ```
 
 ```typescript
 export interface HealthResponse {
