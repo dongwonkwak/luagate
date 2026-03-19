@@ -584,6 +584,16 @@ describe("auth.verify — token rotation", function()
   local ENV_TOKEN = string.rep("E", 32)
   local ROTATED_TOKEN = string.rep("R", 32)
   local OLD_TOKEN = string.rep("O", 32)
+  local previous_env_override
+
+  before_each(function()
+    previous_env_override = _env_override
+    _env_override = { LUAGATE_ADMIN_TOKEN = ENV_TOKEN }
+  end)
+
+  after_each(function()
+    _env_override = previous_env_override
+  end)
 
   local function make_shared_dict(store)
     return {
@@ -617,11 +627,6 @@ describe("auth.verify — token rotation", function()
     end
 
     _G.ngx = mock
-    _G.os = {
-      getenv = function()
-        return ENV_TOKEN
-      end,
-    }
 
     package.loaded["luagate.admin.auth"] = nil
     local rot_auth = require("luagate.admin.auth")
@@ -702,11 +707,6 @@ describe("auth.verify — token rotation", function()
     end
 
     _G.ngx = mock
-    _G.os = {
-      getenv = function()
-        return ENV_TOKEN
-      end,
-    }
 
     package.loaded["luagate.admin.auth"] = nil
     local rot_auth6 = require("luagate.admin.auth")
