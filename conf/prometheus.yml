@@ -11,6 +11,7 @@ rule_files:
 scrape_configs:
   - job_name: luagate
     metrics_path: /metrics
+    bearer_token: "${LUAGATE_ADMIN_TOKEN}"
     static_configs:
       - targets:
           - luagate:9090
