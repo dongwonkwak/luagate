@@ -103,6 +103,7 @@ export class PoliciesPage {
 사용 예시:
 
 ```typescript
+import { test, expect } from "@playwright/test";
 import { setupAdminMock, VALID_TOKEN } from "../fixtures/admin-server";
 import { PoliciesPage } from "../pages/PoliciesPage";
 
@@ -163,6 +164,9 @@ expect(response.status()).toBe(200);
 `page.route()`로 `/api/v1/*` 요청을 인터셉트한다.
 
 ```typescript
+import { test, expect } from "@playwright/test";
+import { setupAdminMock, VALID_TOKEN } from "../fixtures/admin-server";
+
 // 커스텀 mock 응답 오버라이드 (특정 테스트에서)
 test("shows error when health check fails", async ({ page }) => {
   // 1. 기본 mock 설정 (인증 등 다른 엔드포인트 활성화)
@@ -196,6 +200,12 @@ test("shows error when health check fails", async ({ page }) => {
 | `/api/v1/policies/version` | GET | Bearer |
 | `/api/v1/policies/reload` | POST | Bearer |
 
+### Fixture에 없는 엔드포인트
+
+`setupAdminMock`은 위 표의 엔드포인트만 mock한다. 새 페이지가 다른 API를 사용한다면
+(예: `/api/v1/audit`) `e2e/fixtures/admin-server.ts`에 route를 추가해야 한다.
+mock하지 않은 엔드포인트는 실제 서버로 요청이 전달되어 테스트가 실패하거나 예측 불가능해진다.
+
 ## 8. 테스트 격리
 
 - 각 테스트는 **독립적으로 실행 가능**해야 함
@@ -210,7 +220,22 @@ test("shows error when health check fails", async ({ page }) => {
 - [ ] `page.waitForTimeout()` 미사용
 - [ ] URL 하드코딩 없음 (baseURL 활용)
 - [ ] 각 테스트 독립 실행 가능
-- [ ] `npx playwright test tests/<feature>.spec.ts` 로컬 통과
+- [ ] 로컬 통과 (아래 실행 절차 참조)
+
+### 테스트 실행
+
+`playwright.config.ts`에 `webServer` 설정이 없으므로, 테스트 전에 UI 개발 서버를 수동 기동해야 한다:
+
+```bash
+# 1. UI 개발 서버 기동 (별도 터미널)
+cd ui && npm run dev
+
+# 2. 테스트 실행
+cd e2e && npx playwright test tests/<feature>.spec.ts
+```
+
+> `PLAYWRIGHT_BASE_URL`이 기본 `http://localhost:9090/dashboard`이므로,
+> 개발 서버 포트가 다르면 환경변수로 오버라이드한다.
 
 ## 참조
 
