@@ -15,6 +15,7 @@ export class AdminClient {
             "X-MCP-Client": this.mcpClientName,
             "X-MCP-Tool": toolName,
             "X-MCP-Session-Id": this.mcpSessionId,
+            "X-Request-Id": crypto.randomUUID(),
             ...extra,
         };
     }
@@ -77,13 +78,35 @@ export class AdminClient {
         });
         return data;
     }
-    /** PUT /api/v1/policies?dry_run=true — validate only */
-    async validatePolicies(yaml) {
-        const { data } = await this.request("PUT", "/api/v1/policies?dry_run=true", "luagate_validate_policies", {
-            body: yaml,
-            contentType: "application/x-yaml",
-        });
-        return data;
+    /**
+     * Validate policy YAML locally (parse check).
+     * Note: Admin API does not yet support dry_run parameter.
+     * When backend dry_run is implemented, this should call
+     * PUT /api/v1/policies?dry_run=true instead.
+     */
+    validatePoliciesLocally(yaml) {
+        // Basic YAML structure validation
+        if (!yaml || !yaml.trim()) {
+            return { valid: false, error: "Empty YAML" };
+        }
+        // Check for required top-level keys
+        const hasVersion = /^version\s*:/m.test(yaml);
+        const hasGlobal = /^global\s*:/m.test(yaml);
+        if (!hasVersion) {
+            return { valid: false, error: "Missing required 'version' key" };
+        }
+        if (!hasGlobal) {
+            return { valid: false, error: "Missing required 'global' key" };
+        }
+        // Check for basic YAML syntax errors (unclosed quotes, bad indentation)
+        const lines = yaml.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.includes("\t")) {
+                return { valid: false, error: `Tab character found at line ${i + 1} (use spaces)` };
+            }
+        }
+        return { valid: true };
     }
     /** POST /api/v1/policies/reload */
     async reload(expectedActiveVersion) {

@@ -5,7 +5,7 @@ import { registerPolicyTools } from "./tools/policies.js";
 import { registerStatusTools } from "./tools/status.js";
 import { registerReloadTools } from "./tools/reload.js";
 function getConfig() {
-    const baseUrl = process.env.LUAGATE_ADMIN_URL ?? "http://localhost:9090";
+    const baseUrl = process.env.LUAGATE_ADMIN_URL ?? "http://127.0.0.1:9090";
     const token = process.env.LUAGATE_ADMIN_TOKEN;
     if (!token) {
         console.error("LUAGATE_ADMIN_TOKEN environment variable is required");

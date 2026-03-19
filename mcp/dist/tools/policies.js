@@ -41,20 +41,26 @@ export function registerPolicyTools(server, client) {
             .string()
             .describe("검증할 정책 YAML 문자열"),
     }, async ({ policy_yaml }) => {
-        try {
-            const result = await client.validatePolicies(policy_yaml);
+        const result = client.validatePoliciesLocally(policy_yaml);
+        if (result.valid) {
             return {
                 content: [
                     {
                         type: "text",
-                        text: `검증 성공\n\n${JSON.stringify(result, null, 2)}`,
+                        text: "검증 성공: YAML 구조가 유효합니다.\n\n참고: 현재 로컬 구문 검증만 수행합니다. 서버 측 충돌 감지/컴파일 검증은 luagate_update_policies 호출 시 수행됩니다.",
                     },
                 ],
             };
         }
-        catch (e) {
-            return errorResult(e);
-        }
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `검증 실패: ${result.error}`,
+                },
+            ],
+            isError: true,
+        };
     });
     // luagate_update_policies — 정책 업데이트
     server.tool("luagate_update_policies", "정책을 업데이트합니다. 반드시 luagate_get_policies로 현재 ETag를 먼저 확인하세요. confirm=true일 때만 실행됩니다.", {

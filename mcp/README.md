@@ -16,7 +16,7 @@ npm run build
 
 | 변수 | 필수 | 기본값 | 설명 |
 |------|------|--------|------|
-| `LUAGATE_ADMIN_URL` | - | `http://localhost:9090` | Admin API 주소 |
+| `LUAGATE_ADMIN_URL` | - | `http://127.0.0.1:9090` | Admin API 주소 |
 | `LUAGATE_ADMIN_TOKEN` | 필수 | - | Admin API Bearer token |
 | `MCP_CLIENT_NAME` | - | `unknown` | 감사 로그에 기록할 클라이언트 이름 |
 | `MCP_SESSION_ID` | - | (자동 생성) | 감사 로그에 기록할 세션 ID |
@@ -32,7 +32,7 @@ npm run build
       "command": "node",
       "args": ["<path-to-luagate>/mcp/dist/index.js"],
       "env": {
-        "LUAGATE_ADMIN_URL": "http://localhost:9090",
+        "LUAGATE_ADMIN_URL": "http://127.0.0.1:9090",
         "LUAGATE_ADMIN_TOKEN": "your-token-here"
       }
     }
@@ -51,7 +51,7 @@ npm run build
       "command": "node",
       "args": ["${workspaceFolder}/mcp/dist/index.js"],
       "env": {
-        "LUAGATE_ADMIN_URL": "http://localhost:9090",
+        "LUAGATE_ADMIN_URL": "http://127.0.0.1:9090",
         "LUAGATE_ADMIN_TOKEN": "${env:LUAGATE_ADMIN_TOKEN}"
       }
     }
