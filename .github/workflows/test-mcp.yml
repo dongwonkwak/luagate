@@ -6,6 +6,10 @@ on:
       - "mcp/**"
       - ".github/workflows/test-mcp.yml"
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
