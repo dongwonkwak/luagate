@@ -55,8 +55,9 @@ LKG(Last-Known-Good)는 active pointer를 유지하는 메커니즘이며, 자�
 canonical file(`conf/policies.yaml`)이 손상된 경우 수동 복구가 필요하다:
 
 ```bash
-# Git에서 마지막 정상 정책 복원
-git checkout HEAD -- conf/policies.yaml
+# Git에서 마지막 정상 정책 복원 (HEAD가 문제 커밋이면 이전 커밋 지정)
+git log --oneline -5 -- conf/policies.yaml
+git checkout <known-good-commit> -- conf/policies.yaml
 
 # 또는 Admin API로 정상 정책 재배포
 # 1) 현재 ETag 조회
@@ -90,7 +91,7 @@ sudo logrotate -f /etc/logrotate.d/luagate
 
 ```bash
 # .so 파일 존재 확인
-ls -la lib/libluagate_*.so
+ls -la lib/luagate_scanner.so lib/luagate_decoder.so lib/luagate_stream.so
 
 # Docker 환경 — 이미지 재빌드
 docker compose build luagate

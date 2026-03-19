@@ -45,9 +45,13 @@ export LUAGATE_ADMIN_TOKEN="$NEW_TOKEN"
 # 재기동 없이 적용됨 (rotate API 사용 시)
 
 # Kubernetes Secret
+# 주의: LuaGate는 시작 시 환경변수를 한 번만 읽는다.
+# rotate API로 즉시 교체 후, Secret도 갱신하여 Pod 재시작에 대비
 kubectl create secret generic luagate-admin-token \
   --from-literal=token="$NEW_TOKEN" \
   --dry-run=client -o yaml | kubectl apply -f -
+# 롤링 재시작으로 새 Secret 반영 (rotate API 사용 시 즉시 불필요, Pod 재생성 대비)
+kubectl rollout restart deployment/luagate
 ```
 
 ### 4. 교체 확인

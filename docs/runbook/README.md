@@ -17,6 +17,17 @@
 - `LUAGATE_ADMIN_TOKEN` 환경변수 설정
 - `curl`, `jq` 설치
 
+### 로그 경로
+
+각 runbook의 로그 쿼리는 `/var/log/luagate/` 경로를 사용합니다.
+환경에 따라 아래와 같이 조정하세요:
+
+| 환경 | access.log / stream.log | audit.log / error.log |
+|------|------------------------|----------------------|
+| 프로덕션 (파일) | `/var/log/luagate/access.log` | `/var/log/luagate/audit.log` |
+| Docker (기본) | `docker compose logs luagate` (stdout) | `docker compose logs luagate` (stderr) |
+| 개발 (기본) | stdout (`conf/nginx.conf` 기본 설정) | stderr |
+
 ```bash
 # 토큰 설정
 export TOKEN="$LUAGATE_ADMIN_TOKEN"
