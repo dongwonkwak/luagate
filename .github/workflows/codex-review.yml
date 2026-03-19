@@ -8,7 +8,9 @@
 #   nginx_conf — conf/**/*.conf
 #   lua_test   — tests/**/*.lua
 #   int_test   — tests/**/*.t
-#   frontend   — frontend/**
+#   ui_ts      — ui/src/**/*.{ts,tsx} (TypeScript/React)
+#   ui_api     — ui/src/api/**/*.ts (API 클라이언트)
+#   e2e        — e2e/**/*.spec.ts (Playwright E2E)
 #   ci_build   — .github/**, Makefile, flake.nix, CMakeLists.txt
 #   docs       — docs/**/*.md, .claude/knowledge/*.md, *.md (root)
 #   policy     — policies/**/*.yaml
@@ -63,7 +65,9 @@ jobs:
               nginx_conf: is([/^conf\/.+\.conf$/]),
               lua_test:   is([/^tests\/.+\.lua$/]),
               int_test:   is([/^tests\/.+\.t$/]),
-              frontend:   is([/^frontend\//]),
+              ui_ts:      is([/^ui\/src\/.+\.tsx?$/]),
+              ui_api:     is([/^ui\/src\/api\/.+\.ts$/]),
+              e2e:        is([/^e2e\/.+\.spec\.ts$/]),
               ci_build:   is([/^\.github\//, 'Makefile', 'flake.nix']),
               docs:       is([/^docs\/.+\.md$/, /^\.claude\/knowledge\/.+\.md$/, /^[^/]+\.md$/]),
               policy:     is([/^policies\/.+\.yaml$/]),
@@ -138,13 +142,41 @@ jobs:
               ].join('\n'));
             }
 
-            if (cats.frontend) {
+            if (cats.ui_ts) {
               directives.push([
-                '### Frontend 코드 리뷰',
-                '- React/Vite 베스트 프랙티스 준수',
+                '### TypeScript/React 코드 리뷰',
+                '- `any` 타입 사용 금지 — strict 모드 위반 여부 확인',
+                '- `useEffect` 의존성 배열 누락/과잉 여부 확인',
+                '- 불필요한 리렌더링 방지 — `useMemo`, `useCallback` 적절 사용',
+                '- 보안: XSS 위험 (`dangerouslySetInnerHTML`), token 콘솔 로깅, API URL 하드코딩 금지',
+                '- Bearer token 형식 검증 — `Authorization: Bearer <token>` 패턴 준수',
+                '- 인라인 스타일 금지 — Tailwind 클래스 사용',
                 '- 컴포넌트 재사용성 및 단일 책임 원칙',
-                '- 번들 크기 영향 검토',
-                '- 접근성(a11y) 기본 요건 확인',
+                '- 접근성(a11y) 기본 요건 — `aria-label`, 시맨틱 HTML',
+                '- 참조: `.claude/knowledge/ui-review-checklist.md`',
+              ].join('\n'));
+            }
+
+            if (cats.ui_api) {
+              directives.push([
+                '### API 클라이언트 리뷰',
+                '- 401 응답 처리 — 인증 만료 시 적절한 UX (로그인 리다이렉트 등)',
+                '- 에러 바운더리 — 네트워크 에러 사용자 메시지 제공',
+                '- loading/error/success 상태 관리 필수',
+                '- `apiClient<T>()` 제네릭 래퍼 사용 여부 확인',
+                '- ETag/If-Match 헤더 사용 — 정책 업데이트 시 낙관적 동시성 제어',
+                '- 참조: `.claude/knowledge/admin-auth-contract.md`',
+              ].join('\n'));
+            }
+
+            if (cats.e2e) {
+              directives.push([
+                '### Playwright E2E 테스트 리뷰',
+                '- `waitForTimeout` 사용 금지 — `waitForSelector`, `waitForResponse` 등 사용',
+                '- 테스트 격리 — 각 테스트가 독립적으로 실행 가능',
+                '- URL/token 하드코딩 금지 — 환경변수 또는 fixture 사용',
+                '- `aria-label` 기반 셀렉터 우선 — CSS 셀렉터보다 접근성 셀렉터 선호',
+                '- 테스트 파일 상단에 테스트 대상 페이지/컴포넌트 경로 주석',
               ].join('\n'));
             }
 
@@ -187,7 +219,7 @@ jobs:
               '- **프로젝트 컨벤션**: `.claude/knowledge/conventions.md` 기준',
               '  - 커밋 메시지 형식 준수 (`type(scope): description [DON-XX]`)',
               '  - 코드와 문서 변경이 같은 PR에 포함 (same-PR 규칙)',
-              '- **보안**: `.claude/knowledge/review-checklist.md` 기준',
+              '- **보안**: `.claude/knowledge/review-checklist.md` 기준' + (cats.ui_ts || cats.ui_api || cats.e2e ? ' + `.claude/knowledge/ui-review-checklist.md`' : ''),
               '  - 보안 경로 fail-closed (에러 → deny)',
               '  - PII 필드 redaction 적용 여부',
               '  - Admin API 타이밍 안전 토큰 비교',
