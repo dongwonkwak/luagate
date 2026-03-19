@@ -73,7 +73,7 @@ AI 코딩 에이전트와 IDE 통합(Claude Desktop, VS Code 등)이 확산되�
 | **UDS (Unix Domain Socket)** | 권장 | 네트워크 오버헤드 없이 OpenResty ↔ MCP 서버 통신 |
 | TCP localhost | 대안 | UDS 미지원 환경용 |
 
-**결정**: UDS 권장. 로컬 개발 및 Docker 환경 모두 호환.
+**결정**: v1은 localhost HTTP (`127.0.0.1:9090`) 사용 (기존 Admin API 계약 그대로). UDS는 성능 최적화가 필요한 경우 향후 검토.
 
 ### 5. 인증
 
@@ -89,7 +89,7 @@ AI 코딩 에이전트와 IDE 통합(Claude Desktop, VS Code 등)이 확산되�
 | `luagate_get_status` | GET /api/v1/status | 상태 + active_version + worker 수 |
 | `luagate_validate_policies` | PUT /api/v1/policies?dry_run=true | Dry-run: 문법/충돌 검증만, 적용 안 함 (**Admin API 확장 필요** — DON-191에서 구현) |
 | `luagate_update_policies` | PUT /api/v1/policies | 정책 업데이트 (expected_source_version 필수) |
-| `luagate_rollback_policies` | PUT /api/v1/policies (이전 YAML + expected_source_version) | 이전 버전 YAML로 복원 (**별도 엔드포인트 아닌 기존 PUT 재사용**) |
+| `luagate_rollback_policies` | PUT /api/v1/policies (이전 YAML + expected_source_version) | 이전 버전 YAML로 복원 (**기존 PUT 재사용**, 이전 YAML은 클라이언트 세션 캐시 또는 향후 버전 이력 API에서 확보) |
 | `luagate_reload` | POST /api/v1/policies/reload | Hot reload (운영 복구용) |
 
 ### 7. Blind Overwrite 방지
