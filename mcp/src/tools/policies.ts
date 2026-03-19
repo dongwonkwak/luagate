@@ -116,30 +116,22 @@ export function registerPolicyTools(server: McpServer, client: AdminClient): voi
           expected_source_version,
         );
 
-        // Self-healing: health check after update
+        // Post-update health check (informational only — update already committed)
+        let healthNote = "";
         try {
           const health = await client.getHealth();
           if (health.status !== "ok") {
-            // Auto-rollback attempt
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: `정책 업데이트 후 health check 실패 (status: ${health.status}). 수동 롤백이 필요할 수 있습니다.\n\n업데이트 결과:\n${JSON.stringify(result, null, 2)}`,
-                },
-              ],
-              isError: true,
-            };
+            healthNote = `\n\n⚠️ Health check warning: status=${health.status}. 정책은 이미 적용되었습니다. 문제가 있으면 luagate_rollback_policies로 롤백하세요.`;
           }
         } catch {
-          // Health check itself failed — report but don't fail the update
+          // Health check fetch failed — not critical
         }
 
         return {
           content: [
             {
               type: "text" as const,
-              text: `정책 업데이트 성공\n\n${JSON.stringify(result, null, 2)}`,
+              text: `정책 업데이트 성공\n\n${JSON.stringify(result, null, 2)}${healthNote}`,
             },
           ],
         };
