@@ -1,0 +1,41 @@
+name: Update PROGRESS.md on PR merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  update-progress:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract and append progress entry
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Extract <!-- PROGRESS ... --> block from PR body
+          ENTRY=$(echo "$PR_BODY" | sed -n '/^<!-- PROGRESS$/,/^-->$/p' | grep '^\|' || true)
+
+          if [ -z "$ENTRY" ]; then
+            echo "No <!-- PROGRESS --> block found in PR body — skipping"
+            exit 0
+          fi
+
+          # Append to PROGRESS.md table
+          echo "$ENTRY" >> PROGRESS.md
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PROGRESS.md
+          git commit -m "docs(progress): auto-append entry from PR #${{ github.event.pull_request.number }}"
+          git push

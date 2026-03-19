@@ -11,7 +11,7 @@ Codex CLI를 사용한 코드/설계 리뷰 자동화 스크립트.
 ### 사용법
 
 ```bash
-# 1. PROGRESS.md의 PENDING_REVIEW 마커를 자동 감지하여 실행
+# 1. .claude/reviews/ 에서 pending review를 자동 감지하여 실행
 ./scripts/codex-review.sh
 
 # 2. 이슈/유형을 수동으로 지정하여 실행
@@ -19,27 +19,14 @@ Codex CLI를 사용한 코드/설계 리뷰 자동화 스크립트.
 ./scripts/codex-review.sh DON-97 design
 ```
 
-### PENDING_REVIEW 마커 포맷
+### Pending review 감지
 
-`request-codex-review` 스킬이 PROGRESS.md 끝에 아래 형식으로 마커를 기입한다:
+스크립트는 `.claude/reviews/` 디렉토리를 스캔하여 pending review를 자동 감지한다:
+- `*-review.md`가 존재하지만 대응하는 `*-result.md`가 없는 항목을 찾는다.
 
-```
-PENDING_REVIEW: DON-97-code
-```
-
-스크립트는 이 마커를 읽어 다음 경로를 자동으로 결정한다:
-
+수동 지정 시:
 - 리뷰 파일: `.claude/reviews/DON-97-code-review.md`
 - 결과 파일: `.claude/reviews/DON-97-code-result.md`
-
-**재리뷰 시**: 이전 `COMPLETED_REVIEW` 라인이 이미 있더라도 그 아래에 `PENDING_REVIEW`를 추가한다.
-스크립트는 `tail -1`로 마지막 마커를 읽으므로 정상 동작한다.
-
-```
-# 재리뷰 시 PROGRESS.md 예시
-COMPLETED_REVIEW: DON-97-code (2026-03-14)
-PENDING_REVIEW: DON-97-code          ← 스킬이 재기입
-```
 
 ### 최초 리뷰 vs 재리뷰
 
@@ -50,28 +37,14 @@ PENDING_REVIEW: DON-97-code          ← 스킬이 재기입
 
 재리뷰 시 기존 `[x]` 항목은 Codex에게 스킵 지시가 전달된다 (AGENTS.md 불변식).
 
-### 마커 자동 정리
-
-리뷰 실행 완료 후 스크립트가 PROGRESS.md의 마커를 자동으로 갱신한다:
-
-```
-# 실행 전
-PENDING_REVIEW: DON-97-code
-
-# 실행 후
-COMPLETED_REVIEW: DON-97-code (2026-03-14)
-```
-
 ### Worktree 환경
 
 `git worktree`(Claude Code `isolation: "worktree"`)에서 실행할 때:
 
-- PROGRESS.md 마커 갱신은 항상 main repo root의 PROGRESS.md에서만 수행한다.
-- worktree에서는 PROGRESS.md를 수정하지 않는다 (충돌 방지).
 - `.claude/reviews/`는 worktree 내 파일을 우선 탐색한다.
 - `codex exec` 는 현재 worktree의 코드를 대상으로 실행한다.
 - non-worktree에서는 두 경로가 동일하므로 기존 동작과 100% 호환된다.
-- **무인자 실행 불가**: worktree에서는 `PENDING_REVIEW` 마커가 여러 개일 수 있어 자동 감지를 차단한다. 반드시 `./scripts/codex-review.sh DON-XX type` 으로 수동 지정해야 한다.
+- **무인자 실행 불가**: worktree에서는 여러 리뷰가 있을 수 있어 자동 감지를 차단한다. 반드시 `./scripts/codex-review.sh DON-XX type` 으로 수동 지정해야 한다.
 
 ### 전제 조건
 

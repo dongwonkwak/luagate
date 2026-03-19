@@ -96,7 +96,7 @@ linear-update 스킬:
 sync-spec 스킬 (스펙 변경 시):
   - docs/spec/ 변경분 → Linear 문서 동기화
 
-PROGRESS.md 갱신 (worktree 환경이면 건너뛰기 — main 머지 후 갱신)
+PR body에 <!-- PROGRESS --> 블록 추가 (머지 시 자동 append)
 ```
 
 ## 에러 정책
@@ -104,7 +104,7 @@ PROGRESS.md 갱신 (worktree 환경이면 건너뛰기 — main 머지 후 갱�
 | 에러 | 정책 |
 |------|------|
 | 빌드/테스트 실패 | 자체 수정 재시도 (최대 3회) |
-| 스펙 모호/충돌 | 즉시 중단 → PROGRESS.md + Linear 코멘트 |
+| 스펙 모호/충돌 | 즉시 중단 → Linear 코멘트 |
 | 의존성 미충족 | 시작 안 함 → 대체 이슈 제안 |
 | 컨텍스트 부족 | 자율 탐색 후 재시도 (1회) |
 
@@ -115,4 +115,3 @@ PROGRESS.md 갱신 (worktree 환경이면 건너뛰기 — main 머지 후 갱�
 - [ ] 관련 spec/ADR 준수 (AGENTS.md 불변식)
 - [ ] 문서 갱신 (same-PR 규칙)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터
-- [ ] PROGRESS.md append (worktree 시 머지 후 갱신)
