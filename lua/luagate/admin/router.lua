@@ -151,10 +151,16 @@ local function collect_ffi_leak_counts()
 
   local ok, worker_count = pcall(ngx.worker.count)
   if not ok or not worker_count or worker_count < 1 then
-    -- Graceful degradation: fall back to current worker only
+    -- Graceful degradation: fall back to current worker only.
+    -- Preserve "index = worker id" contract by padding with 0s.
     local wid = ngx.worker.id()
     local val = tonumber(metrics_dict:get("ffi:timeout:leak:" .. wid)) or 0
-    return { val }, val, val
+    local counts = {}
+    for i = 1, wid + 1 do
+      counts[i] = 0
+    end
+    counts[wid + 1] = val
+    return counts, val, val
   end
 
   local counts = {}

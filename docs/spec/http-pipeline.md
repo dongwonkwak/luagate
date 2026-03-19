@@ -294,7 +294,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 > **Layer 2 watchdog 동작**: Rust 내부에서 작업 thread를 spawn하고 `recv_timeout`으로 hard timeout을 강제한다. copy-in/copy-out 전략으로 caller-owned 버퍼의 ABI 안전성을 보장한다. 상세: ADR-009.
 >
-> **Layer 2 timeout 시 부수효과**: per-worker leak 카운터(`ffi:timeout:leak:<worker_id>`) 증가. 누적 임곗값(10) 초과 시 worker 자발적 graceful exit.
+> **Layer 2 timeout 시 부수효과**: per-worker leak 카운터(`ffi:timeout:leak:<worker_id>`) 증가. 누적 임곗값(10) 초과 시 `/health` 503 전환 (`reason: "ffi_thread_leak_threshold_exceeded"`). [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3, [admin-api.md](admin-api.md) §6.1 참조.
 
 ## 12. 헬스체크
 

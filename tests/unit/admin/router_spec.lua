@@ -404,7 +404,7 @@ describe("router.dispatch", function()
       assert.are.equal(0, body.ffi_watchdog_timeouts)
     end)
 
-    it("GET /health -> graceful degradation when worker.count fails", function()
+    it("GET /health -> graceful degradation when worker.count fails (wid=0)", function()
       _G.ngx.var.uri = "/health"
       _G.ngx.shared.luagate_metrics = make_shared_dict({
         ["ffi:timeout:leak:0"] = 5,
@@ -423,11 +423,42 @@ describe("router.dispatch", function()
       local dkjson = require("dkjson")
       local body = dkjson.decode(said[1])
       assert.are.equal("ok", body.status)
-      -- Falls back to current worker only
+      -- Falls back to current worker only, index = worker id contract preserved
       assert.is_table(body.ffi_watchdog_leak_count)
       assert.are.equal(1, #body.ffi_watchdog_leak_count)
       assert.are.equal(5, body.ffi_watchdog_leak_count[1])
       assert.are.equal(5, body.ffi_watchdog_timeouts)
+    end)
+
+    it("GET /health -> graceful degradation when worker.count fails (wid=2)", function()
+      _G.ngx.var.uri = "/health"
+      _G.ngx.shared.luagate_metrics = make_shared_dict({
+        ["ffi:timeout:leak:2"] = 7,
+      })
+      _G.ngx.worker.id = function()
+        return 2
+      end
+      _G.ngx.worker.count = function()
+        error("not available in init phase")
+      end
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("ok", body.status)
+      -- Array padded with 0s: [0, 0, 7] — preserves "index = worker id" contract
+      assert.is_table(body.ffi_watchdog_leak_count)
+      assert.are.equal(3, #body.ffi_watchdog_leak_count)
+      assert.are.equal(0, body.ffi_watchdog_leak_count[1])
+      assert.are.equal(0, body.ffi_watchdog_leak_count[2])
+      assert.are.equal(7, body.ffi_watchdog_leak_count[3])
+      assert.are.equal(7, body.ffi_watchdog_timeouts)
     end)
 
     it("GET /health -> 503 + {status:unhealthy} (정책 미로드 상태)", function()
