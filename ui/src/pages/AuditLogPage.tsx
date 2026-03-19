@@ -9,6 +9,8 @@ const PAGE_SIZE = 50;
 export function AuditLogPage() {
   const [offset, setOffset] = useState(0);
 
+  const [endpointMissing, setEndpointMissing] = useState(false);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["audit", offset],
     queryFn: async () => {
@@ -16,10 +18,12 @@ export function AuditLogPage() {
         const { data } = await apiClient<AuditResponse>(
           `/v1/audit?offset=${offset}&limit=${PAGE_SIZE}`,
         );
+        setEndpointMissing(false);
         return data;
       } catch (e) {
         // Audit endpoint may not be implemented yet (404)
         if (e instanceof Error && e.message.includes("404")) {
+          setEndpointMissing(true);
           return { entries: [], total: 0, offset: 0, limit: PAGE_SIZE } as AuditResponse;
         }
         throw e;
@@ -27,7 +31,6 @@ export function AuditLogPage() {
     },
     refetchInterval: 30_000,
   });
-  const endpointMissing = data?.total === 0 && !isLoading && !error;
 
   if (isLoading) return <p className="text-gray-500">Loading audit logs...</p>;
   if (error) {

@@ -31,7 +31,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
   if (
     contentType.includes("application/x-yaml") ||
-    contentType.includes("text/yaml")
+    contentType.includes("text/yaml") ||
+    contentType.includes("text/plain")
   ) {
     return (await response.text()) as unknown as T;
   }
@@ -61,6 +62,10 @@ export async function apiClient<T>(
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("luagate_admin_token");
+      window.location.href = "/dashboard/login";
+    }
     const body = await response.text().catch(() => "");
     throw new ApiError(response.status, response.statusText, body);
   }
