@@ -285,6 +285,8 @@ function _M.preread()
 
   -- Radix tree rebuild on version change (rust-ffi-modules.md §6.4)
   -- Each worker independently rebuilds when active_version changes.
+  -- ADR-009: on failure/timeout, preserve old tree (LKG) and do NOT
+  -- update _radix_version so the next request retries the rebuild.
   local stream_rules = policy._compiled_stream or {}
   if stream_ver ~= _radix_version then
     -- Build CIDR list from stream_rules that have src_ip_cidr scope
@@ -295,27 +297,39 @@ function _M.preread()
       end
     end
 
-    local old_tree = _radix_tree
-
     if #cidr_lines > 0 then
       local cidr_str = table.concat(cidr_lines, "\n") .. "\n"
       local new_tree, build_err = stream_ffi.radix_build(cidr_str)
       if new_tree then
+        -- Success: swap to new tree, free old, update version
+        local old_tree = _radix_tree
         _radix_tree = new_tree
+        if old_tree then
+          stream_ffi.radix_free(old_tree)
+        end
+        _radix_version = stream_ver
       else
-        ngx.log(ngx.WARN, "[luagate-stream] radix_build failed: ", tostring(build_err), ", clearing radix tree")
-        _radix_tree = nil
+        -- Failure/timeout: keep old tree (LKG), do NOT update version
+        -- so next request retries rebuild (ADR-009 §radix_build hot reload)
+        ngx.log(ngx.WARN, "[luagate-stream] radix_build failed: ", tostring(build_err), ", keeping LKG radix tree")
+        -- Increment per-worker leak counter on timeout (ADR-009 Layer 2)
+        if build_err and tostring(build_err):find("%-5") then
+          local metrics_dict = ngx.shared.luagate_metrics
+          if metrics_dict then
+            local wid = ngx.worker.id() or 0
+            metrics_dict:incr("ffi:timeout:leak:" .. wid, 1, 0)
+          end
+        end
       end
     else
+      -- No CIDR rules: clear tree and update version
+      local old_tree = _radix_tree
       _radix_tree = nil
+      if old_tree then
+        stream_ffi.radix_free(old_tree)
+      end
+      _radix_version = stream_ver
     end
-
-    -- Free old tree after swap (FFI free obligation)
-    if old_tree then
-      stream_ffi.radix_free(old_tree)
-    end
-
-    _radix_version = stream_ver
   end
 
   -- Radix lookup: pre-filter by src_ip if tree is available

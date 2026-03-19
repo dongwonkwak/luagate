@@ -134,6 +134,16 @@ local function make_ngx(overrides)
           return 1, nil
         end,
       },
+      luagate_metrics = {
+        _data = {},
+        incr = function(self, key, delta, default)
+          self._data[key] = (self._data[key] or default or 0) + delta
+          return self._data[key], nil
+        end,
+        get = function(self, key)
+          return self._data[key]
+        end,
+      },
     },
     WARN = 5,
     ERR = 4,
@@ -1146,7 +1156,58 @@ describe("handler.preread - radix tree CIDR integration", function()
     package.loaded["luagate.stream.ffi"] = _stream_ffi_module
   end)
 
-  it("radix_build 실패 시 WARN 로그만, 처리 계속", function()
+  it("radix_build 실패 시 LKG 유지, version 미갱신 (ADR-009)", function()
+    -- First call: build succeeds -> tree exists
+    local first_tree = { _type = "first_tree" }
+    local free_calls = {}
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return first_tree, nil
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = function(tree)
+        table.insert(free_calls, tree)
+      end,
+    }
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
+    -- First call succeeded, tree was built (may have freed a prior test's tree)
+    local free_count_after_first = #free_calls
+
+    -- Second call: new version, radix_build fails
+    test_version_counter = test_version_counter + 100
+    local ver2 = "v-radix-lkg-" .. test_version_counter
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver2
+      end
+      return nil
+    end
+
     package.loaded["luagate.stream.ffi"] = {
       detect_protocol = function()
         return "raw", nil, false
@@ -1154,6 +1215,40 @@ describe("handler.preread - radix tree CIDR integration", function()
       extract_sni = _stream_ffi_module.extract_sni,
       radix_build = function()
         return nil, "radix_build_fail:-1"
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = function(tree)
+        table.insert(free_calls, tree)
+      end,
+    }
+
+    handler.preread()
+
+    -- LKG: old tree should NOT be freed after the second call
+    assert.equals(free_count_after_first, #free_calls)
+
+    -- Should have continued to evaluation
+    local ctx = ngx_mock.ctx.luagate_stream
+    assert.equals("deny", ctx.action)
+    assert.equals("denied", ctx.request_state)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("radix_build timeout 시 per-worker leak 카운터 증가 (ADR-009)", function()
+    -- First: build a tree so we have LKG
+    local first_tree = { _type = "leak_test_tree" }
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return first_tree, nil
       end,
       radix_lookup = function()
         return nil, nil
@@ -1177,7 +1272,149 @@ describe("handler.preread - radix tree CIDR integration", function()
 
     handler.preread()
 
-    -- Should have continued to evaluation (deny via default)
+    -- Now: new version with timeout error (-5)
+    test_version_counter = test_version_counter + 1
+    local ver2 = "v-radix-leak-" .. test_version_counter
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return ver2
+      end
+      return nil
+    end
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return nil, "timeout:-5"
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    handler.preread()
+
+    -- Per-worker leak counter should have been incremented
+    local leak_count = ngx_mock.shared.luagate_metrics:get("ffi:timeout:leak:0")
+    assert.equals(1, leak_count)
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("radix_build 실패 후 다음 요청에서 rebuild 재시도 (ADR-009)", function()
+    -- Call 1: build fails
+    local fail_ver = "v-radix-retry-" .. (test_version_counter + 200)
+    test_version_counter = test_version_counter + 200
+
+    local build_call_count = 0
+    local retry_tree = { _type = "retry_tree" }
+
+    local current_build_fn = function()
+      build_call_count = build_call_count + 1
+      if build_call_count == 1 then
+        return nil, "radix_build_fail:-1"
+      end
+      return retry_tree, nil
+    end
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return current_build_fn()
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return fail_ver
+      end
+      return nil
+    end
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    -- First request: build fails
+    handler.preread()
+    assert.equals(1, build_call_count)
+
+    -- Second request: same version -> should retry since version wasn't updated
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+    ngx_mock.shared.luagate_policy.get = function(_, key)
+      if key == "stream:active_version" then
+        return fail_ver
+      end
+      return nil
+    end
+
+    handler.preread()
+    assert.equals(2, build_call_count) -- Retried!
+
+    -- Restore
+    package.loaded["luagate.stream.ffi"] = _stream_ffi_module
+  end)
+
+  it("cold start radix_build 실패 시 fail-closed 유지 (ADR-009)", function()
+    -- No prior tree (cold start), radix_build fails
+    -- _radix_tree is nil, so radix_lookup returns nil -> no match
+    -- Policy evaluation continues with no CIDR filtering -> fail-closed by default
+
+    package.loaded["luagate.stream.ffi"] = {
+      detect_protocol = function()
+        return "raw", nil, false
+      end,
+      extract_sni = _stream_ffi_module.extract_sni,
+      radix_build = function()
+        return nil, "timeout:-5"
+      end,
+      radix_lookup = function()
+        return nil, nil
+      end,
+      radix_free = _stream_ffi_module.radix_free,
+    }
+
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {
+        { id = "rule-a", scope = { src_ip_cidr = "10.0.0.0/8" }, action = "proxy" },
+      },
+      _compiled_stream = {},
+    }
+    _evaluator_stub.evaluate_stream_result = {
+      action = "deny",
+      matched_rule = nil,
+      decision_source = "default",
+    }
+
+    handler.preread()
+
     local ctx = ngx_mock.ctx.luagate_stream
     assert.equals("deny", ctx.action)
     assert.equals("denied", ctx.request_state)
