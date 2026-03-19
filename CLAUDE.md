@@ -152,6 +152,7 @@ make implement ISSUE=42     # 이슈 구현 워크플로우 시작
 make test                   # 전체 테스트
 make test-unit              # Lua 단위 테스트
 make lint                   # StyLua + luacheck + cargo clippy
+make pre-pr                 # 변경 파일 기반 자동 테스트 게이트 (PR 생성 전 필수)
 make up                     # Docker Compose 기동 (통합 테스트 환경)
 make down                   # 종료
 make build-ffi              # Rust FFI 빌드 + lib/ 복사
@@ -161,6 +162,7 @@ make build-ffi              # Rust FFI 빌드 + lib/ 복사
 
 Epic 완료 후 PR 생성 절차:
 
+0. **`make pre-pr` 실행** — 변경 파일 기반 자동 테스트 게이트. 실패 시 PR 생성 불가
 1. **Test Plan 검증** — PR 본문에 포함될 Test Plan 항목을 **모두** 실행하여 통과 확인
    - 코드 변경: `make test-unit` + 관련 테스트 파일 개별 실행 (TAP 출력으로 항목별 확인)
    - 문서/ADR 변경: spec 정합성 검증 (관련 spec 파일 간 참조 일관성, TODO 교체 여부, same-PR 동기화)
@@ -181,4 +183,4 @@ PR에 `chatgpt-codex-connector` review thread 가 달린 뒤 후속 수정/답�
 
 - pre-commit: `stylua --check`, `luacheck`, `clang-format --check`, `shellcheck`, `markdownlint`, `prettier --check` (ui/, mcp/), `eslint` (ui/)
 - commit-msg: `commitlint` (Conventional Commits 형식 강제)
-- pre-push: `make test-unit` + `luacheck` 전체 + `vitest` (ui/) + `tsc -b` (ui/) + `tsc --noEmit` (mcp/) + `cargo test` (src/) + `cargo clippy` (src/)
+- pre-push: `make test-unit` (lua/|tests/ 변경 시) + `luacheck` 전체 + `vitest` (ui/) + `tsc -b` (ui/) + `tsc --noEmit` (mcp/) + `mcp tests` (mcp/ 변경 시: tsc + npm test) + `cargo test` (src/) + `cargo clippy` (src/) + `conf/ change warning` (conf/|Dockerfile 변경 시: 통합 테스트 경고 출력)
