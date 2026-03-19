@@ -18,12 +18,12 @@ reads_memory_from: [architect, implementer]
 
 ## 기술 스택
 
-- React 18 + TypeScript 5 (strict mode)
-- Vite 5 (빌드 + HMR)
+- React 19 + TypeScript 5 (strict mode)
+- Vite 6 (빌드 + HMR)
 - Tailwind CSS 3 (유틸리티 기반 스타일)
-- Monaco Editor (정책 YAML 편집기)
-- Recharts (메트릭 시각화)
-- Zustand (전역 auth 상태)
+- 정책 YAML 편집기: 추후 결정 (Monaco Editor 등 후보)
+- 메트릭 시각화: 추후 결정 (Recharts 등 후보)
+- 전역 상태관리: 추후 결정
 
 ## 프로젝트 구조
 
@@ -61,10 +61,10 @@ ui/
 ## API 클라이언트 패턴
 
 `ui/src/api/client.ts`의 `apiClient<T>()` 래퍼 사용:
-- Bearer token: `localStorage.getItem("luagate_admin_token")`
-- Base URL: `import.meta.env.VITE_ADMIN_API_URL || "/api"`
+- Bearer token: 현재 `localStorage.getItem("luagate_admin_token")` 사용 중 (인증 저장 방식은 ADR 미확정 — `ui-review-checklist.md` 참조)
+- Base URL: `import.meta.env.VITE_ADMIN_API_URL || "/api"` — `/api` prefix가 자동 부여됨에 유의. `/health`, `/metrics`는 `/api` 하위가 아니므로 별도 처리 필요
 - 401 응답 시: 로그인 화면 리다이렉트
-- ETag 기반 낙관적 동시성 제어 (정책 PUT 시 `If-Match`)
+- ETag 기반 낙관적 동시성 제어 (정책 PUT 시 `If-Match` 필수 — 빈 문자열 금지)
 
 ## architect 에스컬레이션 조건
 

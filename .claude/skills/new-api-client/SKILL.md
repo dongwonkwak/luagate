@@ -27,7 +27,7 @@ import { apiClient, ApiResponse, ApiError } from "./client";
 
 ### 인증
 
-- Bearer token: `localStorage.getItem("luagate_admin_token")`
+- Bearer token: 현재 `localStorage.getItem("luagate_admin_token")` 사용 중 (인증 저장 방식 ADR 미확정 — `ui-review-checklist.md` 참조)
 - `apiClient` 래퍼가 자동으로 `Authorization` 헤더 추가
 - 401 응답 시: 자동 로그아웃 + 로그인 리다이렉트 처리 필요
 - 계약: [admin-auth-contract.md](../../.claude/knowledge/admin-auth-contract.md) 참조
@@ -52,6 +52,9 @@ export class ApiError extends Error {
 
 ### GET /health (인증 불필요)
 
+> **주의**: `/health`와 `/metrics`는 `/api` prefix 하위가 아님.
+> `apiClient()`는 `BASE_URL`(`/api`)을 자동 부여하므로 직접 `fetch` 사용 필요.
+
 ```typescript
 export interface HealthResponse {
   status: "ok" | "unhealthy";
@@ -59,25 +62,34 @@ export interface HealthResponse {
   active_http_version: string | null;
   active_stream_version: string | null;
   policy_loaded_at: string | null;
-  ffi_watchdog_leak_count: number[];
-  ffi_watchdog_timeouts: number;
+  ffi_watchdog_leak_count: number;
   reason?: string;
 }
 
+/** /health는 /api prefix 밖이므로 직접 fetch */
 export async function getHealth(): Promise<HealthResponse> {
-  const { data } = await apiClient<HealthResponse>("/health");
-  return data;
+  const baseOrigin = import.meta.env.VITE_ADMIN_API_URL
+    ? new URL(import.meta.env.VITE_ADMIN_API_URL).origin
+    : "";
+  const response = await fetch(`${baseOrigin}/health`);
+  if (!response.ok) throw new ApiError(response.status, response.statusText, "");
+  return response.json();
 }
 ```
 
 ### GET /metrics (Prometheus 텍스트)
 
 ```typescript
+/** /metrics는 /api prefix 밖이므로 직접 fetch */
 export async function getMetrics(): Promise<string> {
-  const url = `${BASE_URL}/metrics`;
-  const response = await fetch(url, {
-    headers: { ...defaultHeaders() },
-  });
+  const baseOrigin = import.meta.env.VITE_ADMIN_API_URL
+    ? new URL(import.meta.env.VITE_ADMIN_API_URL).origin
+    : "";
+  const token = localStorage.getItem("luagate_admin_token");
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const response = await fetch(`${baseOrigin}/metrics`, { headers });
   if (!response.ok) throw new ApiError(response.status, response.statusText, "");
   return response.text();
 }
@@ -123,9 +135,15 @@ export async function putPolicies(yaml: string, ifMatch: string): Promise<ApiRes
 
 ```typescript
 export interface ReloadResponse {
-  ok: boolean;
-  active_http_version: string;
-  active_stream_version: string;
+  previous_http_version: string;
+  previous_stream_version: string;
+  new_http_version: string;
+  new_stream_version: string;
+  http_result: string;
+  stream_result: string;
+  reloaded_at: string;
+  warnings_count: number;
+  errors: string[];
 }
 
 export async function reloadPolicies(): Promise<ReloadResponse> {
@@ -137,6 +155,8 @@ export async function reloadPolicies(): Promise<ReloadResponse> {
 ```
 
 ## 401 자동 처리 패턴
+
+> 인증 토큰 저장 방식은 ADR 미확정 (`ui-review-checklist.md` 참조). 현재는 `localStorage` 사용.
 
 ```typescript
 // 앱 최상위에서 ApiError 401 인터셉트

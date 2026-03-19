@@ -27,8 +27,12 @@ export default function PolicyEditor({ initialYaml, etag, onSave }: PolicyEditor
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
+    if (!etag) {
+      setError("ETag가 없습니다. 정책을 다시 조회해주세요.");
+      return;
+    }
     try {
-      await putPolicies(yaml, etag || "");
+      await putPolicies(yaml, etag);
       onSave(yaml);
     } catch (err) {
       if (err instanceof ApiError) {

@@ -19,21 +19,21 @@ ui/
 
 ## 2. 기술 스택 및 버전
 
-| 라이브러리 | 버전 | 용도 |
-|-----------|------|------|
-| React | 18 | UI 프레임워크 |
-| TypeScript | 5 | strict mode 필수 |
-| Vite | 5 | 빌드 + HMR |
-| Tailwind CSS | 3 | 유틸리티 기반 스타일 |
-| Monaco Editor | latest | 정책 YAML 편집기 |
-| Recharts | latest | 메트릭 시각화 |
-| Zustand | latest | 전역 auth 상태 |
+| 라이브러리 | 버전 | 용도 | 상태 |
+|-----------|------|------|------|
+| React | 19 | UI 프레임워크 | 설치됨 |
+| TypeScript | 5 | strict mode 필수 | 설치됨 |
+| Vite | 6 | 빌드 + HMR | 설치됨 |
+| Tailwind CSS | 3 | 유틸리티 기반 스타일 | 설치됨 |
+| Monaco Editor | — | 정책 YAML 편집기 | 미설치 (후보) |
+| Recharts | — | 메트릭 시각화 | 미설치 (후보) |
+| Zustand | — | 전역 상태관리 | 미설치 (후보) |
 
 ## 3. Admin API 연동 계약
 
 - **Base URL**: `import.meta.env.VITE_ADMIN_API_URL || "/api"` (환경변수)
 - **인증**: Bearer token ([admin-auth-contract.md](admin-auth-contract.md) 참조)
-  - 토큰 저장: `localStorage.getItem("luagate_admin_token")`
+  - 토큰 저장: 현재 `localStorage` 사용 중 (인증 저장 방식 ADR 미확정 — `ui-review-checklist.md` 참조)
   - 401 응답 시: 자동 로그아웃 + 로그인 화면 리다이렉트
 - **API 클라이언트**: `ui/src/api/client.ts`의 `apiClient<T>()` 래퍼 사용
 - **ETag**: 정책 조회 시 ETag 반환 → PUT 시 `If-Match` 헤더로 전달 (낙관적 동시성)
@@ -94,7 +94,7 @@ ui/
 
 ## 7. 테스트 컨벤션
 
-- **단위 테스트**: Vitest (`ui/src/**/__tests__/*.test.tsx`)
-- **E2E 테스트**: Playwright (`e2e/`)
+- **단위 테스트**: 추후 결정 (Vitest 후보, 현재 미설치)
+- **E2E 테스트**: Playwright (`e2e/` — scaffold만 존재)
 - **테스트 파일 위치**: 컴포넌트와 같은 디렉토리의 `__tests__/` 하위
-- **Mock**: API 호출은 MSW 또는 직접 mock 사용
+- **Mock**: API 호출은 직접 mock 또는 MSW (미설치 후보) 사용
