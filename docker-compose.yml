@@ -16,6 +16,8 @@ services:
       - ./policies:/etc/luagate/policies:ro
       - ./policies/luagate.yaml:/conf/policies.yaml:ro
       - ./conf/scanner-patterns:/conf/scanner-patterns:ro
+      # Dashboard UI — mount local build for dev hot-reload
+      - ./ui/dist:/etc/luagate/ui/dist:ro
     environment:
       - LUAGATE_ENV=development
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-development-token-at-least-32-bytes-long}
