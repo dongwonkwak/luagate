@@ -1,0 +1,15 @@
+version: "1.0"
+global:
+  default_action: deny
+rules:
+  - id: allow-health
+    priority: 100
+    match:
+      path: /health
+    action: allow
+  - id: block-sqli
+    priority: 200
+    match:
+      path: /api/*
+    action: deny
+    threat_type: sqli

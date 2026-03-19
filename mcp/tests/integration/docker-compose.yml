@@ -1,0 +1,27 @@
+services:
+  luagate:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    ports:
+      - "9090:9090"
+    environment:
+      - LUAGATE_ADMIN_TOKEN=integration-test-token
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  mcp-test-runner:
+    build:
+      context: ../../mcp
+      dockerfile: ../mcp/Dockerfile.test
+    depends_on:
+      luagate:
+        condition: service_healthy
+    environment:
+      - LUAGATE_ADMIN_URL=http://luagate:9090
+      - LUAGATE_ADMIN_TOKEN=integration-test-token
+      - MCP_CLIENT_NAME=integration-test
+    command: npm run test:integration
