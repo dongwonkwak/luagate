@@ -20,6 +20,7 @@ local ratelimit = require("luagate.admin.ratelimit")
 local policies = require("luagate.admin.policies")
 
 local _M = {}
+local EMPTY_JSON_ARRAY = cjson.empty_array or setmetatable({}, { __jsontype = "array" })
 
 -- ---------------------------------------------------------------------------
 -- Constants
@@ -146,7 +147,7 @@ end
 local function collect_ffi_leak_counts()
   local metrics_dict = ngx.shared.luagate_metrics
   if not metrics_dict then
-    return {}, 0, 0
+    return EMPTY_JSON_ARRAY, 0, 0
   end
 
   local ok, worker_count = pcall(ngx.worker.count)

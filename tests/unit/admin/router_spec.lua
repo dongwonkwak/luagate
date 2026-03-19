@@ -14,6 +14,7 @@ package.preload["cjson.safe"] = function()
     encode = dkjson.encode,
     decode = dkjson.decode,
     null = {},
+    empty_array = setmetatable({}, { __jsontype = "array" }),
   }
 end
 
@@ -396,6 +397,7 @@ describe("router.dispatch", function()
 
       assert.are.equal(200, _G.ngx.status)
       local said = _G.ngx._get_said()
+      assert.truthy(said[1]:find('"ffi_watchdog_leak_count"%s*:%s*%[%]'))
       local dkjson = require("dkjson")
       local body = dkjson.decode(said[1])
       assert.are.equal("ok", body.status)
