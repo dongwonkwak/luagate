@@ -55,7 +55,10 @@ services:
       - /bin/sh
       - -c
       - |
-        echo "$$LUAGATE_ADMIN_TOKEN" > /run/secrets/admin_token
+        set -eu
+        mkdir -p /run/secrets
+        chmod 0700 /run/secrets
+        printf '%s\n' "$$LUAGATE_ADMIN_TOKEN" > /run/secrets/admin_token
         exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml
     networks:
       luagate-net:
