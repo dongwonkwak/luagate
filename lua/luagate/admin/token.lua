@@ -111,6 +111,20 @@ function _M.handle_post_rotate()
     return
   end
 
+  -- Security: reject rotation using grace period (old) token.
+  -- If the caller authenticated with the old token (grace period),
+  -- they must not be allowed to rotate again (prevents stolen token re-rotation).
+  local rotated_token = state_dict:get(KEY_ACTIVE_TOKEN)
+  if rotated_token then
+    local auth_header = ngx.req.get_headers()["Authorization"]
+    local provided = auth_header and auth_header:match("^Bearer (.+)$")
+    if provided and provided ~= rotated_token then
+      -- Caller used a non-active token (grace period) — deny rotation
+      send_error(403, "forbidden", "Rotation not allowed with grace period token")
+      return
+    end
+  end
+
   -- Get current active token: shared dict first, then env-loaded fallback
   local current_token = state_dict:get(KEY_ACTIVE_TOKEN)
   if not current_token then
@@ -139,8 +153,12 @@ function _M.handle_post_rotate()
   -- Audit after successful mutation (audit drop = rollback + reject)
   local audit_ok = audit_log("token_rotated")
   if not audit_ok then
-    -- Rollback: remove new token, restore old
-    state_dict:delete(KEY_ACTIVE_TOKEN)
+    -- Rollback: restore previous active token
+    if current_token then
+      state_dict:set(KEY_ACTIVE_TOKEN, current_token)
+    else
+      state_dict:delete(KEY_ACTIVE_TOKEN)
+    end
     state_dict:delete(KEY_OLD_TOKEN)
     send_error(500, "audit_write_failed", "Audit log failed — mutation rolled back", "audit")
     return

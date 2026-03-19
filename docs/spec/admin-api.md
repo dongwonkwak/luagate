@@ -28,7 +28,7 @@ Authorization: Bearer <token>
 
 - 환경변수 `LUAGATE_ADMIN_TOKEN` 또는 파일(마운트) 방식으로 주입
 - 최소 32바이트 entropy (256-bit random)
-- 재기동 없는 교체: `POST /api/v1/admin/token/rotate` (§6.7 참조)
+- 재기동 없는 교체: `POST /api/v1/admin/token/rotate` (§6.10 참조)
 - 토큰은 로그/응답 바디에 절대 포함하지 않음
 
 인증 실패 응답:
@@ -490,7 +490,7 @@ Authorization: Bearer <token>
 }
 ```
 
-### 6.7 Token Rotation
+### 6.10 Token Rotation
 
 ```http
 POST /api/v1/admin/token/rotate
@@ -512,9 +512,11 @@ Content-Type: application/json
 
 **인증 우선순위** (auth.lua verify):
 
-1. Rotated token (shared dict `luagate_admin_token`)
-2. Grace period old token (shared dict `luagate_admin_token_old`, TTL 30s)
-3. Env-loaded token (`LUAGATE_ADMIN_TOKEN`)
+1. Rotated token (shared dict `luagate_admin_token`) — rotation 후 유일한 정상 토큰
+2. Grace period old token (shared dict `luagate_admin_token_old`, TTL 30s) — 읽기 전용, rotation 재호출 불가
+3. Env-loaded token (`LUAGATE_ADMIN_TOKEN`) — rotation 미발생 시에만 유효
+
+> **보안**: grace period 토큰으로 인증한 요청은 `POST /api/v1/admin/token/rotate` 호출 불가 (403).
 
 **응답 200:**
 
@@ -527,10 +529,12 @@ Content-Type: application/json
 
 **에러 응답:**
 
-| 상태 코드 | 조건 |
-|----------|------|
-| 400 | body 없음, 잘못된 JSON, new_token 누락, new_token 길이 부족 |
-| 500 | shared dict 사용 불가 (fail-closed) |
+| 상태 코드 | error 코드 | 조건 |
+|----------|----------|------|
+| 400 | `bad_request` | body 없음, 잘못된 JSON, new_token 누락, new_token 길이 부족 |
+| 403 | `forbidden` | grace period 토큰으로 rotation 시도 |
+| 500 | `internal_error` | shared dict 사용 불가 (fail-closed) |
+| 500 | `audit_write_failed` | 감사 로그 기록 실패 → mutation rollback (stage: `audit`) |
 
 ## 7. 감사 로그 (audit.log) 섹션
 
