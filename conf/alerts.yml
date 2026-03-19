@@ -81,13 +81,12 @@ groups:
       # ── Service Health ───────────────────────────────────────────────
       - alert: LuagateWorkerDown
         expr: |
-          luagate_http_requests_total{action="allow"} == 0
-          and luagate_http_requests_total{action="deny"} == 0
-          and luagate_policy_loaded == 0
+          absent(up{job="luagate"} == 1)
+          or luagate_policy_loaded == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "LuaGate not processing any requests and policy not loaded"
-          description: "No HTTP requests processed and policy not loaded for 1 minute. Note: luagate_policy_loaded requires both HTTP and Stream versions; HTTP-only deployments should verify via /health."
+          summary: "LuaGate target down or policy not loaded"
+          description: "Prometheus cannot reach LuaGate scrape target, or policy is not loaded for 1 minute. Note: luagate_policy_loaded requires both HTTP and Stream versions; HTTP-only deployments should verify via /health endpoint."
           runbook_url: "TODO(DON-187): docs/runbook/alert-response.md#LuagateWorkerDown"

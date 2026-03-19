@@ -49,8 +49,17 @@ services:
     volumes:
       - ./conf/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./conf/alerts.yml:/etc/prometheus/alerts.yml:ro
+    environment:
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:?Set LUAGATE_ADMIN_TOKEN}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "$$LUAGATE_ADMIN_TOKEN" > /run/secrets/admin_token
+        exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml
     networks:
-      - luagate-net
+      luagate-net:
+        ipv4_address: 172.29.0.10
     depends_on:
       - luagate
     restart: unless-stopped
