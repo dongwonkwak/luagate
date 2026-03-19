@@ -10,7 +10,8 @@
 #   int_test   — tests/**/*.t
 #   ui_ts      — ui/src/**/*.{ts,tsx} (TypeScript/React)
 #   ui_api     — ui/src/api/**/*.ts (API 클라이언트)
-#   e2e        — e2e/**/*.spec.ts (Playwright E2E)
+#   e2e        — e2e/** (Playwright E2E)
+#   ui_ci      — .github/workflows/frontend-* (프론트엔드 CI)
 #   ci_build   — .github/**, Makefile, flake.nix, CMakeLists.txt
 #   docs       — docs/**/*.md, .claude/knowledge/*.md, *.md (root)
 #   policy     — policies/**/*.yaml
@@ -67,7 +68,8 @@ jobs:
               int_test:   is([/^tests\/.+\.t$/]),
               ui_ts:      is([/^ui\/src\/.+\.tsx?$/]),
               ui_api:     is([/^ui\/src\/api\/.+\.ts$/]),
-              e2e:        is([/^e2e\/.+\.spec\.ts$/]),
+              e2e:        is([/^e2e\//]),
+              ui_ci:      is([/^\.github\/workflows\/frontend-/]),
               ci_build:   is([/^\.github\//, 'Makefile', 'flake.nix']),
               docs:       is([/^docs\/.+\.md$/, /^\.claude\/knowledge\/.+\.md$/, /^[^/]+\.md$/]),
               policy:     is([/^policies\/.+\.yaml$/]),
@@ -180,6 +182,17 @@ jobs:
               ].join('\n'));
             }
 
+            if (cats.ui_ci) {
+              directives.push([
+                '### 프론트엔드 CI 워크플로우 리뷰',
+                '- path filter 패턴이 `ui/**` + `.github/workflows/frontend-*.yml` 포함 확인',
+                '- `detect-changes` → 메인 job → `*-status` 3단계 구조 준수',
+                '- `frontend-*-status` job이 `if: always()`로 항상 실행',
+                '- Node.js 버전/캐시 설정이 `frontend-quality.yml`과 일치',
+                '- 참조: `.claude/knowledge/ui-review-checklist.md`',
+              ].join('\n'));
+            }
+
             if (cats.ci_build) {
               directives.push([
                 '### CI/Build 설정 리뷰',
@@ -219,7 +232,7 @@ jobs:
               '- **프로젝트 컨벤션**: `.claude/knowledge/conventions.md` 기준',
               '  - 커밋 메시지 형식 준수 (`type(scope): description [DON-XX]`)',
               '  - 코드와 문서 변경이 같은 PR에 포함 (same-PR 규칙)',
-              '- **보안**: `.claude/knowledge/review-checklist.md` 기준' + (cats.ui_ts || cats.ui_api || cats.e2e ? ' + `.claude/knowledge/ui-review-checklist.md`' : ''),
+              '- **보안**: `.claude/knowledge/review-checklist.md` 기준' + (cats.ui_ts || cats.ui_api || cats.e2e || cats.ui_ci ? ' + `.claude/knowledge/ui-review-checklist.md`' : ''),
               '  - 보안 경로 fail-closed (에러 → deny)',
               '  - PII 필드 redaction 적용 여부',
               '  - Admin API 타이밍 안전 토큰 비교',
