@@ -379,6 +379,18 @@ REVIEWS_DIR="${MAIN_ROOT}/.claude/reviews"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# worktree 환경이면 메인 저장소의 node_modules를 symlink (commitlint 등 hook 의존성)
+if [ "$REPO_ROOT" != "$MAIN_ROOT" ]; then
+  if [ ! -e "$REPO_ROOT/node_modules" ]; then
+    ln -sf "$MAIN_ROOT/node_modules" "$REPO_ROOT/node_modules"
+  fi
+  # worktree info/exclude는 git이 읽지 않으므로 main의 .git/info/exclude에 추가
+  main_exclude="${MAIN_ROOT}/.git/info/exclude"
+  if ! grep -qF 'node_modules' "$main_exclude" 2>/dev/null; then
+    echo 'node_modules' >>"$main_exclude"
+  fi
+fi
+
 load_pr_metadata
 
 if [ "$CURRENT_BRANCH" != "$PR_HEAD_REF" ]; then
