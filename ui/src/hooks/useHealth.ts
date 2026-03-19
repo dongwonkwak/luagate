@@ -1,12 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import type { HealthResponse } from "../types/api";
 
-const HEALTH_URL = import.meta.env.VITE_ADMIN_API_URL
-  ? `${import.meta.env.VITE_ADMIN_API_URL}/health`
-  : "/health";
-
 async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(HEALTH_URL);
+  // /health is always at the server root, never under /api prefix
+  const res = await fetch("/health");
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
   return res.json() as Promise<HealthResponse>;
 }

@@ -57,17 +57,21 @@ function parsePrometheusText(text: string): ParsedMetric[] {
 }
 
 async function fetchMetrics(): Promise<ParsedMetric[]> {
-  // /metrics is at the server root, not under /api prefix
+  // /metrics is always at the server root, never under /api prefix
   const token = localStorage.getItem("luagate_admin_token");
-  const baseUrl = import.meta.env.VITE_ADMIN_API_URL || "";
-  const url = baseUrl ? `${baseUrl}/../metrics` : "/metrics";
 
-  const res = await fetch(url, {
+  const res = await fetch("/metrics", {
     headers: {
       Accept: "text/plain",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
+
+  if (res.status === 401) {
+    localStorage.removeItem("luagate_admin_token");
+    window.location.href = "/dashboard/login";
+    throw new Error("Unauthorized");
+  }
 
   if (!res.ok) throw new Error(`Metrics fetch failed: ${res.status}`);
   const text = await res.text();

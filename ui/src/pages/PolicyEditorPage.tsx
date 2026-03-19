@@ -39,10 +39,16 @@ export function PolicyEditorPage() {
     setMessage(null);
 
     try {
-      await updateMutation.mutateAsync({
+      const result = await updateMutation.mutateAsync({
         yaml: editorValue,
         etag: currentEtag,
       });
+      // Immediately sync local state so editor is no longer dirty
+      setServerYaml(editorValue);
+      const newEtag = result.headers.get("ETag");
+      if (newEtag) {
+        setCurrentEtag(newEtag.replace(/"/g, ""));
+      }
       setMessage({ type: "success", text: "Policy saved successfully." });
     } catch (err) {
       setMessage({
