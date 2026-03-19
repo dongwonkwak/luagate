@@ -20,6 +20,7 @@
 
 ```bash
 # 256-bit random 토큰 생성 (32바이트 entropy)
+OLD_TOKEN="$TOKEN"  # grace period 검증용
 NEW_TOKEN=$(openssl rand -base64 32)
 # 주의: 토큰을 터미널에 출력하지 않음 (스크롤백 유출 방지)
 # 필요 시 파일로 임시 저장 후 즉시 삭제
@@ -68,10 +69,10 @@ curl -s -o /dev/null -w "%{http_code}" \
   http://localhost:9090/api/v1/status
 # 기대값: 200
 
-# 30초 후 이전 토큰 만료 확인
+# 30초 후 이전 토큰 만료 확인 (OLD_TOKEN 별도 저장 필요)
 sleep 35
 curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: Bearer $OLD_TOKEN" \
   http://localhost:9090/api/v1/status
 # 기대값: 401
 ```

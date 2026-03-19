@@ -28,6 +28,14 @@
 | Docker (기본) | `docker compose logs luagate` (stdout) | `docker compose logs luagate` (stderr) |
 | 개발 (기본) | stdout (`conf/nginx.conf` 기본 설정) | stderr |
 
+> **audit.log 참고**: 기본 배포에서 감사 이벤트는 `[luagate:audit]` 접두사로 error_log(stderr)에 기록된다.
+> Docker 환경에서 audit 이벤트만 필터링:
+>
+> ```bash
+> docker compose logs luagate 2>&1 | grep '\[luagate:audit\]' | \
+>   sed 's/.*\[luagate:audit\] //' | jq .
+> ```
+
 ```bash
 # 토큰 설정
 export TOKEN="$LUAGATE_ADMIN_TOKEN"
