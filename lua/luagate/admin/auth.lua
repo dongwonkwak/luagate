@@ -174,6 +174,24 @@ function _M.verify()
   end
 
   -- 3. Constant-time comparison (security-patterns.md: never use ==)
+  -- Check order: rotated token (shared dict) → env-loaded token → grace period old token
+  local state_dict = ngx.shared.luagate_state
+
+  -- 3a. Check rotated token from shared dict (if rotation has occurred)
+  if state_dict then
+    local rotated_token = state_dict:get("luagate_admin_token")
+    if rotated_token and constant_time_compare(provided, rotated_token) then
+      return true
+    end
+
+    -- 3b. Check grace period old token (valid for 30s after rotation)
+    local old_token = state_dict:get("luagate_admin_token_old")
+    if old_token and constant_time_compare(provided, old_token) then
+      return true
+    end
+  end
+
+  -- 3c. Check env-loaded token (original, always valid unless rotated)
   if not constant_time_compare(provided, _admin_token) then
     _reject("invalid_token")
     return false
