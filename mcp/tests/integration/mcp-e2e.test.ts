@@ -18,7 +18,7 @@ import { registerStatusTools } from "../../src/tools/status.js";
 import { registerReloadTools } from "../../src/tools/reload.js";
 
 const ADMIN_URL = process.env.LUAGATE_ADMIN_URL ?? "http://127.0.0.1:9090";
-const ADMIN_TOKEN = process.env.LUAGATE_ADMIN_TOKEN ?? "integration-test-token";
+const ADMIN_TOKEN = process.env.LUAGATE_ADMIN_TOKEN ?? "integration-test-token-minimum-32bytes!";
 
 describe("MCP E2E Integration", () => {
   let client: AdminClient;

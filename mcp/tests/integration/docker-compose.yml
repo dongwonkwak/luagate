@@ -9,7 +9,7 @@ services:
     ports:
       - "127.0.0.1:9190:9090"
     environment:
-      - LUAGATE_ADMIN_TOKEN=integration-test-token
+      - LUAGATE_ADMIN_TOKEN=integration-test-token-minimum-32bytes!
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 2s
@@ -27,6 +27,6 @@ services:
         condition: service_healthy
     environment:
       - LUAGATE_ADMIN_URL=http://127.0.0.1:9190
-      - LUAGATE_ADMIN_TOKEN=integration-test-token
+      - LUAGATE_ADMIN_TOKEN=integration-test-token-minimum-32bytes!
       - MCP_CLIENT_NAME=integration-test
     command: ["sh", "-c", "npm ci && npm run test:integration"]

@@ -132,6 +132,40 @@ describe("MCP Protocol (InMemoryTransport)", () => {
     expect(adminClient.updatePolicies).not.toHaveBeenCalled();
   });
 
+  it("calls luagate_update_policies with confirm=true via MCP protocol", async () => {
+    const result = await mcpClient.callTool({
+      name: "luagate_update_policies",
+      arguments: {
+        policy_yaml: 'version: "1.0"\nglobal:\n  default_action: deny\n',
+        expected_source_version: "v1",
+        confirm: true,
+      },
+    });
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("업데이트 성공");
+    expect(adminClient.updatePolicies).toHaveBeenCalled();
+  });
+
+  it("calls luagate_rollback_policies with confirm=true via MCP protocol", async () => {
+    const result = await mcpClient.callTool({
+      name: "luagate_rollback_policies",
+      arguments: {
+        policy_yaml: 'version: "1.0"\nglobal:\n  default_action: deny\n',
+        expected_source_version: "v1",
+        confirm: true,
+      },
+    });
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("롤백 성공");
+    expect(adminClient.updatePolicies).toHaveBeenCalledWith(
+      expect.any(String),
+      "v1",
+      "luagate_rollback_policies",
+    );
+  });
+
   it("calls luagate_reload via MCP protocol", async () => {
     const result = await mcpClient.callTool({
       name: "luagate_reload",
