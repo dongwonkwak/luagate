@@ -23,12 +23,14 @@
 ```
 ADR-001 (실행 모델)
 ├── ADR-002 (정책 평가) → ADR-003 (저장/Reload) → ADR-005 (활성화/동시성)
-├── ADR-004 (로그/메트릭/보안) → ADR-006 (메트릭 Cardinality)
+├── ADR-004 (로그/메트릭/보안) → ADR-006 (메트릭 Cardinality; +ADR-001)
 │                              → ADR-007 (로그 Redaction)
-│                              → ADR-011 (MCP 서버, ADR-005에도 의존)
-├── ADR-008 (멀티 인스턴스)
-└── ADR-009 (FFI 타임아웃)
+├── ADR-008 (멀티 인스턴스; +ADR-003)
+├── ADR-009 (FFI 타임아웃; +ADR-003)
+└── ADR-011 (MCP 서버; ADR-004 + ADR-005)
 ```
+
+> 각 ADR의 정확한 `Depends on`은 해당 문서의 front matter를 참조하세요.
 
 ## 연관 스펙 문서 매핑
 
@@ -42,8 +44,8 @@ ADR-001 (실행 모델)
 | ADR-006 | [admin-api.md](../../spec/admin-api.md), [log-schema.md](../../spec/log-schema.md), [architecture.md](../../spec/architecture.md) |
 | ADR-007 | [log-schema.md](../../spec/log-schema.md) |
 | ADR-008 | [architecture.md](../../spec/architecture.md), [admin-api.md](../../spec/admin-api.md), [log-schema.md](../../spec/log-schema.md) |
-| ADR-009 | [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [http-pipeline.md](../../spec/http-pipeline.md), [stream-pipeline.md](../../spec/stream-pipeline.md) |
-| ADR-011 | [admin-api.md](../../spec/admin-api.md) |
+| ADR-009 | [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [http-pipeline.md](../../spec/http-pipeline.md), [stream-pipeline.md](../../spec/stream-pipeline.md), [architecture.md](../../spec/architecture.md) |
+| ADR-011 | [admin-api.md](../../spec/admin-api.md), [log-schema.md](../../spec/log-schema.md) |
 
 ## ADR 작성 가이드
 
