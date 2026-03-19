@@ -22,9 +22,9 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      // Validate token by calling /health (no auth needed) then /api/v1/status (auth required)
+      // Validate token by calling an auth-required endpoint
       const baseUrl = import.meta.env.VITE_ADMIN_API_URL || "/api";
-      const res = await fetch(`${baseUrl}/v1/status`, {
+      const res = await fetch(`${baseUrl}/v1/policies/version`, {
         headers: { Authorization: `Bearer ${tokenInput.trim()}` },
       });
 

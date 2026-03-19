@@ -3,29 +3,22 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { ErrorAlert } from "../components/ErrorAlert";
-import type { StatusResponse } from "../types/api";
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
+import type { PolicyVersionResponse } from "../types/api";
 
 export function SystemStatusPage() {
   const health = useHealth();
-  const status = useQuery({
-    queryKey: ["status"],
+  const versions = useQuery({
+    queryKey: ["policyVersions"],
     queryFn: async () => {
-      const { data } = await apiClient<StatusResponse>("/v1/status");
+      const { data } = await apiClient<PolicyVersionResponse>(
+        "/v1/policies/version",
+      );
       return data;
     },
     refetchInterval: 30_000,
   });
 
-  if (health.isLoading || status.isLoading) {
+  if (health.isLoading) {
     return <p className="text-gray-500">Loading...</p>;
   }
 
@@ -42,7 +35,7 @@ export function SystemStatusPage() {
     <div>
       <h2 className="mb-6 text-2xl font-bold text-gray-900">System Status</h2>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {/* Health Status */}
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <p className="text-sm text-gray-500">Health</p>
@@ -51,27 +44,21 @@ export function SystemStatusPage() {
           </div>
         </div>
 
-        {/* Uptime */}
+        {/* Policy Loaded At */}
         <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="text-sm text-gray-500">Uptime</p>
-          <p className="mt-1 text-xl font-semibold text-gray-900">
-            {status.data ? formatUptime(status.data.uptime_seconds) : "—"}
+          <p className="text-sm text-gray-500">Policy Loaded At</p>
+          <p className="mt-1 text-sm font-semibold text-gray-900">
+            {health.data?.policy_loaded_at
+              ? new Date(health.data.policy_loaded_at).toLocaleString()
+              : "—"}
           </p>
         </div>
 
-        {/* Workers */}
+        {/* FFI Watchdog */}
         <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="text-sm text-gray-500">Workers</p>
+          <p className="text-sm text-gray-500">FFI Watchdog Timeouts</p>
           <p className="mt-1 text-xl font-semibold text-gray-900">
-            {status.data?.worker_count ?? "—"}
-          </p>
-        </div>
-
-        {/* Version */}
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="text-sm text-gray-500">Version</p>
-          <p className="mt-1 text-xl font-semibold text-gray-900">
-            {status.data?.luagate_version ?? "—"}
+            {health.data?.ffi_watchdog_timeouts ?? "—"}
           </p>
         </div>
       </div>
@@ -85,38 +72,25 @@ export function SystemStatusPage() {
           <div>
             <dt className="text-xs text-gray-500">Source Version</dt>
             <dd className="mt-0.5 truncate font-mono text-sm text-gray-900">
-              {health.data?.source_version ?? "—"}
+              {versions.data?.source_version ??
+                health.data?.source_version ??
+                "—"}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-gray-500">HTTP Active</dt>
             <dd className="mt-0.5 truncate font-mono text-sm text-gray-900">
-              {health.data?.active_http_version ?? "—"}
+              {versions.data?.active_http_version ??
+                health.data?.active_http_version ??
+                "—"}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-gray-500">Stream Active</dt>
             <dd className="mt-0.5 truncate font-mono text-sm text-gray-900">
-              {health.data?.active_stream_version ?? "—"}
-            </dd>
-          </div>
-        </dl>
-      </div>
-
-      {/* Last Reload */}
-      <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
-        <h3 className="mb-3 text-lg font-medium text-gray-900">Last Reload</h3>
-        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <dt className="text-xs text-gray-500">Time</dt>
-            <dd className="mt-0.5 text-sm text-gray-900">
-              {status.data?.last_reload_at ?? "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-gray-500">Status</dt>
-            <dd className="mt-0.5 text-sm text-gray-900">
-              {status.data?.last_reload_status ?? "—"}
+              {versions.data?.active_stream_version ??
+                health.data?.active_stream_version ??
+                "—"}
             </dd>
           </div>
         </dl>

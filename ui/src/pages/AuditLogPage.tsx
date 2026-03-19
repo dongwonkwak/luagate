@@ -12,13 +12,22 @@ export function AuditLogPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["audit", offset],
     queryFn: async () => {
-      const { data } = await apiClient<AuditResponse>(
-        `/v1/audit?offset=${offset}&limit=${PAGE_SIZE}`,
-      );
-      return data;
+      try {
+        const { data } = await apiClient<AuditResponse>(
+          `/v1/audit?offset=${offset}&limit=${PAGE_SIZE}`,
+        );
+        return data;
+      } catch (e) {
+        // Audit endpoint may not be implemented yet (404)
+        if (e instanceof Error && e.message.includes("404")) {
+          return { entries: [], total: 0, offset: 0, limit: PAGE_SIZE } as AuditResponse;
+        }
+        throw e;
+      }
     },
     refetchInterval: 30_000,
   });
+  const endpointMissing = data?.total === 0 && !isLoading && !error;
 
   if (isLoading) return <p className="text-gray-500">Loading audit logs...</p>;
   if (error) {
@@ -41,7 +50,12 @@ export function AuditLogPage() {
         </p>
       </div>
 
-      {entries.length === 0 ? (
+      {endpointMissing && entries.length === 0 ? (
+        <div className="rounded-md border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+          Audit log endpoint is not available yet. This feature will be enabled
+          when the <code>/api/v1/audit</code> endpoint is implemented.
+        </div>
+      ) : entries.length === 0 ? (
         <p className="text-gray-500">No audit entries found.</p>
       ) : (
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">

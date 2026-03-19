@@ -10,16 +10,24 @@ export function PolicyEditorPage() {
 
   const [editorValue, setEditorValue] = useState("");
   const [currentEtag, setCurrentEtag] = useState<string | null>(null);
+  const [serverYaml, setServerYaml] = useState("");
   const [message, setMessage] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
 
+  const isDirty = serverYaml !== editorValue;
+
   useEffect(() => {
     if (policyData) {
-      setEditorValue(policyData.yaml);
+      // Only overwrite editor if there are no unsaved changes
+      if (!isDirty) {
+        setEditorValue(policyData.yaml);
+      }
+      setServerYaml(policyData.yaml);
       setCurrentEtag(policyData.etag);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [policyData]);
 
   const handleSave = async () => {
@@ -45,6 +53,12 @@ export function PolicyEditorPage() {
   };
 
   const handleReload = async () => {
+    if (isDirty) {
+      const confirmed = window.confirm(
+        "You have unsaved changes. Reloading will discard them. Continue?",
+      );
+      if (!confirmed) return;
+    }
     setMessage(null);
     try {
       await reloadMutation.mutateAsync();
@@ -67,8 +81,6 @@ export function PolicyEditorPage() {
       />
     );
   }
-
-  const isDirty = policyData?.yaml !== editorValue;
 
   return (
     <div className="flex h-full flex-col">
