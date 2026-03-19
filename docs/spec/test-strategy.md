@@ -447,7 +447,7 @@ stages:
 | 워크플로우 | 내용 | PR blocking |
 |-----------|------|------------|
 | `frontend-quality.yml` | ESLint + Prettier + tsc + Vite build | Yes |
-| `frontend-unit.yml` | Vitest 단위 테스트 | Yes (예정) |
+| `frontend-unit.yml` | Vitest 단위 테스트 | Yes |
 | `frontend-e2e.yml` | Playwright E2E 테스트 | Yes (예정) |
 
 - Path filter: `ui/**` 또는 `.github/workflows/frontend-*.yml` 변경 시에만 실행

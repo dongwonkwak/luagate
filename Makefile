@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint e2e
+.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -151,6 +151,10 @@ ui-build:
 ui-lint:
 	@echo "==> Running UI lint + format check..."
 	cd ui && npm run lint && npm run format:check
+
+ui-test:
+	@echo "==> Running UI unit tests (Vitest)..."
+	cd ui && npm run test
 
 # ── E2E (Playwright) ──────────────────────────────────────────────────────
 e2e:
