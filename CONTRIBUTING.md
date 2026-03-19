@@ -173,7 +173,7 @@ docs(spec): update http-pipeline stream preread section [DON-90]
 4. 커밋: `type(scope): 설명 [DON-XX]`
 5. PR 생성 → CI 통과 → 리뷰 → 머지
 6. Linear 이슈 → **Done** + 완료 코멘트 (파일 경로 포함)
-7. `PROGRESS.md` 엔트리 추가
+7. `PROGRESS.md` 엔트리 추가 (worktree 사용 시 main 머지 후 갱신)
 
 ### 이슈 완료 기준
 
@@ -182,7 +182,7 @@ docs(spec): update http-pipeline stream preread section [DON-90]
 - [ ] 관련 스펙 준수 (AGENTS.md 불변식)
 - [ ] 문서 갱신 (same-PR)
 - [ ] Linear 코멘트: 구현 파일 경로 포인터 포함
-- [ ] PROGRESS.md append
+- [ ] PROGRESS.md append (worktree 시 머지 후 갱신)
 
 ---
 

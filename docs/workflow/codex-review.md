@@ -56,13 +56,13 @@ scripts/
 
 2. Claude Code: request-codex-review 스킬 실행
    └─ .claude/reviews/DON-XXX-{type}-review.md 생성
-   └─ PROGRESS.md에 PENDING_REVIEW: DON-XXX-{type} 마커 기입
+   └─ PROGRESS.md에 PENDING_REVIEW: DON-XXX-{type} 마커 기입 (worktree 시 생략)
    └─ 사람에게 실행 명령 안내
 
 3. 사람: Codex 실행
    └─ ./scripts/codex-review.sh
    └─ 결과: .claude/reviews/DON-XXX-{type}-result.md 생성
-   └─ PROGRESS.md: PENDING_REVIEW → COMPLETED_REVIEW 자동 갱신
+   └─ PROGRESS.md: PENDING_REVIEW → COMPLETED_REVIEW 자동 갱신 (항상 main의 PROGRESS.md)
 
 4. 사람: 피드백 검토 후 Claude Code에 수정 지시
    └─ "result.md를 보고 피드백 반영해줘"
@@ -83,7 +83,7 @@ scripts/
 
 2. Claude Code: request-codex-review 스킬 재실행
    └─ review.md는 덮어쓰지 않음 (이미 존재)
-   └─ PROGRESS.md에 PENDING_REVIEW 마커 재기입
+   └─ PROGRESS.md에 PENDING_REVIEW 마커 재기입 (worktree 시 생략 — 수동 지정 실행)
         기존: COMPLETED_REVIEW: DON-XXX-{type} (날짜)
         추가: PENDING_REVIEW: DON-XXX-{type}    ← 아래에 append
    └─ 스크립트는 tail -1으로 마지막 마커를 읽으므로 정상 동작
@@ -126,9 +126,9 @@ Claude Code worktree(`isolation: "worktree"`)에서 구현한 경우의 워크�
 1. Claude Code: worktree에서 구현 + 커밋 완료
    └─ worktree 경로 + 브랜치 반환
 
-2. Claude Code: request-codex-review 스킬 실행 (main context)
-   └─ main/.claude/reviews/DON-XXX-{type}-review.md 생성
-   └─ main/PROGRESS.md에 PENDING_REVIEW 마커 기입
+2. Claude Code: request-codex-review 스킬 실행 (worktree context)
+   └─ worktree/.claude/reviews/DON-XXX-{type}-review.md 생성
+   └─ PROGRESS.md 수정하지 않음 (worktree 규칙)
 
 3. 사람: worktree 디렉토리에서 Codex 실행
    └─ cd <worktree-path>
