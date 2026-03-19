@@ -27,7 +27,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           # Extract <!-- PROGRESS ... --> block from PR body
-          ENTRY=$(echo "$PR_BODY" | sed -n '/^<!-- PROGRESS$/,/^-->$/p' | grep '^\|' || true)
+          ENTRY=$(echo "$PR_BODY" | sed -n '/^<!-- PROGRESS$/,/^-->$/p' | grep '^|' || true)
 
           if [ -z "$ENTRY" ]; then
             echo "No <!-- PROGRESS --> block found in PR body — skipping"
