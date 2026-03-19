@@ -84,7 +84,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ```bash
 # 현재 활성 정책의 규칙 수 세기
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://localhost:9090/api/v1/policies | grep -c '^\s*- id:'
+  http://localhost:9090/api/v1/policies | grep -c '^[[:space:]]*- id:'
 ```
 
 규칙이 100개 이상이면 평가 오버헤드 증가 가능. 규칙 통합 또는 우선순위 최적화 검토.
