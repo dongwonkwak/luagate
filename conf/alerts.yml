@@ -1,0 +1,90 @@
+# LuaGate Prometheus Alerting Rules
+# Metric names match lua/luagate/admin/router.lua handle_metrics()
+# Validate with: promtool check rules conf/alerts.yml
+
+groups:
+  - name: luagate
+    rules:
+      # ── Block Rate ───────────────────────────────────────────────────
+      - alert: LuagateHighBlockRate
+        expr: |
+          (
+            rate(luagate_http_requests_total{action="deny"}[5m])
+            /
+            (rate(luagate_http_requests_total{action="allow"}[5m]) + rate(luagate_http_requests_total{action="deny"}[5m]))
+          ) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High block rate (> 30%)"
+          description: "More than 30% of HTTP requests are being denied for 5 minutes."
+          runbook: "docs/runbook/alert-response.md#LuagateHighBlockRate"
+
+      - alert: LuagateBlockRateSpike
+        expr: |
+          rate(luagate_http_requests_denied_total[1m])
+          > 10 * rate(luagate_http_requests_denied_total[1h])
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Block rate spike (10x above 1h average)"
+          description: "Denied request rate in the last 1 minute is 10x higher than the 1-hour average."
+          runbook: "docs/runbook/alert-response.md#LuagateBlockRateSpike"
+
+      # ── Latency ──────────────────────────────────────────────────────
+      - alert: LuagateHighLatency
+        expr: |
+          histogram_quantile(0.99, rate(luagate_http_response_time_ms_bucket[5m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p99 latency (> 100ms)"
+          description: "HTTP response time p99 exceeds 100ms for 5 minutes."
+          runbook: "docs/runbook/alert-response.md#LuagateHighLatency"
+
+      # ── Connections ──────────────────────────────────────────────────
+      - alert: LuagateActiveConnectionsHigh
+        expr: luagate_active_connections{type="http"} > 1000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High active HTTP connections (> 1000)"
+          description: "Active HTTP connections exceed 1000 for 2 minutes."
+          runbook: "docs/runbook/alert-response.md#LuagateActiveConnectionsHigh"
+
+      # ── Admin API ────────────────────────────────────────────────────
+      - alert: LuagateAdminAPIErrors
+        expr: rate(luagate_http_upstream_errors_total[2m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Admin API upstream 5xx errors detected"
+          description: "Upstream 5xx errors are occurring on the Admin API."
+          runbook: "docs/runbook/alert-response.md#LuagateAdminAPIErrors"
+
+      # ── Policy Reload ────────────────────────────────────────────────
+      - alert: LuagatePolicyReloadFailed
+        expr: increase(luagate_policy_reload_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Policy reload failure detected"
+          description: "Policy reload has failed in the last 5 minutes."
+          runbook: "docs/runbook/alert-response.md#LuagatePolicyReloadFailed"
+
+      # ── Service Health ───────────────────────────────────────────────
+      - alert: LuagateWorkerDown
+        expr: luagate_policy_loaded == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LuaGate policy not loaded"
+          description: "Policy is not loaded for 1 minute — service is effectively down."
+          runbook: "docs/runbook/alert-response.md#LuagateWorkerDown"

@@ -40,6 +40,30 @@ services:
       - luagate-net
     restart: unless-stopped
 
+  # ── Observability (dev only) ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: luagate-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./conf/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./conf/alerts.yml:/etc/prometheus/alerts.yml:ro
+    networks:
+      - luagate-net
+    depends_on:
+      - luagate
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: luagate-alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - luagate-net
+    restart: unless-stopped
+
 networks:
   luagate-net:
     driver: bridge
