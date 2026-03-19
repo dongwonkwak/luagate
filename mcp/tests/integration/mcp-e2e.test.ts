@@ -9,7 +9,13 @@
  *   LUAGATE_ADMIN_TOKEN - Admin API bearer token
  */
 import { describe, it, expect, beforeAll } from "vitest";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { AdminClient, AdminApiRequestError } from "../../src/admin-client.js";
+import { registerPolicyTools } from "../../src/tools/policies.js";
+import { registerStatusTools } from "../../src/tools/status.js";
+import { registerReloadTools } from "../../src/tools/reload.js";
 
 const ADMIN_URL = process.env.LUAGATE_ADMIN_URL ?? "http://127.0.0.1:9090";
 const ADMIN_TOKEN = process.env.LUAGATE_ADMIN_TOKEN ?? "integration-test-token";
@@ -88,5 +94,40 @@ describe("MCP E2E Integration", () => {
 
     const invalidResult = client.validatePoliciesLocally("bad yaml without version");
     expect(invalidResult.valid).toBe(false);
+  });
+});
+
+describe("MCP Server Bootstrap (real Admin API)", () => {
+  it("boots MCP server with real AdminClient and lists tools via InMemoryTransport", async () => {
+    const adminClient = new AdminClient({
+      baseUrl: ADMIN_URL,
+      token: ADMIN_TOKEN,
+      mcpClientName: "integration-test",
+      mcpSessionId: "boot-test",
+    });
+
+    const server = new McpServer({ name: "luagate", version: "0.1.0" });
+    registerPolicyTools(server, adminClient);
+    registerStatusTools(server, adminClient);
+    registerReloadTools(server, adminClient);
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const mcpClient = new Client({ name: "test", version: "1.0.0" });
+
+    await server.connect(serverTransport);
+    await mcpClient.connect(clientTransport);
+
+    // Verify all 7 tools are registered
+    const { tools } = await mcpClient.listTools();
+    expect(tools).toHaveLength(7);
+
+    // Call a tool against the real Admin API
+    const result = await mcpClient.callTool({
+      name: "luagate_get_status",
+      arguments: {},
+    });
+    const text = (result.content[0] as { text: string }).text;
+    const status = JSON.parse(text);
+    expect(status.worker_count).toBeGreaterThan(0);
   });
 });

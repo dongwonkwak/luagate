@@ -56,6 +56,10 @@ jobs:
     steps:
       - name: Check results
         run: |
+          if [ "${{ needs.detect-changes.result }}" != "success" ]; then
+            echo "detect-changes failed or was cancelled"
+            exit 1
+          fi
           if [ "${{ needs.detect-changes.outputs.mcp }}" != "true" ]; then
             echo "No MCP changes detected — skipping"
             exit 0

@@ -1,11 +1,13 @@
 # Run from repo root: docker compose -f mcp/tests/integration/docker-compose.yml up
+# Network: mcp-test-runner uses host network to access luagate via 127.0.0.1:9190
+# which satisfies the Admin API IP allowlist (nginx.conf: allow 127.0.0.1)
 services:
   luagate:
     build:
       context: ../../../
       dockerfile: Dockerfile
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9190:9090"
     environment:
       - LUAGATE_ADMIN_TOKEN=integration-test-token
     healthcheck:
@@ -16,6 +18,7 @@ services:
 
   mcp-test-runner:
     image: node:20-slim
+    network_mode: host
     working_dir: /app
     volumes:
       - ../../../mcp:/app
@@ -23,7 +26,7 @@ services:
       luagate:
         condition: service_healthy
     environment:
-      - LUAGATE_ADMIN_URL=http://luagate:9090
+      - LUAGATE_ADMIN_URL=http://127.0.0.1:9190
       - LUAGATE_ADMIN_TOKEN=integration-test-token
       - MCP_CLIENT_NAME=integration-test
     command: ["sh", "-c", "npm ci && npm run test:integration"]
