@@ -1,11 +1,24 @@
 #!/bin/bash
 # scripts/cargo-test-wrapper.sh — pre-push hook wrapper for cargo test
 # Runs cargo test only when src/ (Rust) files have changed
+# Git pre-push passes: $1=remote_name $2=remote_url, OIDs on stdin
 set -euo pipefail
 
-REMOTE_SHA="${2:-HEAD}"
+REMOTE_OID=""
+while IFS=' ' read -r _local_ref local_oid _remote_ref remote_oid; do
+  if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
+    REMOTE_OID="$(git merge-base HEAD main 2>/dev/null || echo HEAD)"
+  else
+    REMOTE_OID="$remote_oid"
+  fi
+done
 
-if git diff --name-only "$REMOTE_SHA" HEAD 2>/dev/null | grep -q '^src/'; then
+if [ -z "$REMOTE_OID" ]; then
+  echo "  no push refs — skipping cargo test"
+  exit 0
+fi
+
+if git diff --name-only "$REMOTE_OID" "$local_oid" 2>/dev/null | grep -q '^src/'; then
   echo "  src/ (Rust) changes detected — running cargo test..."
   for crate_dir in src/decoder src/scanner src/stream; do
     if [ -f "$crate_dir/Cargo.toml" ]; then
