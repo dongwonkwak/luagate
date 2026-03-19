@@ -58,6 +58,11 @@ export function PolicyEditorPage() {
         "You have unsaved changes. Reloading will discard them. Continue?",
       );
       if (!confirmed) return;
+      // User confirmed discard — reset editor to server state
+      if (policyData) {
+        setEditorValue(policyData.yaml);
+        setServerYaml(policyData.yaml);
+      }
     }
     setMessage(null);
     try {

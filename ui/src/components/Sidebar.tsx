@@ -5,7 +5,7 @@ const NAV_ITEMS = [
   { to: "/dashboard", label: "System Status", icon: "🏠" },
   { to: "/dashboard/policies", label: "Policy Editor", icon: "📋" },
   { to: "/dashboard/metrics", label: "Metrics", icon: "📊" },
-  { to: "/dashboard/logs", label: "Audit Logs", icon: "📜" },
+  { to: "/dashboard/logs", label: "Audit Logs (Soon)", icon: "📜" },
 ] as const;
 
 export function Sidebar() {
