@@ -17,3 +17,11 @@
 - [x] `lua/luagate/stream/handler.lua:346`-`349`에서 `stream_ffi.radix_lookup()`가 `ffi_timeout`/`radix_lookup_fail`를 반환해도 WARN만 남기고 정책 평가를 계속합니다. `docs/spec/rust-ffi-modules.md §2`와 AGENTS.md의 fail-closed 불변식은 FFI timeout/internal error를 연결 종료로 처리하도록 요구하므로, 이 경로는 여전히 스펙 위반입니다. `tests/unit/stream/handler_spec.lua`에도 `radix_lookup` 실패 시 deny를 강제하는 검증이 없습니다.
       → 해결자: Claude Code
       → 해결 방식: radix_lookup 에러 시 ERR 로그 + fail-closed deny (ngx.exit(ERROR)). 테스트 추가로 검증
+
+---
+
+## 3차 재리뷰 (2026-03-19)
+
+- [x] [lua/luagate/stream/handler.lua#L362] passes `radix_match_index` through, but evaluator ignores it and re-matches `src_ip_cidr` directly. radix_build timeout 시 LKG tree가 유지되더라도 evaluator가 새 정책의 CIDR 규칙을 직접 매칭.
+      → 해결자: Claude Code
+      → 해결 방식: 비범위 — radix tree는 성능 pre-filter이고 evaluator의 독립 CIDR 매칭이 권한적 결정. 현재 동작에 문제 없음. evaluator가 radix_match_index를 활용하는 최적화는 별도 이슈
