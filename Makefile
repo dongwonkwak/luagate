@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e
+.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -170,6 +170,11 @@ e2e:
 e2e-ui:
 	@echo "==> Running Playwright E2E tests (UI mode)..."
 	cd e2e && npm run test:ui
+
+# ── Pre-PR Test Gate ─────────────────────────────────────────────────────
+pre-pr:
+	@echo "==> Running pre-PR test gate..."
+	@scripts/pre-pr.sh
 
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean:

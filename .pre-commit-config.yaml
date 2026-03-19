@@ -150,3 +150,17 @@ repos:
         entry: scripts/cargo-clippy-wrapper.sh
         stages: [pre-push]
         pass_filenames: false
+
+      - id: mcp-test
+        name: MCP tests (npm test)
+        language: system
+        entry: scripts/mcp-test-wrapper.sh
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: conf-change-warn
+        name: conf/ change warning
+        language: system
+        entry: scripts/conf-change-wrapper.sh
+        stages: [pre-push]
+        pass_filenames: false
