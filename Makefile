@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream test-chaos up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr storybook storybook-build
+.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream test-chaos up down deploy-prod deploy-prod-down helm-lint helm-template implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr storybook storybook-build
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -116,6 +116,21 @@ up:
 
 down:
 	docker compose down
+
+deploy-prod:
+	docker compose -f docker-compose.prod.yml up -d
+
+deploy-prod-down:
+	docker compose -f docker-compose.prod.yml down
+
+# ── Helm ──────────────────────────────────────────────────────────────────
+helm-lint:
+	@echo "==> Linting Helm chart..."
+	helm lint helm/luagate/ --set adminToken=lint-check-token
+
+helm-template:
+	@echo "==> Rendering Helm templates..."
+	helm template luagate helm/luagate/ --set adminToken=template-check-token
 
 # ── AI-assisted implementation ─────────────────────────────────────────────
 implement:
