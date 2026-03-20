@@ -27,14 +27,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine Docker tags
+        id: docker_tags
+        run: |
+          CURRENT_TAG="${{ github.ref_name }}"
+          HIGHEST_STABLE_TAG="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/${{ github.repository }}:${CURRENT_TAG}"
+            if [ "$CURRENT_TAG" = "$HIGHEST_STABLE_TAG" ]; then
+              echo "ghcr.io/${{ github.repository }}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+          tags: ${{ steps.docker_tags.outputs.tags }}
           cache-from: type=gha,scope=release
           cache-to: type=gha,mode=max,scope=release
 
