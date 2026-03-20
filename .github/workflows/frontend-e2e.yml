@@ -29,7 +29,7 @@ jobs:
               - 'Makefile'
               - 'lua/luagate/**'
               - 'src/**'
-              - '.github/workflows/frontend-e2e.yml'
+              - '.github/workflows/frontend-*.yml'
 
   e2e:
     needs: detect-changes
