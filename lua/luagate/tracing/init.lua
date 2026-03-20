@@ -86,21 +86,50 @@ function _M.init(config_path)
     end
   end
 
+  -- Validate config fields (ADR-010: fail-open on invalid config)
+  local flush_interval = tracing.flush_interval_ms
+  if flush_interval ~= nil and (type(flush_interval) ~= "number" or flush_interval <= 0) then
+    ngx.log(ngx.ERR, "[luagate:tracing] invalid flush_interval_ms: ", tostring(flush_interval), ", tracing disabled")
+    _enabled = false
+    return
+  end
+
+  local batch_size = tracing.batch_size
+  if batch_size ~= nil and (type(batch_size) ~= "number" or batch_size <= 0) then
+    ngx.log(ngx.ERR, "[luagate:tracing] invalid batch_size: ", tostring(batch_size), ", tracing disabled")
+    _enabled = false
+    return
+  end
+
+  local endpoint = tracing.endpoint
+  if endpoint ~= nil and (type(endpoint) ~= "string" or #endpoint == 0) then
+    ngx.log(ngx.ERR, "[luagate:tracing] invalid endpoint: ", tostring(endpoint), ", tracing disabled")
+    _enabled = false
+    return
+  end
+
+  local exporter_type = tracing.exporter
+  if exporter_type ~= nil and exporter_type ~= "otlp_http" and exporter_type ~= "stdout" then
+    ngx.log(ngx.ERR, "[luagate:tracing] invalid exporter: ", tostring(exporter_type), ", tracing disabled")
+    _enabled = false
+    return
+  end
+
   -- Configure modules
   sampler.set_rate(sample_rate)
 
   exporter.configure({
-    endpoint = tracing.endpoint or "http://localhost:4318/v1/traces",
+    endpoint = endpoint or "http://localhost:4318/v1/traces",
     export_timeout_ms = tracing.export_timeout_ms or 10000,
-    exporter = tracing.exporter or "otlp_http",
+    exporter = exporter_type or "otlp_http",
     service_name = tracing.service_name or "luagate",
-    batch_size = tracing.batch_size or 1024,
+    batch_size = batch_size or 1024,
   })
 
   _config = {
     sample_rate = sample_rate,
-    flush_interval_ms = tracing.flush_interval_ms or 5000,
-    batch_size = tracing.batch_size or 1024,
+    flush_interval_ms = flush_interval or 5000,
+    batch_size = batch_size or 1024,
   }
 
   _enabled = true

@@ -343,6 +343,27 @@ function _M.access()
   local path_raw = ctx.path_raw or ""
   local query_raw = ctx.query_raw or ""
 
+  -- ADR-010 §2: start security_scan child span early so it covers all exit paths
+  local scan_span = nil
+  local trace_ctx_scan = ctx.trace
+  if trace_ctx_scan then
+    local ok_tr, tr = pcall(require, "luagate.tracing.init")
+    if ok_tr then
+      scan_span = tr.start_child_span(trace_ctx_scan, "security_scan")
+    end
+  end
+
+  -- Helper: finish security_scan span (called before every scanner-path return)
+  local function finish_scan_span(err_type)
+    if scan_span then
+      local sm = require("luagate.tracing.span")
+      sm.finish(scan_span)
+      if err_type then
+        sm.set_error(scan_span, err_type)
+      end
+    end
+  end
+
   -- 2a. Decoder error check (set in rewrite phase; http-pipeline.md §5 threat_type enum)
   --     NOTE: ctx.threat_type is NOT set for operational failures — only ngx.var
   --     is set for log distinguishability. ctx.threat_type drives the scanner
@@ -361,6 +382,7 @@ function _M.access()
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = ctx.decoder_error
     ngx.var.luagate_threat_type = log_threat_type
+    finish_scan_span("decode_error")
     do_deny(ctx.decoder_error, ctx.request_id or "")
     return
   end
@@ -378,12 +400,10 @@ function _M.access()
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = "input_size_exceeded"
     ngx.var.luagate_threat_type = "scanner_error"
+    finish_scan_span("input_size_exceeded")
     do_deny("input_size_exceeded", ctx.request_id or "")
     return
   end
-
-  -- ADR-010 §2: record scanner start time for security_scan span
-  local scan_start_ns = ngx.now() * 1e9
 
   -- 2c. Scanner scan (security-scanner.md §2)
   --     pcall wrapping: catch Lua-level exceptions from scanner FFI (ADR-001 §1.2)
@@ -399,6 +419,7 @@ function _M.access()
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = "scanner_load_error"
     ngx.var.luagate_threat_type = "scanner_error"
+    finish_scan_span("scanner_load_error")
     do_deny("scanner_load_error", ctx.request_id or "")
     return
   end
@@ -440,6 +461,7 @@ function _M.access()
     ngx.var.luagate_request_state = "scanner_denied"
     ngx.var.luagate_deny_reason = deny_reason
     ngx.var.luagate_threat_type = log_threat_type
+    finish_scan_span(deny_reason)
     do_deny(deny_reason, ctx.request_id or "")
     return
   end
@@ -460,6 +482,7 @@ function _M.access()
     ngx.var.luagate_threat_score = tostring(scan_result.threat_score)
     ngx.var.luagate_deny_reason = "scanner: " .. scan_result.threat_type
     ngx.var.luagate_request_state = "scanner_denied"
+    finish_scan_span("threat:" .. scan_result.threat_type)
     do_deny("scanner: " .. scan_result.threat_type, ctx.request_id or "")
     return
   end
@@ -470,20 +493,8 @@ function _M.access()
     ngx.var.luagate_threat_score = tostring(scan_result.threat_score)
   end
 
-  -- ADR-010 §2: create security_scan child span
-  local scan_end_ns = ngx.now() * 1e9
-  local trace_ctx_sc = ctx.trace
-  if trace_ctx_sc then
-    local ok_tr, tr = pcall(require, "luagate.tracing.init")
-    if ok_tr then
-      local sc_span = tr.start_child_span(trace_ctx_sc, "security_scan")
-      if sc_span then
-        local sm = require("luagate.tracing.span")
-        sc_span.start_time_ns = scan_start_ns
-        sm.finish(sc_span, scan_end_ns)
-      end
-    end
-  end
+  -- ADR-010 §2: finish security_scan span (happy path — no threat)
+  finish_scan_span(nil)
 
   -- 3. Build request context for policy evaluation (http-pipeline.md §2.3)
   --    path_normalized and query_normalized set in rewrite phase.
