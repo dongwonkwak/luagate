@@ -8,6 +8,12 @@
 
 ---
 
-## 재리뷰 (2026-03-20)
+## 2차 리뷰 (2026-03-20)
 
 - [x] `.github/workflows/frontend-e2e.yml:43-54` now uses raw `docker run` instead of Docker Compose, which still leaves the E2E runtime broken: `conf/nginx.conf` expects the Compose network gateway for admin-plane allowlisting and loads `conf/policies.yaml` plus `conf/scanner-patterns` at startup, but the image started here provides neither that network topology nor those `conf/*` assets. As written, `curl http://localhost:9090/health` / the Playwright base URL can still fail before the tests actually run. → 수정: `--network host` 사용으로 127.0.0.1 allowlist 매칭. conf/* 자산은 Dockerfile COPY로 이미지에 포함됨.
+
+---
+
+## 3차 리뷰 (2026-03-20)
+
+- [x] `.github/workflows/frontend-e2e.yml` still starts `luagate:test`, but the runtime image does not actually include the config assets OpenResty expects at startup: `conf/nginx.conf` loads `conf/policies.yaml` and `conf/scanner-patterns`, while `Dockerfile` only copies `conf/nginx.conf` and `policies/` to `/etc/luagate/policies/`. → 수정: docker run에 `-v policies/luagate.yaml:/conf/policies.yaml:ro -v conf/scanner-patterns:/conf/scanner-patterns:ro` 볼륨 마운트 추가.

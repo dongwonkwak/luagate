@@ -55,6 +55,8 @@ jobs:
         run: |
           docker run -d --name luagate-e2e \
             --network host \
+            -v ${{ github.workspace }}/policies/luagate.yaml:/conf/policies.yaml:ro \
+            -v ${{ github.workspace }}/conf/scanner-patterns:/conf/scanner-patterns:ro \
             -e LUAGATE_ADMIN_TOKEN=test-e2e-token \
             -e LUAGATE_ENV=development \
             luagate:test
