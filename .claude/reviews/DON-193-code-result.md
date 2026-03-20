@@ -16,7 +16,7 @@
 
 ## 재리뷰 (2026-03-20)
 
-- [ ] `실제 이슈 작업으로 테스트` Acceptance Criteria는 아직 미충족입니다. 현재 diff는 [SKILL.md](/home/dongwon/project/luagate-don-193/.claude/skills/context-handoff/SKILL.md#L20C1)와 [CLAUDE.md](/home/dongwon/project/luagate-don-193/CLAUDE.md#L57C1)에 절차만 추가했고, 실제 DON 이슈에서 핸드오프 코멘트 생성 및 후속 에이전트 전달을 검증한 기록이나 산출물이 없습니다.
+- [ ] `실제 이슈 작업으로 테스트` Acceptance Criteria는 아직 미충족입니다. 현재 diff는 [SKILL.md](../skills/context-handoff/SKILL.md#L20C1)와 [CLAUDE.md](../../CLAUDE.md#L57C1)에 절차만 추가했고, 실제 DON 이슈에서 핸드오프 코멘트 생성 및 후속 에이전트 전달을 검증한 기록이나 산출물이 없습니다.
 
 ---
 
