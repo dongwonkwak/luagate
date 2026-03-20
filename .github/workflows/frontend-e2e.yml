@@ -56,7 +56,7 @@ jobs:
             --network host \
             -v ${{ github.workspace }}/policies/luagate.yaml:/conf/policies.yaml:ro \
             -v ${{ github.workspace }}/conf/scanner-patterns:/conf/scanner-patterns:ro \
-            -e LUAGATE_ADMIN_TOKEN=test-e2e-token \
+            -e LUAGATE_ADMIN_TOKEN=test-e2e-token-for-ci-playwright-runner \
             -e LUAGATE_ENV=development \
             luagate:test
           timeout 90 bash -c 'until curl -sf http://localhost:9090/health; do sleep 2; done' || {
