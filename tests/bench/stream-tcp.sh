@@ -25,8 +25,20 @@ echo ""
 if command -v ncat > /dev/null 2>&1 || command -v nc > /dev/null 2>&1; then
     NC_CMD="nc"
     command -v ncat > /dev/null 2>&1 && NC_CMD="ncat"
+    TIMEOUT_CMD=""
+    if command -v timeout > /dev/null 2>&1; then
+        TIMEOUT_CMD="timeout"
+    elif command -v gtimeout > /dev/null 2>&1; then
+        TIMEOUT_CMD="gtimeout"
+    else
+        fail "Neither timeout nor gtimeout found. TCP benchmark requires a timeout wrapper."
+        warn "Install coreutils for timeout support."
+        warn "  nix-shell -p coreutils  OR  brew install coreutils"
+        exit 1
+    fi
 
     info "Using ${NC_CMD} for TCP benchmark..."
+    info "Using ${TIMEOUT_CMD} as timeout wrapper..."
 
     # Generate test payload
     PAYLOAD=$(head -c "${TCP_MSG_SIZE}" /dev/urandom | base64 | head -c "${TCP_MSG_SIZE}")
@@ -44,7 +56,7 @@ if command -v ncat > /dev/null 2>&1 || command -v nc > /dev/null 2>&1; then
         local end_time=$(( $(date +%s) + TCP_DURATION ))
 
         while [ "$(date +%s)" -lt "$end_time" ]; do
-            if echo "${PAYLOAD}" | timeout 5 "${NC_CMD}" -w 2 "${LUAGATE_STREAM_HOST}" "${LUAGATE_STREAM_PORT}" > /dev/null 2>&1; then
+            if echo "${PAYLOAD}" | "${TIMEOUT_CMD}" 5 "${NC_CMD}" -w 2 "${LUAGATE_STREAM_HOST}" "${LUAGATE_STREAM_PORT}" > /dev/null 2>&1; then
                 success=$((success + 1))
                 bytes=$((bytes + TCP_MSG_SIZE))
             else
