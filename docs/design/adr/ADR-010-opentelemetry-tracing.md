@@ -21,7 +21,7 @@
 
 ## Context
 
-현재 LuaGate는 `request_id` (UUID v4) 필드를 access.log에 기록하고 `X-Request-ID` 응답 헤더로 전달한다 (log-schema.md §3.1). 그러나 이 값은 단일 인스턴스 내 요청 추적에만 유용하며, 외부 트레이싱 시스템(Jaeger, Tempo, Zipkin 등)과의 연동 메커니즘이 없다.
+현재 LuaGate는 `request_id` (opaque string — 클라이언트 `X-Request-ID` 또는 Nginx `$request_id`) 필드를 access.log에 기록하고 `X-Request-ID` 응답/업스트림 헤더로 전달한다 (log-schema.md §3.1). 그러나 이 값은 단일 인스턴스 내 요청 추적에만 유용하며, 외부 트레이싱 시스템(Jaeger, Tempo, Zipkin 등)과의 연동 메커니즘이 없다.
 
 ### 현재 상태
 
@@ -60,14 +60,17 @@
 
 ```
 [root] HTTP Request (rewrite → log)
+├── [child] normalize       (rewrite_by_lua, decoder FFI)
 ├── [child] policy_eval     (access_by_lua)
-├── [child] security_scan   (access_by_lua, FFI)
+├── [child] security_scan   (access_by_lua, scanner FFI)
 └── [child] proxy           (access_by_lua 종료 ~ upstream 응답 완료)
 ```
 
-- **루트 span**: `rewrite_by_lua`에서 생성하되 시작 시각을 `ngx.req.start_time()`으로 backdate한다 (요청 수신 시각). `log_by_lua`에서 종료. 이를 통해 루트 span duration이 `latency_ms` (`$request_time` = 요청 수신 ~ 응답 전송 완료)와 일치한다. `header_filter_by_lua`는 응답 헤더 전송 시점이므로 streaming/chunked 응답에서 body 전송 시간이 빠져 부적합하다.
-- **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy)
-- **FFI 호출 span**: security_scan child 내에 scanner/decoder FFI 호출 span 포함
+- **루트 span**: `rewrite_by_lua`에서 생성하되 시작 시각을 `ngx.req.start_time()`으로 backdate한다 (요청 수신 시각). `log_by_lua`에서 종료. 이를 통해 루트 span duration이 `latency_ms` (`$request_time` = 요청 수신 ~ 응답 전송 완료)와 일치한다.
+- **child span**: 주요 내부 단계별 생성 (normalize, policy_eval, security_scan, proxy)
+- **normalize child span**: `rewrite_by_lua`에서 생성. decoder FFI (path/query 정규화) 호출을 포함한다. http-pipeline.md §2.2의 rewrite 정규화 단계에 해당
+- **security_scan child span**: `access_by_lua`에서 생성. scanner FFI 호출만 포함 (decoder는 rewrite에서 이미 실행됨)
+- **pre-Lua rejection**: Nginx가 malformed request를 Lua phase 진입 전에 거부하는 경우 (400/413/414), 트레이싱 span은 생성되지 않는다. `trace_id`/`span_id` 로그 필드는 기본값 null로 기록된다. 이는 의도된 동작이며, inbound `traceparent`가 있어도 Lua가 실행되지 않으므로 파싱 자체가 불가하다
 - **proxy child span**: `access_by_lua` 종료 시점에 `ngx.now()`로 시작 시각(`proxy_start_ts`)을 기록한다. `log_by_lua`에서 `ngx.now()`로 종료 시각을 기록하고, duration = 종료 시각 - `proxy_start_ts`로 계산한다. 이를 통해 proxy span은 `access_by_lua` 종료부터 Nginx가 upstream 응답 수신 + 클라이언트 전송 완료까지의 전체 구간을 반영하며, retry/failover가 발생해도 단일 span으로 총 소요 시간을 정확히 기록한다. `$upstream_response_time`은 span attribute `luagate.upstream_response_time`으로 별도 보존한다 (attempt별 디버깅 용도).
 - **upstream retry/failover**: Nginx가 retry/failover를 수행하면 `$upstream_response_time`이 쉼표 구분 다중 값이 될 수 있다 (예: `"0.5, 1.2"`). 이 경우 **단일 proxy span으로 합산**한다 — 전체 upstream 소요 시간(마지막 값의 종료 시점)을 proxy span duration으로 기록하고, attempt 횟수를 span attribute `luagate.upstream_attempts`로 남긴다. attempt별 개별 span 생성은 Phase 2 이후 범위로 둔다. outbound `traceparent`의 `span_id`는 최초 attempt 시점에 생성한 proxy span의 ID를 사용하며, retry 시에도 동일한 `span_id`를 전달한다 (upstream 관점에서 같은 parent).
 - **upstream 실패 (connect/DNS 등)**: `$upstream_response_time`이 빈 문자열 또는 nil인 경우 (connect 실패, DNS 해석 실패 등), proxy span을 `log_by_lua` 시점에서 즉시 종료한다. 이때 span에 `otel.status_code=ERROR`, `error.type=upstream_connect_failure`, `http.response.status_code=502` 등 에러 attribute를 설정한다. duration은 proxy span 시작 ~ log_by_lua 시점으로 기록한다 (실제 대기 시간 반영).
@@ -97,7 +100,7 @@
 - **타이머 등록**: `init_worker_by_lua`에서 `ngx.timer.every(flush_interval, flush_fn)`으로 worker당 1회 등록. 요청 경로에서 타이머를 생성하지 않는다 (타이머 중복 생성 방지).
 - 각 worker는 독립적인 span 버퍼를 유지 (shared dict 불필요)
 - `ngx.timer.every` 콜백에서 cosocket 사용 가능 → OTLP endpoint로 배치 전송
-- 버퍼 크기 제한: worker당 최대 8192 spans (초과 시 oldest drop). 산출 근거: SLO 10,000 req/s ÷ worker 4개 × 1% 샘플링 × 4 spans/req × 5초 flush = 5,000 spans. 여유 포함 8192로 설정
+- 버퍼 크기 제한: worker당 최대 4096 spans (초과 시 oldest drop). 산출 근거: SLO 10,000 req/s ÷ 4 workers = 2,500 req/s/worker × 1% 샘플링 = 25 req/s × 5 spans/req × 5초 flush = 625 spans. 버스트/배압 여유 6.5배 포함 4096으로 설정
 - flush 주기: 5초 (설정 가능)
 - **버퍼 동시 접근 제어**: `log_by_lua`의 span append와 timer 콜백의 flush는 같은 worker에서 실행되지만, timer 콜백이 cosocket I/O 중 yield하면 그 사이에 `log_by_lua`가 실행될 수 있다. 이를 방지하기 위해 flush 시작 시 현재 버퍼를 새 빈 테이블로 **atomic swap**한다: `local batch = buffer; buffer = {}`. swap 후 `log_by_lua`는 새 빈 버퍼에 append하고, timer는 swap된 batch를 전송한다. Lua table 할당은 원자적이므로 lock이 필요 없다
 
@@ -133,7 +136,7 @@ tracing:
   sample_rate: 0.01          # 1% (production default)
   exporter: otlp_http        # otlp_http | stdout
   endpoint: "http://localhost:4318/v1/traces"
-  batch_size: 100            # flush 시 최대 span 수
+  batch_size: 1024           # flush 시 최대 span 수 (정상 부하 625 + 여유)
   flush_interval_ms: 5000    # flush 주기 (ms)
 ```
 
@@ -220,8 +223,8 @@ access.log에 2개 NULLABLE 필드 추가:
 
 | 필드 | 타입 | JSON Nullability | 설명 |
 |------|------|-----------------|------|
-| `trace_id` | string (32-hex) | NULLABLE | W3C TraceContext trace ID. 트레이싱 비활성화 또는 미샘플 시 null |
-| `span_id` | string (16-hex) | NULLABLE | 루트 span ID. 트레이싱 비활성화 또는 미샘플 시 null |
+| `trace_id` | string (32-hex) | NULLABLE | W3C TraceContext trace ID. 트레이싱 비활성화 시 null. inbound `traceparent` 존재 시 sampled 플래그와 무관하게 항상 기록. inbound 없고 locally unsampled 시 null |
+| `span_id` | string (16-hex) | NULLABLE | 루트 span ID. 트레이싱 비활성화 시 null. inbound `traceparent` 존재 시 sampled 플래그와 무관하게 항상 기록. inbound 없고 locally unsampled 시 null |
 
 > 기존 `request_id` 필드는 변경 없음. `trace_id`와 `request_id`의 상관은 span attribute를 통해 제공.
 
@@ -246,7 +249,7 @@ access.log에 2개 NULLABLE 필드 추가:
 
 | 리스크 | 완화 |
 |--------|------|
-| span 버퍼 메모리 압박 | worker당 1000 span 하드 캡 + oldest drop |
+| span 버퍼 메모리 압박 | worker당 4096 span 하드 캡 + oldest drop |
 | OTLP endpoint 장애 시 버퍼 누적 | flush 실패 시 버퍼 강제 drain (drop) + 메트릭 카운터 |
 | 높은 샘플 비율로 인한 성능 저하 | production 기본 1%, 설정 검증으로 100% 방지 |
 | `ngx.timer.at` 타이머 고갈 | pending timer 수 모니터링, max 제한 |
