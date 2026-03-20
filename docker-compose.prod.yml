@@ -3,7 +3,7 @@ services:
   # The host file must use the canonical schema (top-level rules/stream_rules).
   # Default: fail-closed (deny all) per policy-engine.md / ADR-002.
   policy-seed:
-    image: luagate:${VERSION:-latest}
+    image: luagate:${VERSION:-0.1.0}
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -25,7 +25,7 @@ services:
     restart: "no"
 
   luagate:
-    image: luagate:${VERSION:-latest}
+    image: luagate:${VERSION:-0.1.0}
     restart: unless-stopped
     depends_on:
       policy-seed:
