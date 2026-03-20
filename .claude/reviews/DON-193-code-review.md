@@ -8,6 +8,7 @@
 
 ```
 .claude/skills/context-handoff/SKILL.md  (신규)
+.claude/skills/plan-next-work/SKILL.md   (수정)
 CLAUDE.md                                (스킬 등록 추가)
 ```
 
