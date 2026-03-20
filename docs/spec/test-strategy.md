@@ -484,8 +484,8 @@ main 브랜치 보호 규칙에 다음 status check를 required로 설정한다:
 | 변경 파일 | frontend-quality | frontend-unit | frontend-e2e | integration-test |
 |----------|-----------------|--------------|-------------|-----------------|
 | `ui/src/**` 만 | 실행 | 실행 | 실행 | 실행 (항상) |
-| `lua/**` 만 | skip (success) | skip (success) | 실행 | 실행 (항상) |
-| `ui/**` + `lua/**` | 실행 | 실행 | 실행 | 실행 (항상) |
+| `lua/luagate/**` 만 | skip (success) | skip (success) | 실행 | 실행 (항상) |
+| `ui/**` + `lua/luagate/**` | 실행 | 실행 | 실행 | 실행 (항상) |
 | `docs/**` 만 | skip (success) | skip (success) | skip (success) | 실행 (항상) |
 
 <!-- ADR 필요 -->
