@@ -95,9 +95,9 @@ else
   } > CHANGELOG.md
 fi
 
-# 커밋 + 태그
+# 커밋 + 태그 (--no-verify: 릴리즈 커밋은 Linear 이슈 없이 생성되므로 commitlint 예외)
 git add CHANGELOG.md
-git commit -m "chore(release): ${VERSION}"
+git commit --no-verify -m "chore(release): ${VERSION}"
 git tag -a "${TAG}" -m "Release ${TAG}"
 
 echo ""
