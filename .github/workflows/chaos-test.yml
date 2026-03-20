@@ -1,0 +1,76 @@
+name: Chaos Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      wrk_duration:
+        description: 'wrk duration (e.g. 30s, 60s)'
+        required: false
+        default: '30s'
+      reload_count:
+        description: 'Number of reloads during load test'
+        required: false
+        default: '6'
+
+permissions:
+  contents: read
+
+jobs:
+  chaos-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      WRK_APT_VERSION: 4.1.0-3build1
+      BC_APT_VERSION: 1.07.1-3build1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install benchmark tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            "wrk=${WRK_APT_VERSION}" \
+            "bc=${BC_APT_VERSION}"
+
+      - name: Start LuaGate
+        run: |
+          echo "LUAGATE_ADMIN_TOKEN=ci-chaos-test-token" > .env
+          docker compose up -d --build
+        env:
+          LUAGATE_ADMIN_TOKEN: ci-chaos-test-token
+
+      - name: Wait for LuaGate
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9090/health > /dev/null 2>&1; then
+              echo "LuaGate ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "LuaGate failed to start"
+          docker compose logs
+          exit 1
+
+      - name: Run chaos tests
+        run: bash tests/chaos/test_hot_reload.sh
+        env:
+          LUAGATE_ADMIN_TOKEN: ci-chaos-test-token
+          WRK_DURATION: ${{ github.event.inputs.wrk_duration }}
+          RELOAD_COUNT: ${{ github.event.inputs.reload_count }}
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose logs luagate > chaos-luagate.log
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-test-logs
+          path: chaos-luagate.log
+
+      - name: Teardown
+        if: always()
+        run: docker compose down

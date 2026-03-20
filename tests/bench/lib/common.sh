@@ -81,5 +81,6 @@ admin_reload() {
 }
 
 admin_policy_version() {
-    curl -sf "${LUAGATE_HTTP_URL}/health" | grep -o '"policy_version":"[^"]*"' | cut -d'"' -f4
+    # /health returns source_version (canonical file SHA256), not "policy_version"
+    curl -sf "${LUAGATE_ADMIN_URL}/health" | grep -o '"source_version":"[^"]*"' | cut -d'"' -f4
 }
