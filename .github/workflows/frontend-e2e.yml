@@ -54,7 +54,7 @@ jobs:
       - name: Start LuaGate server
         run: |
           docker run -d --name luagate-e2e \
-            -p 9090:9090 -p 8080:8080 \
+            --network host \
             -e LUAGATE_ADMIN_TOKEN=test-e2e-token \
             -e LUAGATE_ENV=development \
             luagate:test
