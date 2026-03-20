@@ -6,9 +6,13 @@ set -euo pipefail
 VERSION="${1:?Usage: $0 <version>}"
 TAG="v${VERSION}"
 
-# 필수 도구 확인
-if ! command -v gh >/dev/null 2>&1; then
-  echo "Error: gh CLI is required. Install from https://cli.github.com/" >&2
+# 작업 트리 청결성 확인 (staged 먼저 검사 — diff-index는 둘 다 감지)
+if ! git diff --cached --quiet 2>/dev/null; then
+  echo "Error: staging area is not clean. Commit or reset first." >&2
+  exit 1
+fi
+if ! git diff --quiet 2>/dev/null; then
+  echo "Error: working tree has uncommitted changes. Commit or stash first." >&2
   exit 1
 fi
 
@@ -72,10 +76,16 @@ trap 'rm -f "$NOTES_FILE"' EXIT
   fi
 } > "$NOTES_FILE"
 
-# CHANGELOG.md 업데이트 (prepend)
+# CHANGELOG.md 업데이트 (prepend — # Changelog 헤더 보존)
 if [ -f CHANGELOG.md ]; then
   TEMP_CHANGELOG=$(mktemp)
-  cat "$NOTES_FILE" CHANGELOG.md > "$TEMP_CHANGELOG"
+  # 첫 줄(# Changelog)과 빈 줄 유지, 그 사이에 새 엔트리 삽입
+  {
+    head -2 CHANGELOG.md
+    echo ""
+    cat "$NOTES_FILE"
+    tail -n +3 CHANGELOG.md
+  } > "$TEMP_CHANGELOG"
   mv "$TEMP_CHANGELOG" CHANGELOG.md
 else
   {
@@ -99,3 +109,8 @@ echo ""
 echo "The release.yml workflow will automatically:"
 echo "  - Build and push Docker image to ghcr.io"
 echo "  - Create GitHub Release with notes"
+if command -v gh >/dev/null 2>&1; then
+  echo ""
+  echo "  Or create release manually:"
+  echo "    gh release create ${TAG} --notes-file /tmp/release-notes.md"
+fi
