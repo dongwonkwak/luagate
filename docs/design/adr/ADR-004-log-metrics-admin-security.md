@@ -33,10 +33,10 @@ LuaGate는 API 게이트웨이이자 보안 게이트웨이로서 두 가지 관
 
 ### §4 로그/메트릭 데이터 모델
 
-#### 4.1 HTTP 요청 로그 스키마 (27개 필드)
+#### 4.1 HTTP 요청 로그 스키마 (30개 필드)
 
 각 HTTP 요청 처리 완료 시 아래 JSON 레코드를 `access.log`에 기록한다.
-상세 필드 정의 및 예시: [spec/log-schema.md §3](../../spec/log-schema.md#3-http-요청-로그-accesslog--27개-필드)
+상세 필드 정의 및 예시: [spec/log-schema.md §3](../../spec/log-schema.md#3-http-요청-로그-accesslog--30개-필드)
 
 | # | 필드명 | 타입 | 설명 |
 |---|--------|------|------|

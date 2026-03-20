@@ -123,7 +123,7 @@
 | 있음 | `sampled=0` | parent-based: 샘플링 안 함 (상위 결정 존중) | **항상 기록** (상관관계 유지) | X |
 | 없음 | — | 새 trace_id 생성 + 로컬 rate 적용 | 샘플링 시 기록, 미샘플 시 null | 샘플링 시만 |
 
-> **inbound 없음 + locally unsampled**: 새 trace_id는 생성하지만 sampled=0으로 결정된 경우, outbound `traceparent`를 **전파하지 않는다** (헤더 미설정). 이유: LuaGate가 trace의 최초 originator이고 export도 하지 않으므로, downstream에 `sampled=0` 컨텍스트를 전파해도 어떤 hop에서도 span이 수집되지 않아 의미가 없다. `trace_id`/`span_id` 로그도 null이므로 상관관계가 존재하지 않는다.
+> **inbound 없음 + locally unsampled**: 새 trace_id를 생성하고 `sampled=0`으로 outbound `traceparent`를 **전파한다**. W3C Trace Context 표준에 따라, originator는 샘플링 여부와 무관하게 trace context를 downstream에 전파해야 한다. downstream hop이 독자적으로 재샘플링하여 trace를 이어받을 수 있기 때문이다. 단, LuaGate 자체는 span을 export하지 않으며 `trace_id`/`span_id` 로그 필드도 null로 기록한다 (로컬 비용 최소화).
 >
 > **핵심 결정 — parent-based 샘플링**: inbound `traceparent`가 있으면 sampled 플래그를 그대로 존중한다 (parent-based). LuaGate가 독자적으로 재샘플링하지 않는다. 이를 통해 partial trace (상위 hop은 export 안 했는데 LuaGate만 export) 문제를 방지하고, 분산 환경에서 일관된 end-to-end 트레이스를 보장한다.
 > **로그 기록**: inbound trace가 있으면 sampled 플래그와 무관하게 `trace_id`/`span_id`를 항상 access.log에 기록한다. 외부 트레이싱 시스템에서 LuaGate 로그와의 상관관계가 끊기지 않도록 한다.
@@ -251,7 +251,7 @@ access.log에 2개 NULLABLE 필드 추가:
 |--------|------|
 | span 버퍼 메모리 압박 | worker당 4096 span 하드 캡 + oldest drop |
 | OTLP endpoint 장애 시 버퍼 누적 | flush 실패 시 버퍼 강제 drain (drop) + 메트릭 카운터 |
-| 높은 샘플 비율로 인한 성능 저하 | production 기본 1%, 설정 검증으로 100% 방지 |
+| 높은 샘플 비율로 인한 성능 저하 + 버퍼 초과 | production 기본 1%. dev(100%)/staging(10%) 환경에서는 트래픽이 낮으므로 (개발 환경 SLO 없음) 버퍼 초과는 허용 가능. 고부하 staging에서는 `sample_rate`를 낮추거나 `batch_size`/`max_queue_size`를 조정한다 |
 | `ngx.timer.at` 타이머 고갈 | pending timer 수 모니터링, max 제한 |
 | worker 종료/교체 시 span 유실 | 아래 Worker Shutdown 정책 참조 |
 
@@ -262,6 +262,11 @@ access.log에 2개 NULLABLE 필드 추가:
 3. 손실 범위: 마지막 flush 이후 ~ shutdown 사이의 최대 `flush_interval_ms` (5초) 분량. 1% 샘플링 기준 무시할 수준
 
 **premature 콜백에서 cosocket 사용 가능성**: OpenResty `ngx.timer.at`/`ngx.timer.every`의 premature 콜백에서도 cosocket(TCP/UDP)은 사용 가능하다. OpenResty 문서에 따르면 timer 콜백은 "가벼운 스레드(light thread)" 컨텍스트에서 실행되며 cosocket API가 완전히 지원된다. `premature=true`는 worker 종료 신호일 뿐 API 제약을 추가하지 않는다. 단, worker shutdown timeout(`worker_shutdown_timeout` 지시자) 내에 완료해야 하므로 `export_timeout_ms`를 이 값보다 짧게 설정해야 한다.
+
+**검증 계획** (DON-180 구현 시 수행):
+1. Test::Nginx 통합 테스트: `init_worker_by_lua`에서 premature timer 등록 → `nginx -s quit` 후 OTLP mock endpoint에 span 도착 확인
+2. 실패 경로 테스트: OTLP endpoint 중단 상태에서 shutdown → drop 메트릭 증가 확인 + worker 정상 종료 확인 (hang 없음)
+3. `worker_shutdown_timeout` 초과 테스트: export_timeout_ms를 의도적으로 크게 설정 → worker가 timeout 내 종료되는지 확인
 
 이는 의도된 trade-off이다. 트레이싱은 관측성 기능이므로 완전한 무손실을 보장하지 않는다 (fail-open 원칙).
 

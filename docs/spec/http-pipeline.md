@@ -238,7 +238,7 @@ local result = decoder.normalize(path_raw, query_raw)
 
 ```lua
 ngx.ctx.luagate = {
-  request_id        = "UUID",
+  request_id        = "string",  -- opaque: X-Request-ID 또는 $request_id (ADR-010)
   path_raw          = string,
   path_normalized   = string,
   query_raw         = string,   -- raw query string (원본)
