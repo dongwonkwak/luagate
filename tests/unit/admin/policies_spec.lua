@@ -287,6 +287,9 @@ local function make_ngx(overrides)
       get_method = function()
         return "GET"
       end,
+      get_uri_args = function()
+        return {}
+      end,
       read_body = function() end,
       get_body_data = function()
         return nil
@@ -824,6 +827,155 @@ describe("PUT /api/v1/policies", function()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
     assert.are.equal("validation_failed", body.error)
+  end)
+end)
+
+-- ===========================================================================
+-- PUT /api/v1/policies?dry_run=true
+-- ===========================================================================
+describe("PUT /api/v1/policies?dry_run=true", function()
+  local yaml_body = "version: '1.0'\nrules: []\nstream_rules: []\n"
+
+  before_each(function()
+    reset_stubs()
+    setup_io_stubs()
+    _file_registry["conf/policies.yaml"] = yaml_body
+    _G.ngx = make_ngx({
+      var = { uri = "/api/v1/policies", remote_addr = "127.0.0.1" },
+    })
+    _G.ngx.req.get_headers = function()
+      return {
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    _G.ngx.req.get_method = function()
+      return "PUT"
+    end
+    _G.ngx.req.get_body_data = function()
+      return yaml_body
+    end
+    _G.ngx.req.get_uri_args = function()
+      return { dry_run = "true" }
+    end
+    policies = load_policies()
+  end)
+
+  after_each(function()
+    teardown_io_stubs()
+  end)
+
+  it("returns 200 with validation results (no commit)", function()
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.is_true(body.dry_run)
+    assert.is_true(body.valid)
+    assert.truthy(body.version_hash)
+    assert.is_table(body.warnings)
+    assert.are.equal(0, #body.warnings)
+    assert.is_table(body.shadowed)
+    assert.is_number(body.http_rules_count)
+    assert.is_number(body.stream_rules_count)
+  end)
+
+  it("does not require If-Match header", function()
+    -- No If-Match provided, should still succeed
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.is_true(body.dry_run)
+  end)
+
+  it("accepts If-Match header but ignores mismatch", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"wrong_version"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.is_true(body.dry_run)
+  end)
+
+  it("returns 422 on parse failure", function()
+    _parser_result = nil
+    _parser_err = "YAML syntax error at line 42"
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("validate", body.stage)
+  end)
+
+  it("returns 422 on validation failure", function()
+    _validator_ok = nil
+    _validator_err = "rule 'my-rule': action must be 'allow' or 'deny'"
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+  end)
+
+  it("reports conflicts as warnings (not 422)", function()
+    _conflict_conflicts = {
+      { rule_ids = { "rule-a", "rule-b" }, message = "same scope, priority, opposing action" },
+    }
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.is_true(body.dry_run)
+    assert.are.equal(1, #body.warnings)
+    assert.are.equal("conflict", body.warnings[1].type)
+    assert.are.same({ "rule-a", "rule-b" }, body.warnings[1].rule_ids)
+  end)
+
+  it("does not write audit log", function()
+    policies.handle_put_policies()
+
+    local logged = _G.ngx._get_logged()
+    for _, entry in ipairs(logged) do
+      assert.falsy(entry:find("%[luagate:audit%]"), "dry_run should not produce audit log entries")
+    end
+  end)
+
+  it("does not call loader.load_policy", function()
+    -- If load_policy were called, it would try to load from a temp file
+    -- that doesn't exist. Success means it was never called.
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.is_true(body.dry_run)
   end)
 end)
 

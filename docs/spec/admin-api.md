@@ -303,6 +303,48 @@ If-Match: "<source_version>"
 }
 ```
 
+#### 6.5.1 Dry-run 검증 모드
+
+```http
+PUT /api/v1/policies?dry_run=true
+Authorization: Bearer <token>
+Content-Type: application/x-yaml
+Content-Length: <bytes>
+
+<정책 YAML>
+```
+
+정책을 실제 적용하지 않고 검증만 수행한다. MCP `luagate_validate_policies` tool이 사용한다.
+
+**처리 순서**: [1] parse → [2] validate → [3] conflict_detect → [4] hash(SHA256). commit/file write 없음.
+
+**If-Match**: 선택 (dry-run은 저장하지 않으므로 optimistic lock 불필요)
+
+**응답 200 (검증 성공):**
+
+```json
+{
+  "dry_run": true,
+  "valid": true,
+  "version_hash": "b4e3f2a1...",
+  "warnings": [
+    {"type": "conflict", "rule_ids": ["rule-a", "rule-b"], "message": "same scope, priority, opposing action"}
+  ],
+  "shadowed": ["narrow-allow"],
+  "http_rules_count": 42,
+  "stream_rules_count": 5
+}
+```
+
+> **충돌(conflict)은 경고로 보고**: 일반 PUT에서는 conflict 발견 시 422를 반환하지만, dry-run에서는 `warnings` 배열에 포함하여 200으로 반환한다.
+> **감사 로그 미기록**: dry-run은 상태 변경이 없으므로 감사 로그를 남기지 않는다.
+
+**응답 422 (parse/validate 실패):**
+
+일반 PUT과 동일한 에러 응답 형식. parse/validate 에러는 dry-run에서도 422로 반환한다.
+
+---
+
 **응답 422 (검증 실패):**
 
 ```json
