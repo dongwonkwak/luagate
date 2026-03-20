@@ -13,8 +13,11 @@ ensure_results_dir
 
 OUTFILE="${RESULTS_DIR}/http-allow-$(date +%Y%m%d-%H%M%S).txt"
 
+# Target a path that passes through policy evaluation (not /health which skips it)
+BENCH_PATH="${BENCH_PATH:-/api/v1/users}"
+
 info "==> HTTP Allow Throughput Benchmark"
-info "    URL:         ${LUAGATE_HTTP_URL}/health"
+info "    URL:         ${LUAGATE_HTTP_URL}${BENCH_PATH}"
 info "    Threads:     ${WRK_THREADS}"
 info "    Connections: ${WRK_CONNECTIONS}"
 info "    Duration:    ${WRK_DURATION}"
@@ -22,7 +25,7 @@ echo ""
 
 wrk -t"${WRK_THREADS}" -c"${WRK_CONNECTIONS}" -d"${WRK_DURATION}" \
     -s "${SCRIPT_DIR}/wrk/report.lua" \
-    "${LUAGATE_HTTP_URL}/health" \
+    "${LUAGATE_HTTP_URL}${BENCH_PATH}" \
     2>&1 | tee "${OUTFILE}"
 
 ok "Results saved to: ${OUTFILE}"

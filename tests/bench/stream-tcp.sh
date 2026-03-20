@@ -11,18 +11,17 @@ wait_for_luagate
 ensure_results_dir
 
 OUTFILE="${RESULTS_DIR}/stream-tcp-$(date +%Y%m%d-%H%M%S).txt"
-TCP_CONNECTIONS="${TCP_CONNECTIONS:-100}"
+TCP_CONCURRENCY="${TCP_CONCURRENCY:-10}"
 TCP_DURATION="${TCP_DURATION:-10}"
 TCP_MSG_SIZE="${TCP_MSG_SIZE:-1024}"
 
 info "==> TCP Proxy Throughput Benchmark"
 info "    Host:        ${LUAGATE_STREAM_HOST}:${LUAGATE_STREAM_PORT}"
-info "    Connections: ${TCP_CONNECTIONS}"
+info "    Concurrency: ${TCP_CONCURRENCY}"
 info "    Duration:    ${TCP_DURATION}s"
 info "    Msg Size:    ${TCP_MSG_SIZE} bytes"
 echo ""
 
-# Use wrk if available (can test TCP via HTTP upgrade), otherwise use custom approach
 if command -v ncat > /dev/null 2>&1 || command -v nc > /dev/null 2>&1; then
     NC_CMD="nc"
     command -v ncat > /dev/null 2>&1 && NC_CMD="ncat"
@@ -32,40 +31,61 @@ if command -v ncat > /dev/null 2>&1 || command -v nc > /dev/null 2>&1; then
     # Generate test payload
     PAYLOAD=$(head -c "${TCP_MSG_SIZE}" /dev/urandom | base64 | head -c "${TCP_MSG_SIZE}")
 
-    # Track metrics
-    CONN_SUCCESS=0
-    CONN_FAIL=0
-    TOTAL_BYTES=0
+    # Counters (written by subshells via temp files)
+    COUNTER_DIR=$(mktemp -d)
+    trap 'rm -rf "${COUNTER_DIR}"' EXIT
+
+    # Worker: send messages in a loop for TCP_DURATION seconds
+    tcp_worker() {
+        local id="$1"
+        local success=0
+        local fail=0
+        local bytes=0
+        local end_time=$(( $(date +%s) + TCP_DURATION ))
+
+        while [ "$(date +%s)" -lt "$end_time" ]; do
+            if echo "${PAYLOAD}" | timeout 5 "${NC_CMD}" -w 2 "${LUAGATE_STREAM_HOST}" "${LUAGATE_STREAM_PORT}" > /dev/null 2>&1; then
+                success=$((success + 1))
+                bytes=$((bytes + TCP_MSG_SIZE))
+            else
+                fail=$((fail + 1))
+            fi
+        done
+        echo "${success} ${fail} ${bytes}" > "${COUNTER_DIR}/worker_${id}"
+    }
+
     START_TIME=$(date +%s%N)
 
-    for i in $(seq 1 "${TCP_CONNECTIONS}"); do
-        if echo "${PAYLOAD}" | timeout 5 "${NC_CMD}" -w 2 "${LUAGATE_STREAM_HOST}" "${LUAGATE_STREAM_PORT}" > /dev/null 2>&1; then
-            CONN_SUCCESS=$((CONN_SUCCESS + 1))
-            TOTAL_BYTES=$((TOTAL_BYTES + TCP_MSG_SIZE))
-        else
-            CONN_FAIL=$((CONN_FAIL + 1))
-        fi
-
-        # Progress every 10 connections
-        if [ $((i % 10)) -eq 0 ]; then
-            echo -ne "\r  Progress: ${i}/${TCP_CONNECTIONS}"
-        fi
+    # Launch concurrent workers
+    for i in $(seq 1 "${TCP_CONCURRENCY}"); do
+        tcp_worker "$i" &
     done
-    echo ""
+    wait
 
     END_TIME=$(date +%s%N)
     ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
     ELAPSED_S=$(echo "scale=2; ${ELAPSED_MS} / 1000" | bc 2>/dev/null || echo "0")
 
+    # Aggregate results
+    TOTAL_SUCCESS=0
+    TOTAL_FAIL=0
+    TOTAL_BYTES=0
+    for f in "${COUNTER_DIR}"/worker_*; do
+        read -r s fl b < "$f"
+        TOTAL_SUCCESS=$((TOTAL_SUCCESS + s))
+        TOTAL_FAIL=$((TOTAL_FAIL + fl))
+        TOTAL_BYTES=$((TOTAL_BYTES + b))
+    done
+
     {
         echo "--- TCP Proxy Benchmark Results ---"
-        echo "  Connections attempted: ${TCP_CONNECTIONS}"
-        echo "  Connections success:   ${CONN_SUCCESS}"
-        echo "  Connections failed:    ${CONN_FAIL}"
-        echo "  Total bytes sent:      ${TOTAL_BYTES}"
+        echo "  Concurrency:           ${TCP_CONCURRENCY}"
         echo "  Duration:              ${ELAPSED_S}s"
+        echo "  Connections success:   ${TOTAL_SUCCESS}"
+        echo "  Connections failed:    ${TOTAL_FAIL}"
+        echo "  Total bytes sent:      ${TOTAL_BYTES}"
         if [ "${ELAPSED_MS}" -gt 0 ]; then
-            CPS=$(echo "scale=2; ${CONN_SUCCESS} * 1000 / ${ELAPSED_MS}" | bc 2>/dev/null || echo "N/A")
+            CPS=$(echo "scale=2; ${TOTAL_SUCCESS} * 1000 / ${ELAPSED_MS}" | bc 2>/dev/null || echo "N/A")
             BPS=$(echo "scale=2; ${TOTAL_BYTES} * 1000 / ${ELAPSED_MS} / 1024" | bc 2>/dev/null || echo "N/A")
             echo "  Connections/sec:       ${CPS}"
             echo "  Throughput:            ${BPS} KB/s"
