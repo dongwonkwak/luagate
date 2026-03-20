@@ -445,14 +445,43 @@ stages:
 
 ### 10.1 프론트엔드 CI 파이프라인
 
-| 워크플로우 | 내용 | PR blocking |
-|-----------|------|------------|
-| `frontend-quality.yml` | ESLint + Prettier + tsc + Vite build | Yes |
-| `frontend-unit.yml` | Vitest 단위 테스트 | Yes |
-| `frontend-e2e.yml` | Playwright E2E 테스트 | Yes (예정) |
+| 워크플로우 | Status Check 이름 | 내용 | PR blocking |
+|-----------|-------------------|------|------------|
+| `frontend-quality.yml` | `frontend-quality-status` | ESLint + Prettier + tsc + Vite build | Yes |
+| `frontend-unit.yml` | `frontend-unit-status` | Vitest 단위 테스트 + Codecov | Yes |
+| `frontend-e2e.yml` | `frontend-e2e-status` | Playwright E2E 테스트 (Docker) | Yes |
 
 - Path filter: `ui/**` 또는 `.github/workflows/frontend-*.yml` 변경 시에만 실행
-- `frontend-quality-status`, `frontend-unit-status` job이 항상 떠서 PR blocking 가능
+- E2E는 추가로 `e2e/**`, `conf/**`, `lua/luagate/**`, `src/**` 등 백엔드 변경도 감지
+- 각 워크플로우의 final status job (`*-status`)은 `if: always()`로 항상 실행되어 PR blocking 가능
+- Path filter로 skip된 경우에도 status job은 success로 완료됨
+
+### 10.2 GitHub Branch Protection — Required Status Checks
+
+main 브랜치 보호 규칙에 다음 status check를 required로 설정한다:
+
+**프론트엔드:**
+
+- `frontend-quality-status`
+- `frontend-unit-status`
+- `frontend-e2e-status`
+
+**백엔드:**
+
+- `Test::Nginx (pipeline_spec)` (integration-test.yml)
+- `Test::Nginx (test_nginx_basic)` (integration-test.yml)
+
+> **설정 경로**: Repository Settings → Branches → Branch protection rules → main
+> → Require status checks to pass before merging → 위 check 이름 추가
+
+### 10.3 변경 유형별 CI 실행 매트릭스
+
+| 변경 파일 | 실행 워크플로우 | 기대 동작 |
+|----------|---------------|---------|
+| `ui/src/**` 만 | frontend-\* 3개 | backend skip |
+| `lua/**` 만 | integration-test, frontend-e2e | frontend-quality/unit skip |
+| `ui/**` + `lua/**` | 전체 | 모두 실행 |
+| `docs/**` 만 | 없음 | 모든 status success (skip) |
 
 <!-- ADR 필요 -->
 > **TODO**: 카오스 엔지니어링(worker 강제 종료, shared dict 초과) 테스트 전략 수립 시 ADR 필요

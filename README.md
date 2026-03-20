@@ -2,10 +2,11 @@
 
 > OpenResty(Nginx + LuaJIT) 기반 정책 구동 API/보안 게이트웨이
 
-<!-- Badges (placeholder) -->
-<!-- ![CI](https://github.com/dongwonkwak/luagate/actions/workflows/ci.yml/badge.svg) -->
-<!-- ![Coverage](https://codecov.io/gh/dongwonkwak/luagate/badge.svg) -->
-<!-- ![License](https://img.shields.io/badge/license-MIT-blue.svg) -->
+![Integration Tests](https://github.com/dongwonkwak/luagate/actions/workflows/integration-test.yml/badge.svg)
+![Frontend Quality](https://github.com/dongwonkwak/luagate/actions/workflows/frontend-quality.yml/badge.svg)
+![Frontend Unit Tests](https://github.com/dongwonkwak/luagate/actions/workflows/frontend-unit.yml/badge.svg)
+![Frontend E2E Tests](https://github.com/dongwonkwak/luagate/actions/workflows/frontend-e2e.yml/badge.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 <!-- Demo GIF placeholder -->
 <!-- ![Demo](docs/assets/demo.gif) -->
