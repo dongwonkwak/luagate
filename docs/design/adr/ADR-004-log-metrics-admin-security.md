@@ -33,10 +33,10 @@ LuaGate는 API 게이트웨이이자 보안 게이트웨이로서 두 가지 관
 
 ### §4 로그/메트릭 데이터 모델
 
-#### 4.1 HTTP 요청 로그 스키마 (30개 필드)
+#### 4.1 HTTP 요청 로그 스키마 (28개 필드)
 
 각 HTTP 요청 처리 완료 시 아래 JSON 레코드를 `access.log`에 기록한다.
-상세 필드 정의 및 예시: [spec/log-schema.md §3](../../spec/log-schema.md#3-http-요청-로그-accesslog--30개-필드)
+상세 필드 정의 및 예시: [spec/log-schema.md §3](../../spec/log-schema.md#3-http-요청-로그-accesslog--28개-필드)
 
 | # | 필드명 | 타입 | 설명 |
 |---|--------|------|------|
@@ -67,6 +67,7 @@ LuaGate는 API 게이트웨이이자 보안 게이트웨이로서 두 가지 관
 | 25 | `bytes_sent` | number | 헤더 포함 total bytes (클라이언트로 전송) |
 | 26 | `active_version` | string | 요청 시작 시 스냅샷한 HTTP 활성 정책 SHA256 |
 | 27 | `worker_id` | number | 처리한 Nginx worker ID (`ngx.worker.id()`) |
+| 28 | `ffi_timeout` | boolean | FFI Layer 2 watchdog timeout 여부. 기본값 `false` |
 
 **로그 예시:**
 
@@ -98,7 +99,8 @@ LuaGate는 API 게이트웨이이자 보안 게이트웨이로서 두 가지 관
   "response_status": 403,
   "bytes_sent": 91,
   "active_version": "a3f2c1d4e5b6789012345678901234567890abcd",
-  "worker_id": 2
+  "worker_id": 2,
+  "ffi_timeout": false
 }
 ```
 
