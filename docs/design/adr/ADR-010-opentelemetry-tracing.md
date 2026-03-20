@@ -25,7 +25,7 @@
 
 ### 현재 상태
 
-1. `request_id`: `rewrite_by_lua`에서 생성 (Nginx `$request_id` 또는 Lua UUID v4 fallback — logging-contract.md §Correlation ID 참조), access.log에 기록. `X-Request-ID`는 응답 헤더로 전달하는 용도이며 클라이언트 입력을 수용하지 않는다
+1. `request_id`: Nginx `map` 지시자로 결정 — 클라이언트 `X-Request-ID` 헤더가 있으면 그대로 채택, 없으면 Nginx `$request_id` fallback (`conf/nginx.conf:54-57`). 형식이 보장되지 않는다 (클라이언트가 임의 값을 보낼 수 있음)
 2. 외부 트레이싱 시스템 연동: 없음 (OTLP exporter 미존재)
 3. upstream 전파: `X-Request-ID` 헤더만 전달, W3C Trace Context 미지원
 4. 내부 단계별 소요 시간 측정: 없음
@@ -65,7 +65,7 @@
 └── [child] proxy           (access_by_lua 종료 ~ upstream 응답 완료)
 ```
 
-- **루트 span**: `rewrite_by_lua`에서 시작, `log_by_lua`에서 종료. `$request_time`은 요청 수신 ~ 응답 전송 완료(body flush 포함) 시점을 `log_by_lua`에서 계산하므로, 루트 span duration이 기존 `latency_ms`와 정확히 일치한다. `header_filter_by_lua`는 응답 헤더 전송 시점이므로 streaming/chunked 응답에서 body 전송 시간이 빠져 부적합하다.
+- **루트 span**: `rewrite_by_lua`에서 생성하되 시작 시각을 `ngx.req.start_time()`으로 backdate한다 (요청 수신 시각). `log_by_lua`에서 종료. 이를 통해 루트 span duration이 `latency_ms` (`$request_time` = 요청 수신 ~ 응답 전송 완료)와 일치한다. `header_filter_by_lua`는 응답 헤더 전송 시점이므로 streaming/chunked 응답에서 body 전송 시간이 빠져 부적합하다.
 - **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy)
 - **FFI 호출 span**: security_scan child 내에 scanner/decoder FFI 호출 span 포함
 - **proxy child span**: `access_by_lua` 종료 시점에 시작, `log_by_lua`에서 `$upstream_response_time` 기반으로 종료 시각을 역산하여 기록. 이를 통해 proxy span은 업스트림 왕복 시간을 정확히 반영한다.
@@ -121,14 +121,21 @@ tracing:
   flush_interval_ms: 5000    # flush 주기 (ms)
 ```
 
+**설정 로드 계약**:
+
+- **로드 시점**: `init_by_lua`에서 1회 로드. `conf/luagate.yaml`이 없거나 `tracing.enabled`가 `false`이면 트레이싱 모듈 전체를 no-op으로 초기화한다.
+- **HUP/Hot Reload와의 관계**: 트레이싱 설정은 정책 Hot Reload (ADR-003) 대상이 **아니다**. 샘플링 비율, exporter endpoint 등 트레이싱 설정 변경은 Nginx reload (`nginx -s reload` 또는 SIGHUP)로만 반영되며, 이때 worker가 교체되면서 `init_by_lua` → `init_worker_by_lua`가 다시 실행된다.
+- **Validation**: `init_by_lua`에서 YAML 파싱 + 스키마 검증 (필수 필드, 타입, 범위). 검증 실패 시 트레이싱을 비활성화하고 `ngx.log(ngx.ERR, ...)` 로그만 남긴다 (서버 기동을 차단하지 않음 — fail-open 원칙).
+- **기존 설정과의 관계**: `conf/nginx.conf`는 Nginx 지시자, `conf/policies.yaml`은 정책 규칙을 담는다. `conf/luagate.yaml`은 트레이싱/관측성 등 **애플리케이션 레벨 설정**을 담는 새 파일이다. 향후 다른 애플리케이션 설정도 이 파일에 추가할 수 있다.
+
 ### 6. `request_id`와 `trace_id` 관계: 별도 유지 + 매핑
 
 | 필드 | 형식 | 생성 시점 | 용도 |
 |------|------|----------|------|
-| `request_id` | string (Nginx `$request_id` 또는 Lua UUID v4) | `rewrite_by_lua` | 내부 로그 상관, `X-Request-ID` 응답 헤더 |
+| `request_id` | string (클라이언트 `X-Request-ID` 또는 Nginx `$request_id`) | Nginx `map` 지시자 (conf/nginx.conf) | 내부 로그 상관, `X-Request-ID` 업스트림/응답 헤더 |
 | `trace_id` | W3C 32자 hex | `rewrite_by_lua` (inbound 없을 때 생성) | 분산 트레이싱 |
 
-- `request_id`를 `trace_id`로 **승격하지 않는다**. `request_id`는 Nginx `$request_id` (32-hex) 또는 Lua UUID v4 형식이며, `trace_id`는 반드시 W3C 128-bit hex (32자) 형식이어야 한다. 형식이 유사하지만 생성 경로와 의미가 다르므로 별도 유지한다. 기존 로그 소비자와의 호환성도 유지해야 한다.
+- `request_id`를 `trace_id`로 **승격하지 않는다**. `request_id`는 클라이언트가 전달한 임의 값일 수 있어 형식이 보장되지 않으며, `trace_id`는 반드시 W3C 128-bit hex (32자) 형식이어야 한다. 생성 경로와 의미가 다르므로 별도 유지한다. 기존 로그 소비자와의 호환성도 유지해야 한다.
 - span attribute `luagate.request_id`로 매핑하여 로그-트레이스 상관을 지원한다.
 - access.log에 `trace_id`, `span_id` 필드를 NULLABLE로 추가한다 (트레이싱 비활성화 또는 미샘플 시 null).
 
