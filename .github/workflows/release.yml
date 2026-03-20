@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine Docker tags
+        id: docker_tags
+        run: |
+          CURRENT_TAG="${{ github.ref_name }}"
+          HIGHEST_STABLE_TAG="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/${{ github.repository }}:${CURRENT_TAG}"
+            if [ "$CURRENT_TAG" = "$HIGHEST_STABLE_TAG" ]; then
+              echo "ghcr.io/${{ github.repository }}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.docker_tags.outputs.tags }}
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,mode=max,scope=release
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          CURRENT_TAG="${{ github.ref_name }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' "${CURRENT_TAG}^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${CURRENT_TAG}"
+          else
+            RANGE=""
+          fi
+          {
+            echo "notes<<EOF"
+            echo "## Docker"
+            echo ""
+            echo '```bash'
+            echo "docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}"
+            echo '```'
+            echo ""
+            echo "## Changes"
+            echo ""
+            if [ -n "$RANGE" ]; then
+              git log "$RANGE" --pretty=format:"- %s" 2>/dev/null || echo "- Initial release"
+            else
+              git log --pretty=format:"- %s" -20 2>/dev/null || echo "- Initial release"
+            fi
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.notes.outputs.notes }}
+          generate_release_notes: true

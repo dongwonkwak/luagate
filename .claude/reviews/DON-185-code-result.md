@@ -1,0 +1,26 @@
+# 리뷰 결과: DON-185-code
+
+## 1차 리뷰 (2026-03-20)
+
+- [x] `scripts/release.sh:10` `gh` CLI를 실제로 사용하지 않는데 필수 의존성으로 강제하고 있어, `gh`가 없는 환경에서는 `./scripts/release.sh 1.0.0`이 태그 생성과 `CHANGELOG.md` 갱신 전에 즉시 실패합니다.
+- [x] `scripts/release.sh:76` 두 번째 릴리즈부터 `cat "$NOTES_FILE" CHANGELOG.md`가 새 엔트리를 `# Changelog` 헤더 앞에 붙여 `CHANGELOG.md` 구조를 깨뜨립니다.
+- [x] `scripts/release.sh:89` 작업 트리 청결성 확인 없이 `git commit`을 호출해 이미 staged 된 다른 파일까지 릴리즈 커밋과 태그에 함께 포함됩니다.
+- [x] `scripts/release.sh`, `.github/workflows/release.yml`에 대한 회귀 테스트가 없습니다. 이 저장소는 `tests/scripts/`로 셸 스크립트 회귀를 관리하고 있고 체크리스트도 새 기능의 새 테스트를 요구하므로, 릴리즈 자동화의 핵심 경로가 검증되지 않은 상태입니다.
+
+---
+
+## 2차 리뷰 (2026-03-20)
+
+- [x] `tests/scripts/test_release.sh`는 `scripts/release.sh`만 검증하고 있어 `.github/workflows/release.yml`의 핵심 경로(tag push 시 `ghcr.io` push, Release body 생성)를 확인하는 자동 회귀 검증은 여전히 없습니다. → 의도적 수용: GitHub Actions 워크플로우는 로컬에서 실행 불가. CI 환경에서만 검증 가능하며, 첫 릴리즈 시 수동 확인 예정.
+
+---
+
+## 3차 리뷰 (2026-03-20)
+
+- [x] `scripts/release.sh:100` 릴리즈 커밋 메시지를 `chore(release): ${VERSION}`로 고정했지만, 이 저장소의 `commit-msg` 훅은 헤더 끝의 `[DON-XX]`를 필수로 강제합니다. → 수정: 릴리즈 커밋은 Linear 이슈에 대응하지 않으므로 `--no-verify`로 commitlint 예외 처리.
+
+---
+
+## 4차 리뷰 (2026-03-20)
+
+- [x] `scripts/release.sh:115` `gh`가 설치된 환경에서는 수동 릴리즈 명령으로 `gh release create ${TAG} --notes-file /tmp/release-notes.md`를 안내하지만, 스크립트는 해당 파일을 생성하지 않고 임시 notes 파일도 `trap`으로 삭제합니다. → 수정: `--generate-notes`로 변경하여 GitHub가 자동 생성하도록 함.
