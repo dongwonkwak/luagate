@@ -15,7 +15,7 @@
 | [ADR-007](./ADR-007-log-redaction-and-retention.md) | 로그 Redaction + 보존/파기 | Accepted | 2026-03-15 | /16 IP 마스킹 + 필드별 규칙 |
 | [ADR-008](./ADR-008-multi-instance-policy-sync.md) | 멀티 인스턴스 정책 동기화 | Accepted | 2026-03-18 | CI/CD push + /health 검증 |
 | [ADR-009](./ADR-009-ffi-timeout-enforcement.md) | FFI 타임아웃 강제 | Accepted | 2026-03-18 | detached thread + watchdog |
-| ~~ADR-010~~ | *(OpenTelemetry 트레이싱 — 번호 예약, 미작성)* | — | — | [DON-179](https://linear.app/dongwon/issue/DON-179) |
+| [ADR-010](./ADR-010-opentelemetry-tracing.md) | OpenTelemetry 분산 트레이싱 도입 | Accepted | 2026-03-20 | 커스텀 OTLP/HTTP 모듈 + head-based 샘플링 |
 | [ADR-011](./ADR-011-mcp-server.md) | MCP 서버 설계 | Accepted | 2026-03-19 | Admin API → MCP tool 노출 |
 
 ## 의존성 관계
@@ -25,6 +25,7 @@ ADR-001 (실행 모델)
 ├── ADR-002 (정책 평가) → ADR-003 (저장/Reload) → ADR-005 (활성화/동시성)
 ├── ADR-004 (로그/메트릭/보안) → ADR-006 (메트릭 Cardinality; +ADR-001)
 │                              → ADR-007 (로그 Redaction)
+│                              → ADR-010 (OpenTelemetry 트레이싱; +ADR-001)
 ├── ADR-008 (멀티 인스턴스; +ADR-003)
 ├── ADR-009 (FFI 타임아웃; +ADR-003)
 └── ADR-011 (MCP 서버; ADR-004 + ADR-005)
@@ -45,6 +46,7 @@ ADR-001 (실행 모델)
 | ADR-007 | [log-schema.md](../../spec/log-schema.md) |
 | ADR-008 | [architecture.md](../../spec/architecture.md), [admin-api.md](../../spec/admin-api.md), [log-schema.md](../../spec/log-schema.md) |
 | ADR-009 | [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [http-pipeline.md](../../spec/http-pipeline.md), [stream-pipeline.md](../../spec/stream-pipeline.md), [architecture.md](../../spec/architecture.md) |
+| ADR-010 | [log-schema.md](../../spec/log-schema.md), [http-pipeline.md](../../spec/http-pipeline.md) |
 | ADR-011 | [admin-api.md](../../spec/admin-api.md), [log-schema.md](../../spec/log-schema.md) |
 
 ## ADR 작성 가이드
