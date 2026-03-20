@@ -247,7 +247,13 @@ end
 
 --- PUT /api/v1/policies — full pipeline: If-Match → parse → validate →
 --- conflict → hash → audit → commit + canonical file write.
+--- When ?dry_run=true, stops after hash and returns validation results
+--- without committing (admin-api.md §6.5.1).
 function _M.handle_put_policies()
+  -- [0] dry_run flag
+  local args = ngx.req.get_uri_args()
+  local dry_run = args.dry_run == "true"
+
   -- [0] Content-Encoding check (compression not allowed)
   local content_encoding = ngx.req.get_headers()["Content-Encoding"]
   if content_encoding then
@@ -267,18 +273,24 @@ function _M.handle_put_policies()
   end
 
   -- [1] If-Match check (ADR-005: optimistic lock on source_version)
+  --     Optional when dry_run=true (no commit, so no lock needed)
   local if_match = ngx.req.get_headers()["If-Match"]
+  local current_source
   if not if_match then
-    send_error(428, "version_mismatch", "reload", "If-Match header is required")
-    return
-  end
-  -- Strip surrounding quotes if present
-  if_match = if_match:gsub('^"', ""):gsub('"$', "")
+    if not dry_run then
+      send_error(428, "version_mismatch", "reload", "If-Match header is required")
+      return
+    end
+  else
+    -- Strip surrounding quotes if present
+    if_match = if_match:gsub('^"', ""):gsub('"$', "")
 
-  local current_source, mismatch_msg = validate_source_if_match(if_match)
-  if mismatch_msg then
-    send_error(409, "version_mismatch", "reload", mismatch_msg)
-    return
+    local mismatch_msg
+    current_source, mismatch_msg = validate_source_if_match(if_match)
+    if mismatch_msg then
+      send_error(409, "version_mismatch", "reload", mismatch_msg)
+      return
+    end
   end
 
   -- [2] Parse
@@ -295,7 +307,7 @@ function _M.handle_put_policies()
     return
   end
 
-  -- [4] Conflict detection — fail-closed per admin-api.md §3 (422 conflict_detected)
+  -- [4] Conflict detection
   local http_enabled = conflict.filter_enabled(policy.rules or {})
   local stream_enabled = conflict.filter_enabled(policy.stream_rules or {})
   local all_enabled = {}
@@ -305,9 +317,10 @@ function _M.handle_put_policies()
   for _, r in ipairs(stream_enabled) do
     all_enabled[#all_enabled + 1] = r
   end
-  local conflicts, _ = conflict.detect(all_enabled)
+  local conflicts, shadowed = conflict.detect(all_enabled)
 
-  if #conflicts > 0 then
+  -- In dry_run mode, conflicts are warnings, not fatal errors
+  if #conflicts > 0 and not dry_run then
     local details = {}
     for _, c in ipairs(conflicts) do
       local ids = table.concat(c.rule_ids or {}, ", ")
@@ -321,6 +334,54 @@ function _M.handle_put_policies()
   local new_version, hash_err = sha256_hex(body)
   if not new_version then
     send_error(500, "internal_error", "internal", "SHA256 failed: " .. tostring(hash_err))
+    return
+  end
+
+  -- [5.1] dry_run: return validation results without committing
+  if dry_run then
+    -- Echo If-Match as ETag to prevent Nginx core from turning 200 into 412
+    if if_match then
+      ngx.header["ETag"] = '"' .. if_match .. '"'
+    end
+    local warnings = {}
+    for _, c in ipairs(conflicts) do
+      local rule_ids = c.rule_ids
+      if not rule_ids or #rule_ids == 0 then
+        rule_ids = {}
+        if c.rule_a then
+          rule_ids[#rule_ids + 1] = c.rule_a
+        end
+        if c.rule_b then
+          rule_ids[#rule_ids + 1] = c.rule_b
+        end
+      end
+
+      local message = c.message
+      if not message then
+        if c.overlap_type == "exact" then
+          message = "same scope, priority, opposing action"
+        elseif c.overlap_type == "overlap" then
+          message = "overlapping scope, priority, opposing action"
+        else
+          message = "conflicting rules detected"
+        end
+      end
+
+      warnings[#warnings + 1] = {
+        type = "conflict",
+        rule_ids = rule_ids,
+        message = message,
+      }
+    end
+    send_json(200, {
+      dry_run = true,
+      valid = true,
+      version_hash = new_version,
+      warnings = warnings,
+      shadowed = shadowed or {},
+      http_rules_count = #(policy.rules or {}),
+      stream_rules_count = #(policy.stream_rules or {}),
+    })
     return
   end
 
