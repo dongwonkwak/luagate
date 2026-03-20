@@ -43,6 +43,12 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
 
+      - name: Seed corpus from checked-in seeds
+        working-directory: ${{ matrix.target.crate_dir }}
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target.bin }}
+          cp -r fuzz/seed/${{ matrix.target.bin }}/* fuzz/corpus/${{ matrix.target.bin }}/ 2>/dev/null || true
+
       - name: Run fuzzer (30 min)
         working-directory: ${{ matrix.target.crate_dir }}
         run: |
