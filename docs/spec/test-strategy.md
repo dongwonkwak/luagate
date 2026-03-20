@@ -468,20 +468,25 @@ main 브랜치 보호 규칙에 다음 status check를 required로 설정한다:
 
 **백엔드:**
 
-- `Test::Nginx (pipeline_spec)` (integration-test.yml)
-- `Test::Nginx (test_nginx_basic)` (integration-test.yml)
+- `Test::Nginx (Docker)` (integration-test.yml — `test-docker-compat` aggregation job, `if: always()`)
 
+> **참고**: 개별 shard (`Test::Nginx (pipeline_spec)` 등)는 matrix 확장 시 이름이 변경되므로
+> required check에는 항상 실행되는 aggregation job `Test::Nginx (Docker)`만 등록한다.
+>
 > **설정 경로**: Repository Settings → Branches → Branch protection rules → main
 > → Require status checks to pass before merging → 위 check 이름 추가
 
 ### 10.3 변경 유형별 CI 실행 매트릭스
 
-| 변경 파일 | 실행 워크플로우 | 기대 동작 |
-|----------|---------------|---------|
-| `ui/src/**` 만 | frontend-\* 3개 | backend skip |
-| `lua/**` 만 | integration-test, frontend-e2e | frontend-quality/unit skip |
-| `ui/**` + `lua/**` | 전체 | 모두 실행 |
-| `docs/**` 만 | 없음 | 모든 status success (skip) |
+`integration-test.yml`은 path filter 없이 모든 PR에서 실행된다.
+프론트엔드 워크플로우만 path filter로 조건부 실행한다.
+
+| 변경 파일 | frontend-quality | frontend-unit | frontend-e2e | integration-test |
+|----------|-----------------|--------------|-------------|-----------------|
+| `ui/src/**` 만 | 실행 | 실행 | 실행 | 실행 (항상) |
+| `lua/**` 만 | skip (success) | skip (success) | 실행 | 실행 (항상) |
+| `ui/**` + `lua/**` | 실행 | 실행 | 실행 | 실행 (항상) |
+| `docs/**` 만 | skip (success) | skip (success) | skip (success) | 실행 (항상) |
 
 <!-- ADR 필요 -->
 > **TODO**: 카오스 엔지니어링(worker 강제 종료, shared dict 초과) 테스트 전략 수립 시 ADR 필요
