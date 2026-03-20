@@ -67,15 +67,15 @@
 ```
 
 - **루트 span**: `rewrite_by_lua`에서 생성하되 시작 시각을 `ngx.req.start_time()`으로 backdate한다 (요청 수신 시각). `log_by_lua`에서 종료. 이를 통해 루트 span duration이 `latency_ms` (`$request_time` = 요청 수신 ~ 응답 전송 완료)와 일치한다.
-- **SpanKind 및 HTTP Semantic Convention** (OpenTelemetry Semantic Conventions for HTTP):
-  - 루트 span: `SpanKind=SERVER` (LuaGate가 HTTP 서버 역할). 필수 속성: `http.method`, `http.url`, `http.status_code`, `http.scheme`, `net.host.name`, `net.host.port`
-  - proxy child span: `SpanKind=CLIENT` (LuaGate가 upstream에 대해 HTTP 클라이언트 역할). 필수 속성: `http.method`, `http.url`, `http.status_code`, `net.peer.name`, `net.peer.port`
+- **SpanKind 및 HTTP Semantic Convention** (OpenTelemetry Semantic Conventions v1.25+ stable):
+  - 루트 span: `SpanKind=SERVER`. 필수 속성: `http.request.method`, `url.scheme`, `url.path`, `http.response.status_code`, `server.address`, `server.port`. 에러 시 span status `ERROR` + `error.type` 속성
+  - proxy child span: `SpanKind=CLIENT`. 필수 속성: `http.request.method`, `url.full`, `http.response.status_code`, `server.address`, `server.port`. 에러 시 span status `ERROR` + `error.type` 속성
   - normalize/policy_eval/security_scan child spans: `SpanKind=INTERNAL` (내부 처리 단계)
 - **child span**: 주요 내부 단계별 생성 (normalize, policy_eval, security_scan, proxy)
 - **normalize child span**: `rewrite_by_lua`에서 생성. decoder FFI (path/query 정규화) 호출을 포함한다. http-pipeline.md §2.2의 rewrite 정규화 단계에 해당
 - **security_scan child span**: `access_by_lua`에서 생성. scanner FFI 호출만 포함 (decoder는 rewrite에서 이미 실행됨)
 - **pre-Lua rejection**: Nginx가 malformed request를 Lua phase 진입 전에 거부하는 경우 (400/413/414), 트레이싱 span은 생성되지 않는다. `trace_id`/`span_id` 로그 필드는 기본값 null로 기록된다. 이는 의도된 동작이며, inbound `traceparent`가 있어도 Lua가 실행되지 않으므로 파싱 자체가 불가하다
-- **proxy child span**: `access_by_lua` 종료 시점에 `ngx.now()`로 시작 시각(`proxy_start_ts`)을 기록한다. `log_by_lua`에서 `ngx.now()`로 종료 시각을 기록하고, duration = 종료 시각 - `proxy_start_ts`로 계산한다. 이를 통해 proxy span은 `access_by_lua` 종료부터 Nginx가 upstream 응답 수신 + 클라이언트 전송 완료까지의 전체 구간을 반영하며, retry/failover가 발생해도 단일 span으로 총 소요 시간을 정확히 기록한다. `$upstream_response_time`은 span attribute `luagate.upstream_response_time`으로 별도 보존한다 (attempt별 디버깅 용도).
+- **proxy child span**: `access_by_lua` 종료 시점에 `ngx.now()`로 시작 시각(`proxy_start_ts`)을 기록한다. duration은 `$upstream_response_time` 합산값을 사용한다 (upstream 서버 응답 시간만 반영, 클라이언트 송신 지연 제외). 이를 통해 `SpanKind=CLIENT` span이 순수 upstream 의존성 latency만 표현하여, Jaeger/Tempo 서비스 맵에서 upstream 지연을 정확히 분석할 수 있다. 클라이언트 송신 시간은 루트 span (`SpanKind=SERVER`)의 duration에 이미 포함되어 있으므로 별도 계측이 불필요하다. raw `$upstream_response_time` 문자열은 span attribute `luagate.upstream_response_time`으로 보존한다.
 - **upstream retry/failover**: Nginx가 retry/failover를 수행하면 `$upstream_response_time`이 쉼표 구분 다중 값이 될 수 있다 (예: `"0.5, 1.2"`). 이 경우 **단일 proxy span으로 합산**한다 — 전체 upstream 소요 시간(마지막 값의 종료 시점)을 proxy span duration으로 기록하고, attempt 횟수를 span attribute `luagate.upstream_attempts`로 남긴다. attempt별 개별 span 생성은 Phase 2 이후 범위로 둔다. outbound `traceparent`의 `span_id`는 최초 attempt 시점에 생성한 proxy span의 ID를 사용하며, retry 시에도 동일한 `span_id`를 전달한다 (upstream 관점에서 같은 parent).
 - **upstream 실패 (connect/DNS 등)**: `$upstream_response_time`이 빈 문자열 또는 nil인 경우 (connect 실패, DNS 해석 실패 등), proxy span을 `log_by_lua` 시점에서 즉시 종료한다. 이때 span에 `otel.status_code=ERROR`, `error.type=upstream_connect_failure`, `http.response.status_code=502` 등 에러 attribute를 설정한다. duration은 proxy span 시작 ~ log_by_lua 시점으로 기록한다 (실제 대기 시간 반영).
 - **outbound traceparent 주입**: `access_by_lua` 단계에서 proxy child span을 생성한 뒤, 해당 span의 `span_id`를 parent로 하여 `ngx.req.set_header("traceparent", "00-<trace_id>-<proxy_span_id>-<flags>")`를 설정한다. 이렇게 하면 업스트림 서비스의 span이 proxy child의 자식으로 올바르게 연결된다.
@@ -168,7 +168,7 @@ tracing:
 
 > **request_id 타입 재정의**: 기존 log-schema.md는 `request_id`를 "UUID v4"로 기술했으나, 실제 런타임 계약은 클라이언트 `X-Request-ID` 헤더를 그대로 채택한다 (`conf/nginx.conf:54-57` map). 따라서 `request_id`의 타입을 **opaque string**으로 재정의한다. 클라이언트가 UUID v4를 보내면 UUID v4이고, 임의 문자열을 보내면 그대로 기록된다. 이 ADR과 함께 log-schema.md의 `request_id` 타입 설명을 동기화한다.
 - span attribute `luagate.request_id`로 매핑하여 로그-트레이스 상관을 지원한다.
-- access.log에 `trace_id`, `span_id` 필드를 NULLABLE로 추가한다 (트레이싱 비활성화 또는 미샘플 시 null).
+- access.log에 `trace_id`, `span_id` 필드를 NULLABLE로 추가한다 (트레이싱 비활성화 또는 pre-Lua rejection 시 null. 활성화 시 항상 기록 — §5 샘플링 표 참조).
 
 ### Span Attribute Redaction (ADR-007 연동)
 
