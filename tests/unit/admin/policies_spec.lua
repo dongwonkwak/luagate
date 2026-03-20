@@ -960,7 +960,7 @@ describe("PUT /api/v1/policies?dry_run=true", function()
 
   it("reports conflicts as warnings (not 422)", function()
     _conflict_conflicts = {
-      { rule_ids = { "rule-a", "rule-b" }, message = "same scope, priority, opposing action" },
+      { rule_a = "rule-a", rule_b = "rule-b", overlap_type = "exact" },
     }
     policies = load_policies()
 
@@ -974,6 +974,7 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     assert.are.equal(1, #body.warnings)
     assert.are.equal("conflict", body.warnings[1].type)
     assert.are.same({ "rule-a", "rule-b" }, body.warnings[1].rule_ids)
+    assert.are.equal("same scope, priority, opposing action", body.warnings[1].message)
   end)
 
   it("does not write audit log", function()

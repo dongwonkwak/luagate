@@ -345,10 +345,32 @@ function _M.handle_put_policies()
     end
     local warnings = {}
     for _, c in ipairs(conflicts) do
+      local rule_ids = c.rule_ids
+      if not rule_ids or #rule_ids == 0 then
+        rule_ids = {}
+        if c.rule_a then
+          rule_ids[#rule_ids + 1] = c.rule_a
+        end
+        if c.rule_b then
+          rule_ids[#rule_ids + 1] = c.rule_b
+        end
+      end
+
+      local message = c.message
+      if not message then
+        if c.overlap_type == "exact" then
+          message = "same scope, priority, opposing action"
+        elseif c.overlap_type == "overlap" then
+          message = "overlapping scope, priority, opposing action"
+        else
+          message = "conflicting rules detected"
+        end
+      end
+
       warnings[#warnings + 1] = {
         type = "conflict",
-        rule_ids = c.rule_ids or {},
-        message = c.message or "conflicting rules detected",
+        rule_ids = rule_ids,
+        message = message,
       }
     end
     send_json(200, {
