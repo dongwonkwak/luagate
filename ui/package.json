@@ -28,7 +28,6 @@
     "@storybook/addon-a11y": "^10.3.1",
     "@storybook/addon-docs": "^10.3.1",
     "@storybook/react-vite": "^10.3.1",
-    "@storybook/test": "^8.6.15",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.1.2",
