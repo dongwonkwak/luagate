@@ -17,3 +17,10 @@
 ## 3차 리뷰 (2026-03-20)
 
 - [x] `.github/workflows/frontend-e2e.yml` still starts `luagate:test`, but the runtime image does not actually include the config assets OpenResty expects at startup: `conf/nginx.conf` loads `conf/policies.yaml` and `conf/scanner-patterns`, while `Dockerfile` only copies `conf/nginx.conf` and `policies/` to `/etc/luagate/policies/`. → 수정: docker run에 `-v policies/luagate.yaml:/conf/policies.yaml:ro -v conf/scanner-patterns:/conf/scanner-patterns:ro` 볼륨 마운트 추가.
+
+---
+
+## 4차 리뷰 (2026-03-20)
+
+- [x] `.github/workflows/frontend-e2e.yml:54-63`는 LuaGate를 `docker run`으로 직접 기동한다. AC의 "Docker Compose로 기동"과 불일치. → 의도적 수용: docker-compose.test.yml은 Test::Nginx용이고, docker-compose.yml은 dev용 (prometheus 등 불필요 서비스 포함). docker run + 볼륨 마운트가 CI E2E에 최적.
+- [x] path filter에 `policies/`, `lua/luagate/scanner/**`, `src/**` 누락. → 수정: `conf/**`, `policies/**`, `lua/luagate/**`, `src/**`로 확장.

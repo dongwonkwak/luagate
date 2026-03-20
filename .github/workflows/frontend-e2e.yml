@@ -20,16 +20,15 @@ jobs:
             e2e:
               - 'ui/**'
               - 'e2e/**'
-              - 'conf/nginx.conf'
+              - 'conf/**'
+              - 'policies/**'
               - 'docker-compose.yml'
               - 'docker-compose.test.yml'
               - 'Dockerfile'
               - 'Dockerfile.test'
               - 'Makefile'
-              - 'lua/luagate/admin/**'
-              - 'lua/luagate/policy/**'
-              - 'lua/luagate/metrics/**'
-              - 'lua/luagate/log/**'
+              - 'lua/luagate/**'
+              - 'src/**'
               - '.github/workflows/frontend-e2e.yml'
 
   e2e:
