@@ -1267,6 +1267,64 @@ describe("MCP metadata in audit logs", function()
     assert.is_true(found_mcp, "audit log should contain actor_type='mcp' with MCP metadata")
   end)
 
+  it("normalizes duplicate MCP headers to scalar audit fields", function()
+    _file_registry["conf/policies.yaml"] = "global:\n  default_action: allow\nrules: []\nstream_rules: []"
+    _loader_versions = { http_version = "abc123", stream_version = "abc123", source_version = "abc123" }
+    _loader_result = {
+      ok = true,
+      skipped = false,
+      new_version = "new_hash",
+      previous_http_version = "abc123",
+      previous_stream_version = "abc123",
+      http_ok = true,
+      stream_ok = true,
+      conflicts = {},
+      shadowed = {},
+    }
+    _parser_result = { global = { default_action = "allow" }, rules = {}, stream_rules = {} }
+
+    _G.ngx = make_ngx({
+      var = { uri = "/api/v1/policies", remote_addr = "127.0.0.1" },
+    })
+    _G.ngx.req.get_headers = function()
+      return {
+        ["Content-Type"] = "application/x-yaml",
+        ["If-Match"] = "abc123",
+        ["X-MCP-Client"] = { "claude-desktop", "duplicate-client" },
+        ["X-MCP-Tool"] = { "luagate_update_policies", "duplicate-tool" },
+        ["X-MCP-Session-Id"] = { "sess-abc123", "duplicate-session" },
+        ["X-Request-ID"] = { "req-xyz789", "duplicate-request" },
+      }
+    end
+    _G.ngx.req.get_method = function()
+      return "PUT"
+    end
+    _G.ngx.req.get_body_data = function()
+      return "global:\n  default_action: allow\nrules: []\nstream_rules: []"
+    end
+
+    policies = load_policies()
+    policies.handle_put_policies()
+
+    local logged = _G.ngx._get_logged()
+    local found_mcp = false
+    for _, entry in ipairs(logged) do
+      if entry:find("%[luagate:audit%]") and entry:find('"actor_type":"mcp"') then
+        found_mcp = true
+        assert.truthy(entry:find('"client_name":"claude%-desktop"'), "should normalize client_name to string")
+        assert.truthy(entry:find('"tool_name":"luagate_update_policies"'), "should normalize tool_name to string")
+        assert.truthy(entry:find('"session_id":"sess%-abc123"'), "should normalize session_id to string")
+        assert.truthy(entry:find('"request_id":"req%-xyz789"'), "should normalize request_id to string")
+        assert.falsy(entry:find('"client_name"%s*:%s*%['), "client_name must not be encoded as array")
+        assert.falsy(entry:find('"tool_name"%s*:%s*%['), "tool_name must not be encoded as array")
+        assert.falsy(entry:find('"session_id"%s*:%s*%['), "session_id must not be encoded as array")
+        assert.falsy(entry:find('"request_id"%s*:%s*%['), "request_id must not be encoded as array")
+        break
+      end
+    end
+    assert.is_true(found_mcp, "audit log should contain scalar MCP metadata when headers are repeated")
+  end)
+
   it("includes actor_type='api' when no MCP headers are present (backward compatible)", function()
     _file_registry["conf/policies.yaml"] = "global:\n  default_action: allow\nrules: []\nstream_rules: []"
     _loader_versions = { http_version = "abc123", stream_version = "abc123", source_version = "abc123" }

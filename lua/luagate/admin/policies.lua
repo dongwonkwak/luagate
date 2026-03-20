@@ -88,9 +88,24 @@ end
 --- Extract MCP metadata from request headers (ADR-011 §8).
 -- Determines actor_type ("mcp" or "api") based on X-MCP-Client header presence.
 -- @return table  MCP metadata fields (actor_type always present)
+local function header_to_string(value)
+  if type(value) == "string" then
+    return value
+  end
+
+  if type(value) == "table" then
+    local first = value[1]
+    if type(first) == "string" then
+      return first
+    end
+  end
+
+  return nil
+end
+
 local function extract_mcp_metadata()
   local headers = ngx.req.get_headers()
-  local mcp_client = headers["X-MCP-Client"]
+  local mcp_client = header_to_string(headers["X-MCP-Client"])
 
   if not mcp_client then
     return { actor_type = "api" }
@@ -99,9 +114,9 @@ local function extract_mcp_metadata()
   return {
     actor_type = "mcp",
     client_name = mcp_client,
-    tool_name = headers["X-MCP-Tool"],
-    session_id = headers["X-MCP-Session-Id"],
-    request_id = headers["X-Request-ID"],
+    tool_name = header_to_string(headers["X-MCP-Tool"]),
+    session_id = header_to_string(headers["X-MCP-Session-Id"]),
+    request_id = header_to_string(headers["X-Request-ID"]),
   }
 end
 
