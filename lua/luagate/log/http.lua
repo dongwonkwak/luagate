@@ -103,6 +103,14 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
+--- Redact sensitive query parameters (exported for tracing span attributes).
+-- ADR-010 Span Attribute Redaction: url.full must apply same PII rules as access.log.
+-- @param qs string  Raw query string
+-- @return string  Redacted query string
+function _M.redact_query_string(qs)
+  return redact_query_string(qs)
+end
+
 --- Build the 29-field log record and set ngx.var.luagate_log_json.
 -- Called from log_by_lua (via handler.log_phase).
 -- Errors are silently caught by the caller (pcall in handler.log_phase).

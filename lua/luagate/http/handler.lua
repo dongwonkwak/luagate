@@ -157,6 +157,7 @@ function _M.rewrite()
   local query_normalized = query_raw
   local decoder_error = nil
   local decoder_ffi_timeout = false
+  local normalize_start_ns = ngx.now() * 1e9
 
   local ok_dec, decoder = pcall(require, "luagate.decoder.ffi")
   if ok_dec then
@@ -195,6 +196,7 @@ function _M.rewrite()
     decoder_error = "decoder_load_error"
   end
   ngx.var.luagate_path_normalized = path_normalized
+  local normalize_end_ns = ngx.now() * 1e9
 
   -- 5. src_ip: MVP uses remote_addr directly.
   --    Full PROXY Protocol / XFF trusted-proxy logic is a future issue.
@@ -232,6 +234,17 @@ function _M.rewrite()
       -- Set nginx vars for log fields (always, regardless of sampling)
       ngx.var.luagate_trace_id = trace_ctx.trace_id
       ngx.var.luagate_span_id = trace_ctx.root_span.span_id
+
+      -- ADR-010 §2: retroactively create normalize child span
+      local norm_span = tracing.start_child_span(trace_ctx, "normalize")
+      if norm_span then
+        local span_mod = require("luagate.tracing.span")
+        norm_span.start_time_ns = normalize_start_ns
+        span_mod.finish(norm_span, normalize_end_ns)
+        if decoder_error then
+          span_mod.set_error(norm_span, decoder_error)
+        end
+      end
     end
   end
 end
@@ -369,6 +382,9 @@ function _M.access()
     return
   end
 
+  -- ADR-010 §2: record scanner start time for security_scan span
+  local scan_start_ns = ngx.now() * 1e9
+
   -- 2c. Scanner scan (security-scanner.md §2)
   --     pcall wrapping: catch Lua-level exceptions from scanner FFI (ADR-001 §1.2)
   local ok_sc, scanner = pcall(require, "luagate.scanner.ffi")
@@ -454,6 +470,21 @@ function _M.access()
     ngx.var.luagate_threat_score = tostring(scan_result.threat_score)
   end
 
+  -- ADR-010 §2: create security_scan child span
+  local scan_end_ns = ngx.now() * 1e9
+  local trace_ctx_sc = ctx.trace
+  if trace_ctx_sc then
+    local ok_tr, tr = pcall(require, "luagate.tracing.init")
+    if ok_tr then
+      local sc_span = tr.start_child_span(trace_ctx_sc, "security_scan")
+      if sc_span then
+        local sm = require("luagate.tracing.span")
+        sc_span.start_time_ns = scan_start_ns
+        sm.finish(sc_span, scan_end_ns)
+      end
+    end
+  end
+
   -- 3. Build request context for policy evaluation (http-pipeline.md §2.3)
   --    path_normalized and query_normalized set in rewrite phase.
   local request_ctx = {
@@ -469,7 +500,23 @@ function _M.access()
   local default_action = (policy.global and policy.global.default_action) or "deny"
 
   -- 5. Evaluate against compiled HTTP rules (ADR-002 §3.1 first-match-wins)
+  local policy_eval_start_ns = ngx.now() * 1e9
   local result = evaluator.evaluate(policy._compiled_http or {}, request_ctx, default_action)
+  local policy_eval_end_ns = ngx.now() * 1e9
+
+  -- ADR-010 §2: create policy_eval child span
+  local trace_ctx_pe = ctx.trace
+  if trace_ctx_pe then
+    local ok_tr, tr = pcall(require, "luagate.tracing.init")
+    if ok_tr then
+      local pe_span = tr.start_child_span(trace_ctx_pe, "policy_eval")
+      if pe_span then
+        local sm = require("luagate.tracing.span")
+        pe_span.start_time_ns = policy_eval_start_ns
+        sm.finish(pe_span, policy_eval_end_ns)
+      end
+    end
+  end
 
   -- 6. Update ngx.ctx with evaluation result
   ctx.action = result.action
@@ -505,18 +552,23 @@ function _M.access()
         -- ADR-010 §2: CLIENT span required attributes (OTel Semantic Conventions v1.25+)
         local span_mod = require("luagate.tracing.span")
         span_mod.set_attribute(proxy_span, "http.request.method", ngx.req.get_method())
-        -- url.full: redaction applied by using path_normalized + redacted query
+        -- url.full: apply PII redaction (ADR-010 Span Attribute Redaction)
+        local ok_logmod, logmod = pcall(require, "luagate.log.http")
+        local redacted_qs = ctx.query_raw or ""
+        if ok_logmod and logmod.redact_query_string then
+          redacted_qs = logmod.redact_query_string(redacted_qs)
+        end
         local scheme = ngx.var.scheme or "http"
-        local host = ngx.var.host or ""
+        local upstream_host = ngx.var.proxy_host or ngx.var.host or ""
         local path = ctx.path_normalized or ngx.var.uri or ""
-        local qs = ngx.var.luagate_query_string or ""
-        local url_full = scheme .. "://" .. host .. path
-        if qs ~= "" then
-          url_full = url_full .. "?" .. qs
+        local url_full = scheme .. "://" .. upstream_host .. path
+        if redacted_qs ~= "" then
+          url_full = url_full .. "?" .. redacted_qs
         end
         span_mod.set_attribute(proxy_span, "url.full", url_full)
-        span_mod.set_attribute(proxy_span, "server.address", host)
-        span_mod.set_attribute(proxy_span, "server.port", tonumber(ngx.var.server_port) or 0)
+        -- server.address/port: upstream target, not LuaGate itself
+        span_mod.set_attribute(proxy_span, "server.address", upstream_host)
+        span_mod.set_attribute(proxy_span, "server.port", tonumber(ngx.var.proxy_port) or 0)
 
         ctx.proxy_span = proxy_span
         ctx.proxy_start_ts = ngx.now()
