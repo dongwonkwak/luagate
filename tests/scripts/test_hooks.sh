@@ -93,4 +93,57 @@ assert_output_contains "marker present → confirmed" "confirmed" "$OUTPUT"
 cleanup_git_sandbox
 
 # ═══════════════════════════════════════════════════════════════════
+# post-implement-verify.sh tests
+# ═══════════════════════════════════════════════════════════════════
+
+echo ""
+echo "-- Test: post-implement no changes → exit 0, no lint --"
+setup_git_sandbox
+OUTPUT="$(bash "$POST_IMPLEMENT_HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+assert_exit_code "no changes → exit 0" 0 "$EXIT_CODE"
+assert_output_not_contains "no changes → no lint message" "post-implement" "$OUTPUT"
+cleanup_git_sandbox
+
+echo ""
+echo "-- Test: post-implement with tracked .lua change → detects change --"
+setup_git_sandbox
+echo "-- lua code" > test.lua
+git add test.lua && git commit -q -m "add lua"
+echo "-- modified" >> test.lua
+# Hook will try to run make lint which won't exist in sandbox, but it should
+# detect the change and attempt to run lint (exit 0 on failure by design)
+OUTPUT="$(bash "$POST_IMPLEMENT_HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+assert_exit_code "lua change detected → exit 0" 0 "$EXIT_CODE"
+assert_output_contains "lua change → detected message" "code changes detected" "$OUTPUT"
+cleanup_git_sandbox
+
+echo ""
+echo "-- Test: post-implement with staged .sh change → detects change --"
+setup_git_sandbox
+echo "#!/bin/bash" > test.sh
+git add test.sh
+OUTPUT="$(bash "$POST_IMPLEMENT_HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+assert_exit_code "sh staged → exit 0" 0 "$EXIT_CODE"
+assert_output_contains "sh staged → detected message" "code changes detected" "$OUTPUT"
+cleanup_git_sandbox
+
+echo ""
+echo "-- Test: post-implement with untracked .ts file → detects change --"
+setup_git_sandbox
+echo "const x = 1;" > newfile.ts
+OUTPUT="$(bash "$POST_IMPLEMENT_HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+assert_exit_code "untracked ts → exit 0" 0 "$EXIT_CODE"
+assert_output_contains "untracked ts → detected message" "code changes detected" "$OUTPUT"
+cleanup_git_sandbox
+
+echo ""
+echo "-- Test: post-implement with .md only → no detection --"
+setup_git_sandbox
+echo "# readme" > notes.md
+OUTPUT="$(bash "$POST_IMPLEMENT_HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+assert_exit_code "md only → exit 0" 0 "$EXIT_CODE"
+assert_output_not_contains "md only → no detection" "code changes detected" "$OUTPUT"
+cleanup_git_sandbox
+
+# ═══════════════════════════════════════════════════════════════════
 print_summary "Claude Code Hooks Tests"
