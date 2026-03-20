@@ -43,6 +43,22 @@ export function mockFetch(
   };
 }
 
+/** Merge default headers with init.headers (init takes precedence but doesn't drop defaults) */
+function mergeHeaders(
+  defaults: Record<string, string>,
+  init?: ResponseInit,
+): Headers {
+  const merged = new Headers(defaults);
+  if (init?.headers) {
+    const extra =
+      init.headers instanceof Headers
+        ? init.headers
+        : new Headers(init.headers as Record<string, string>);
+    extra.forEach((v, k) => merged.set(k, v));
+  }
+  return merged;
+}
+
 /** Helper to create a JSON Response */
 export function jsonResponse(
   body: unknown,
@@ -50,9 +66,8 @@ export function jsonResponse(
 ): () => Response {
   return () =>
     new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      ...init,
+      status: init?.status ?? 200,
+      headers: mergeHeaders({ "Content-Type": "application/json" }, init),
     });
 }
 
@@ -64,9 +79,8 @@ export function textResponse(
 ): () => Response {
   return () =>
     new Response(body, {
-      status: 200,
-      headers: { "Content-Type": contentType },
-      ...init,
+      status: init?.status ?? 200,
+      headers: mergeHeaders({ "Content-Type": contentType }, init),
     });
 }
 
