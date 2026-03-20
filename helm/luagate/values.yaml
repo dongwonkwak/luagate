@@ -90,6 +90,16 @@ policies: |
   rules: []
   stream_rules: []
 
+policyPersistence:
+  # -- Use an existing PersistentVolumeClaim for /conf (optional).
+  existingClaim: ""
+  # -- Access mode for the canonical policy PVC.
+  accessMode: ReadWriteOnce
+  # -- Requested storage size for the canonical policy PVC.
+  size: 1Gi
+  # -- StorageClass name for the canonical policy PVC. Empty uses cluster default.
+  storageClassName: ""
+
 # -- Node selector
 nodeSelector: {}
 

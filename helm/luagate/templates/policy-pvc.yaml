@@ -1,0 +1,17 @@
+{{- if not .Values.policyPersistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "luagate.fullname" . }}-policies
+  labels:
+    {{- include "luagate.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.policyPersistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.policyPersistence.size }}
+  {{- with .Values.policyPersistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

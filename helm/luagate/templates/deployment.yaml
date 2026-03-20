@@ -69,11 +69,17 @@ spec:
               mountPath: /conf
       initContainers:
         {{- if .Values.policies }}
-        # Seed canonical policy file from ConfigMap into the writable emptyDir
+        # Seed canonical policy file into the writable PVC only on first start.
         - name: policy-seed
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["sh", "-c", "cp /policy-src/policies.yaml /conf/policies.yaml"]
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f /conf/policies.yaml ]; then
+                cp /policy-src/policies.yaml /conf/policies.yaml
+              fi
           volumeMounts:
             - name: policies
               mountPath: /conf
@@ -83,8 +89,10 @@ spec:
         {{- end }}
       volumes:
         # Writable volume for canonical policy file (supports PUT /api/v1/policies)
+        # and preserves the latest policy across pod recreation.
         - name: policies
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-policies" (include "luagate.fullname" .)) .Values.policyPersistence.existingClaim }}
         {{- if .Values.policies }}
         - name: policy-src
           configMap:
