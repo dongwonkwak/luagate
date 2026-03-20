@@ -1,0 +1,7 @@
+# 리뷰 결과: DON-201-code
+
+## 1차 리뷰 (2026-03-20)
+
+- [x] `.github/workflows/frontend-e2e.yml:43-55`은 `luagate:test` 이미지를 빌드한 뒤 `docker-compose.test.yml`을 올리는데, 이 Compose 파일의 유일한 `test` 서비스는 `Dockerfile.test` 기반 Test::Nginx 러너일 뿐이고 `9090`을 노출하는 장기 실행 서버가 아니다 (`docker-compose.test.yml:12-37`). 결과적으로 `curl http://localhost:9090/health`는 성공할 수 없어 Playwright 단계까지 도달하지 못한다.
+- [x] `.github/workflows/frontend-e2e.yml:74-78`은 실패 시 `e2e/playwright-report/`를 artifact로 업로드하지만, CI에서 Playwright reporter는 `github`로만 설정돼 있어 (`e2e/playwright.config.ts:6-13`) 해당 디렉터리가 생성되지 않는다. 현재 상태로는 Acceptance Criteria의 "실패 시 playwright-report artifact 업로드"를 충족하지 못한다.
+- [x] `.github/workflows/frontend-e2e.yml:20-31`의 path filter는 실제 실행에 사용하는 `docker-compose.test.yml`과 `Dockerfile.test`를 포함하지 않고 대신 `docker-compose.yml`, `Dockerfile`만 감시한다. 지금 구현 기준으로는 E2E 런타임을 바꾸는 핵심 파일 수정이 있어도 워크플로우가 실행되지 않아, 관련 변경에 대한 PR blocking이 비게 된다.

@@ -22,7 +22,9 @@ jobs:
               - 'e2e/**'
               - 'conf/nginx.conf'
               - 'docker-compose.yml'
+              - 'docker-compose.test.yml'
               - 'Dockerfile'
+              - 'Dockerfile.test'
               - 'Makefile'
               - 'lua/luagate/admin/**'
               - 'lua/luagate/policy/**'
@@ -49,9 +51,13 @@ jobs:
           cache-from: type=gha,scope=frontend-e2e
           cache-to: type=gha,mode=max,scope=frontend-e2e
 
-      - name: Start services
+      - name: Start LuaGate server
         run: |
-          docker compose -f docker-compose.test.yml up -d
+          docker run -d --name luagate-e2e \
+            -p 9090:9090 -p 8080:8080 \
+            -e LUAGATE_ADMIN_TOKEN=test-e2e-token \
+            -e LUAGATE_ENV=development \
+            luagate:test
           timeout 60 bash -c 'until curl -sf http://localhost:9090/health; do sleep 2; done'
 
       - uses: actions/setup-node@v4
@@ -66,7 +72,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
         working-directory: e2e
 
-      - run: npm run test
+      - run: npx playwright test --reporter=github,html
         working-directory: e2e
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:9090/dashboard
@@ -79,7 +85,7 @@ jobs:
 
       - name: Stop services
         if: always()
-        run: docker compose -f docker-compose.test.yml down -v
+        run: docker rm -f luagate-e2e || true
 
   frontend-e2e-status:
     runs-on: ubuntu-latest
