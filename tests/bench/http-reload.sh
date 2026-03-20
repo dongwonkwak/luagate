@@ -76,14 +76,29 @@ fi
 info "  Reloads succeeded: ${RELOAD_SUCCESS}/${RELOAD_COUNT}"
 
 # Wait for wrk to finish
-wait $WRK_PID || true
+if ! wait $WRK_PID; then
+    rm -f "${RESULTS_DIR}/_reload_wrk_tmp.txt"
+    fail "wrk failed during reload benchmark"
+    exit 1
+fi
 RELOAD_RESULT=$(cat "${RESULTS_DIR}/_reload_wrk_tmp.txt")
 echo "$RELOAD_RESULT" | tee -a "${OUTFILE}"
 rm -f "${RESULTS_DIR}/_reload_wrk_tmp.txt"
 
-RELOAD_RPS=$(echo "$RELOAD_RESULT" | grep "^SUMMARY:" | grep -oP 'rps=\K[0-9.]+')
-RELOAD_ERRORS=$(echo "$RELOAD_RESULT" | grep "^SUMMARY:" | grep -oP 'errors=\K[0-9]+')
-RELOAD_ERROR_RATE=$(echo "$RELOAD_RESULT" | grep "^SUMMARY:" | grep -oP 'error_rate=\K[0-9.]+')
+RELOAD_SUMMARY=$(echo "$RELOAD_RESULT" | grep "^SUMMARY:" || true)
+if [ -z "${RELOAD_SUMMARY}" ]; then
+    fail "wrk output missing SUMMARY line during reload benchmark"
+    exit 1
+fi
+
+RELOAD_RPS=$(echo "$RELOAD_SUMMARY" | grep -oP 'rps=\K[0-9.]+' || true)
+RELOAD_ERRORS=$(echo "$RELOAD_SUMMARY" | grep -oP 'errors=\K[0-9]+' || true)
+RELOAD_ERROR_RATE=$(echo "$RELOAD_SUMMARY" | grep -oP 'error_rate=\K[0-9.]+' || true)
+
+if [ -z "${RELOAD_RPS}" ] || [ -z "${RELOAD_ERRORS}" ] || [ -z "${RELOAD_ERROR_RATE}" ]; then
+    fail "wrk SUMMARY missing required reload metrics"
+    exit 1
+fi
 
 echo "" | tee -a "${OUTFILE}"
 info "=== Comparison ===" | tee -a "${OUTFILE}"
