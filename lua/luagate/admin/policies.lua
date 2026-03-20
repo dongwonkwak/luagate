@@ -339,6 +339,10 @@ function _M.handle_put_policies()
 
   -- [5.1] dry_run: return validation results without committing
   if dry_run then
+    -- Echo If-Match as ETag to prevent Nginx core from turning 200 into 412
+    if if_match then
+      ngx.header["ETag"] = '"' .. if_match .. '"'
+    end
     local warnings = {}
     for _, c in ipairs(conflicts) do
       warnings[#warnings + 1] = {

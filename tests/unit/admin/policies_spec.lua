@@ -892,6 +892,21 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     assert.is_true(body.dry_run)
   end)
 
+  it("echoes ETag when If-Match is provided and valid", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    assert.are.equal('"abc123"', _G.ngx.header["ETag"])
+  end)
+
   it("returns 409 when If-Match header mismatches", function()
     _G.ngx.req.get_headers = function()
       return {
