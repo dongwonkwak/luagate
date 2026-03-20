@@ -63,6 +63,17 @@ assert_output_not_contains "marker present → no block" "block" "$OUTPUT"
 assert_output_contains "marker present → found message" "found" "$OUTPUT"
 cleanup_git_sandbox
 
+echo ""
+echo "-- Test: codex-address-pr-review without marker → skip pre-review gate --"
+setup_git_sandbox
+echo "some content without marker" > PROGRESS.md
+git add PROGRESS.md && git commit -q -m "add progress"
+INPUT='{"tool_name":"Bash","tool_input":{"command":"./scripts/codex-address-pr-review.sh --thread-url https://github.com/example/repo/pull/1#discussion_r1"}}'
+OUTPUT="$(echo "$INPUT" | bash "$PRE_REVIEW_HOOK" 2>&1)" && EXIT_CODE=0 || EXIT_CODE=$?
+assert_exit_code "post-PR follow-up → exit 0" 0 "$EXIT_CODE"
+assert_output_not_contains "post-PR follow-up → no block" "block" "$OUTPUT"
+cleanup_git_sandbox
+
 # ═══════════════════════════════════════════════════════════════════
 # check-pending-review.sh tests
 # ═══════════════════════════════════════════════════════════════════

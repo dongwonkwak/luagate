@@ -1,10 +1,10 @@
 #!/bin/bash
 # .claude/hooks/pre-review-check.sh — Claude Code PreToolUse hook
-# Intercepts codex-review commands and validates review-pending marker in PROGRESS.md
+# Intercepts pre-PR codex review commands and validates review-pending marker in PROGRESS.md
 set -euo pipefail
 
 INPUT="$(cat)"
-REVIEW_PATTERN='codex-review\.sh|codex-address-pr-review\.sh|request-codex-review'
+REVIEW_PATTERN='codex-review\.sh|request-codex-review'
 REVIEW_MARKER="리뷰 대기"
 
 # Require jq for JSON parsing
