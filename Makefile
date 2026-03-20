@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr storybook storybook-build
+.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream test-chaos up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr storybook storybook-build
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -94,6 +94,10 @@ lint:
 	markdownlint docs/
 
 # ── Benchmark ──────────────────────────────────────────────────────────────
+test-chaos:
+	@echo "==> Running chaos tests (Docker required)..."
+	bash tests/chaos/test_hot_reload.sh
+
 bench:
 	@echo "==> Running full benchmark suite..."
 	bash tests/bench/run-all.sh
