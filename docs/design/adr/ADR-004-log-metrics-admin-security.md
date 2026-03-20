@@ -41,7 +41,7 @@ LuaGate는 API 게이트웨이이자 보안 게이트웨이로서 두 가지 관
 | # | 필드명 | 타입 | 설명 |
 |---|--------|------|------|
 | 1 | `timestamp` | ISO-8601 string | 요청 수신 시각 (UTC) |
-| 2 | `request_id` | UUID string | 요청별 고유 식별자 |
+| 2 | `request_id` | string | 요청별 고유 식별자 (클라이언트 `X-Request-ID` 또는 Nginx `$request_id` — [ADR-010](./ADR-010-opentelemetry-tracing.md)) |
 | 3 | `src_ip` | string | 클라이언트 원본 IP (PROXY Protocol > XFF 최좌측 non-trusted > `$remote_addr`) |
 | 4 | `src_port` | number | 클라이언트 원본 포트 |
 | 5 | `dst_port` | number | 서버 리슨 포트 |

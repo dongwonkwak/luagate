@@ -120,7 +120,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 - `access_by_lua`에서 allow 판정된 요청만 도달
 - Nginx `proxy_pass` 지시자로 업스트림 서버에 프록시
 - 업스트림 latency 측정: `$upstream_response_time`
-- 헤더 전달: `X-Request-ID`, `X-Forwarded-For`, `X-Real-IP`
+- 헤더 전달: `X-Request-ID`, `X-Forwarded-For`, `X-Real-IP`, `traceparent`, `tracestate` ([ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) — 트레이싱 비활성화 시 traceparent/tracestate 미전달)
 
 ### 2.5 log_by_lua (요청 완료 후 비동기 로그)
 
@@ -136,7 +136,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 
 | 변수 | 타입 | 설명 | Producer 단계 |
 |------|------|------|-------------|
-| `$luagate_request_id` | string | 요청 UUID | rewrite_by_lua |
+| `$luagate_request_id` | string | 요청 ID (opaque string — 클라이언트 X-Request-ID 또는 Nginx $request_id). [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) | Nginx map |
 | `$luagate_action` | string | `allow` \| `deny` | access_by_lua |
 | `$luagate_matched_rule` | string \| null | 매칭된 규칙 ID. 없으면 null | access_by_lua |
 | `$luagate_decision_source` | string | decision_source enum | access_by_lua |
@@ -144,6 +144,8 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | `$luagate_rule_name` | string \| null | 스캐너 매칭 rule_name. 없으면 null | access_by_lua |
 | `$luagate_active_version` | string | 요청 시점 active_version | rewrite_by_lua |
 | `$luagate_request_state` | string | request_state enum | log_by_lua |
+| `$luagate_trace_id` | string \| null | W3C trace ID (32-hex). 트레이싱 비활성화/미샘플 시 null. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) | rewrite_by_lua |
+| `$luagate_span_id` | string \| null | 루트 span ID (16-hex). 트레이싱 비활성화/미샘플 시 null. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) | rewrite_by_lua |
 
 > **기본값 선할당**: `rewrite_by_lua` 진입 시 아래 기본값으로 초기화.
 > `access_by_lua`에서 실제 판정 결과로 override, `log_by_lua`에서 finalize.
