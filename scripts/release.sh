@@ -112,5 +112,5 @@ echo "  - Create GitHub Release with notes"
 if command -v gh >/dev/null 2>&1; then
   echo ""
   echo "  Or create release manually:"
-  echo "    gh release create ${TAG} --notes-file /tmp/release-notes.md"
+  echo "    gh release create ${TAG} --generate-notes"
 fi

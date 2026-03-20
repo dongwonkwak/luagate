@@ -18,3 +18,9 @@
 ## 3차 리뷰 (2026-03-20)
 
 - [x] `scripts/release.sh:100` 릴리즈 커밋 메시지를 `chore(release): ${VERSION}`로 고정했지만, 이 저장소의 `commit-msg` 훅은 헤더 끝의 `[DON-XX]`를 필수로 강제합니다. → 수정: 릴리즈 커밋은 Linear 이슈에 대응하지 않으므로 `--no-verify`로 commitlint 예외 처리.
+
+---
+
+## 4차 리뷰 (2026-03-20)
+
+- [x] `scripts/release.sh:115` `gh`가 설치된 환경에서는 수동 릴리즈 명령으로 `gh release create ${TAG} --notes-file /tmp/release-notes.md`를 안내하지만, 스크립트는 해당 파일을 생성하지 않고 임시 notes 파일도 `trap`으로 삭제합니다. → 수정: `--generate-notes`로 변경하여 GitHub가 자동 생성하도록 함.
