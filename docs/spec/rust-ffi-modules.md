@@ -391,29 +391,27 @@ percent-encoding = "2.3"
 
 ### 9.1 대상
 
-| 대상 | 도구 | Corpus |
+| 대상 | fuzz target | Corpus |
 | --- | --- | --- |
-| `luagate_detect_protocol` | AFL++ 또는 libFuzzer | TLS ClientHello, HTTP request fragments, raw bytes |
-| `luagate_extract_sni` | libFuzzer | TLS record 변형 corpus |
-| `luagate_normalize_path` | libFuzzer | percent-encoded paths, Unicode bypass corpus |
-| `luagate_normalize_query` | libFuzzer | RFC 3986 query variations |
+| `luagate_scan_http` | `fuzz_scanner` (src/scanner/fuzz/) | SQLi, XSS, path traversal, 임의 문자열 |
+| `luagate_normalize_path`, `luagate_normalize_query`, `luagate_normalize_nfkc` | `fuzz_decoder` (src/decoder/fuzz/) | percent-encoded paths, Unicode bypass, HTML entities |
+| `luagate_extract_sni`, `luagate_detect_protocol` | `fuzz_sni` (src/stream/fuzz/) | TLS ClientHello, HTTP request fragments, raw bytes |
 
 ### 9.2 빌드 타겟
 
 ```bash
-# ASan/UBSan fuzz 빌드
-cargo +nightly build --release -Z sanitizer=address,undefined \
-    --target x86_64-unknown-linux-gnu
-
-# libFuzzer 타겟
-cargo +nightly fuzz run fuzz_detect_protocol
-cargo +nightly fuzz run fuzz_normalize_path
+# cargo-fuzz (libFuzzer) 사용 — nightly 필요
+cd src/scanner && cargo +nightly fuzz run fuzz_scanner -- -max_total_time=1800
+cd src/decoder && cargo +nightly fuzz run fuzz_decoder -- -max_total_time=1800
+cd src/stream  && cargo +nightly fuzz run fuzz_sni     -- -max_total_time=1800
 ```
 
 ### 9.3 CI 통합
 
+- `.github/workflows/fuzz.yml`: 주 1회 (일요일 03:00 UTC) weekly fuzzing, 타겟당 30분
 - `make fuzz-regression`: CI에서 corpus 기반 regression fuzz 실행 (10초, 단기 버전)
 - fuzz crash → CI 실패. 수정 후 crash 재현 test case를 corpus에 추가
+- crash artifact는 GitHub Actions artifact로 30일간 보관
 
 ## 10. Lua FFI 공통 패턴
 
@@ -490,8 +488,9 @@ build-ffi:
 <TAB>cp src/stream/target/release/libluagate_stream.so   lib/
 
 fuzz-regression:
-<TAB>cd src/stream  && cargo +nightly fuzz run fuzz_detect_protocol -- -max_total_time=10
-<TAB>cd src/decoder && cargo +nightly fuzz run fuzz_normalize_path  -- -max_total_time=10
+<TAB>cd src/scanner && cargo +nightly fuzz run fuzz_scanner -- -max_total_time=10
+<TAB>cd src/decoder && cargo +nightly fuzz run fuzz_decoder -- -max_total_time=10
+<TAB>cd src/stream  && cargo +nightly fuzz run fuzz_sni     -- -max_total_time=10
 
 # nginx.conf에서 lib/ 디렉토리를 lua_package_cpath에 추가
 ```

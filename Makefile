@@ -141,8 +141,12 @@ build-ffi:
 
 fuzz-regression:
 	@echo "==> Running fuzz regression..."
-	cd src/decoder && cargo +nightly fuzz run fuzz_normalize_path -- -max_total_time=10 2>/dev/null || \
-	  echo "  (fuzz target not available — install cargo-fuzz)"
+	cd src/scanner && cargo +nightly fuzz run fuzz_scanner -- -max_total_time=10 2>/dev/null || \
+	  echo "  (scanner fuzz target not available — install cargo-fuzz)"
+	cd src/decoder && cargo +nightly fuzz run fuzz_decoder -- -max_total_time=10 2>/dev/null || \
+	  echo "  (decoder fuzz target not available — install cargo-fuzz)"
+	cd src/stream && cargo +nightly fuzz run fuzz_sni -- -max_total_time=10 2>/dev/null || \
+	  echo "  (stream fuzz target not available — install cargo-fuzz)"
 
 # ── UI (Dashboard) ────────────────────────────────────────────────────
 ui-dev:

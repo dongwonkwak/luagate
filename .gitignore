@@ -4,13 +4,11 @@
 # Rust
 src/*/target/
 src/*/Cargo.lock
+src/*/fuzz/target/
+src/*/fuzz/Cargo.lock
 *.o
 *.a
 *.out
-
-# Rust build artifacts
-src/*/target/
-src/*/Cargo.lock
 
 # Lua
 luacov.stats.out
