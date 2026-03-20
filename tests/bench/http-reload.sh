@@ -21,8 +21,11 @@ OUTFILE="${RESULTS_DIR}/http-reload-$(date +%Y%m%d-%H%M%S).txt"
 RELOAD_INTERVAL="${RELOAD_INTERVAL:-5}"
 RELOAD_COUNT="${RELOAD_COUNT:-6}"
 
+# Use a policy-evaluated path (not /health which skips rewrite/access phases)
+BENCH_PATH="${BENCH_PATH:-/api/v1/users}"
+
 info "==> Hot Reload Zero-Downtime Benchmark"
-info "    URL:            ${LUAGATE_HTTP_URL}/health"
+info "    URL:            ${LUAGATE_HTTP_URL}${BENCH_PATH}"
 info "    Duration:       ${WRK_DURATION}"
 info "    Reload every:   ${RELOAD_INTERVAL}s"
 info "    Reload count:   ${RELOAD_COUNT}"
@@ -32,7 +35,7 @@ echo ""
 info "Phase 1: Baseline measurement (no reloads)..."
 BASELINE=$(wrk -t"${WRK_THREADS}" -c"${WRK_CONNECTIONS}" -d"${WRK_DURATION}" \
     -s "${SCRIPT_DIR}/wrk/report.lua" \
-    "${LUAGATE_HTTP_URL}/health" 2>&1)
+    "${LUAGATE_HTTP_URL}${BENCH_PATH}" 2>&1)
 echo "$BASELINE" | tee -a "${OUTFILE}"
 
 BASELINE_RPS=$(echo "$BASELINE" | grep "^SUMMARY:" | grep -oP 'rps=\K[0-9.]+')
@@ -45,17 +48,32 @@ info "Phase 2: Measurement with concurrent reloads..."
 # Start wrk in background
 wrk -t"${WRK_THREADS}" -c"${WRK_CONNECTIONS}" -d"${WRK_DURATION}" \
     -s "${SCRIPT_DIR}/wrk/report.lua" \
-    "${LUAGATE_HTTP_URL}/health" \
+    "${LUAGATE_HTTP_URL}${BENCH_PATH}" \
     > "${RESULTS_DIR}/_reload_wrk_tmp.txt" 2>&1 &
 WRK_PID=$!
 
 # Trigger reloads while wrk is running
+RELOAD_SUCCESS=0
 sleep 2  # Let wrk warm up
 for i in $(seq 1 "${RELOAD_COUNT}"); do
     info "  Triggering reload ${i}/${RELOAD_COUNT}..."
-    admin_reload || warn "  Reload ${i} failed"
+    if admin_reload; then
+        RELOAD_SUCCESS=$((RELOAD_SUCCESS + 1))
+    else
+        warn "  Reload ${i} failed"
+    fi
     sleep "${RELOAD_INTERVAL}"
 done
+
+# Verify at least one reload succeeded — otherwise results are meaningless
+if [ "$RELOAD_SUCCESS" -eq 0 ]; then
+    kill $WRK_PID 2>/dev/null || true
+    wait $WRK_PID 2>/dev/null || true
+    rm -f "${RESULTS_DIR}/_reload_wrk_tmp.txt"
+    fail "All ${RELOAD_COUNT} reloads failed — benchmark invalid"
+    exit 1
+fi
+info "  Reloads succeeded: ${RELOAD_SUCCESS}/${RELOAD_COUNT}"
 
 # Wait for wrk to finish
 wait $WRK_PID || true

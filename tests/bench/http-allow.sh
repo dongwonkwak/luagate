@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # tests/bench/http-allow.sh — HTTP allow throughput benchmark (wrk)
-# Measures RPS and latency for requests that pass policy evaluation.
+# Measures RPS and latency for requests that pass through policy evaluation.
+# NOTE: This measures end-to-end gateway overhead (policy eval + proxy_pass).
+# If upstream is unreachable, wrk will report status errors (502) but RPS/latency
+# still reflect the gateway processing cost. For pure gateway-only overhead
+# without proxy_pass, use BENCH_PATH=/health (skips policy evaluation).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
