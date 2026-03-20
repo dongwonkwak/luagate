@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import Editor from "@monaco-editor/react";
 import {
   usePolicies,
@@ -6,6 +6,50 @@ import {
   useReloadPolicies,
 } from "../hooks/usePolicies";
 import { ErrorAlert } from "../components/ErrorAlert";
+
+class EditorBoundary extends Component<
+  {
+    fallback: ReactNode;
+    children: ReactNode;
+  },
+  {
+    hasError: boolean;
+  }
+> {
+  state = {
+    hasError: false,
+  };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+
+    return this.props.children;
+  }
+}
+
+function PlainYamlEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <textarea
+      aria-label="Policy YAML Editor"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      spellCheck={false}
+      className="h-full w-full resize-none border-0 p-4 font-mono text-sm text-gray-900 focus:outline-none"
+    />
+  );
+}
 
 export function PolicyEditorPage() {
   const { data: policyData, isLoading, error: fetchError } = usePolicies();
@@ -19,8 +63,24 @@ export function PolicyEditorPage() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const [usePlainEditor, setUsePlainEditor] = useState(false);
 
   const isDirty = serverYaml !== editorValue;
+
+  useEffect(() => {
+    if (editorReady || usePlainEditor) {
+      return;
+    }
+
+    const fallbackTimer = window.setTimeout(() => {
+      setUsePlainEditor(true);
+    }, 2000);
+
+    return () => {
+      window.clearTimeout(fallbackTimer);
+    };
+  }, [editorReady, usePlainEditor]);
 
   useEffect(() => {
     if (policyData) {
@@ -147,20 +207,38 @@ export function PolicyEditorPage() {
       )}
 
       <div className="flex-1 overflow-hidden rounded-md border border-gray-200">
-        <Editor
-          height="100%"
-          defaultLanguage="yaml"
-          value={editorValue}
-          onChange={(val) => setEditorValue(val ?? "")}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 13,
-            lineNumbers: "on",
-            scrollBeyondLastLine: false,
-            wordWrap: "on",
-            tabSize: 2,
-          }}
-        />
+        {usePlainEditor ? (
+          <PlainYamlEditor value={editorValue} onChange={setEditorValue} />
+        ) : (
+          <EditorBoundary
+            fallback={
+              <PlainYamlEditor value={editorValue} onChange={setEditorValue} />
+            }
+          >
+            <Editor
+              height="100%"
+              defaultLanguage="yaml"
+              value={editorValue}
+              onMount={() => setEditorReady(true)}
+              onChange={(val) => setEditorValue(val ?? "")}
+              loading={
+                <PlainYamlEditor
+                  value={editorValue}
+                  onChange={setEditorValue}
+                />
+              }
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                lineNumbers: "on",
+                scrollBeyondLastLine: false,
+                wordWrap: "on",
+                tabSize: 2,
+                ariaLabel: "Policy YAML Editor",
+              }}
+            />
+          </EditorBoundary>
+        )}
       </div>
     </div>
   );

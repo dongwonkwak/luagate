@@ -1,5 +1,23 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { setupAdminMock, VALID_TOKEN } from "../fixtures/admin-server";
+
+async function gotoPoliciesPage(page: Page) {
+  await page.goto("/dashboard/policies");
+  await expect(page).toHaveURL(/\/dashboard\/policies$/);
+  await expect(
+    page.getByRole("heading", { name: "Policy Editor" }),
+  ).toBeVisible();
+}
+
+async function replaceEditorContent(page: Page, nextValue: string) {
+  const editor = page.getByLabel("Policy YAML Editor");
+  const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
+
+  await expect(editor).toBeVisible({ timeout: 15000 });
+  await editor.focus();
+  await page.keyboard.press(selectAll);
+  await page.keyboard.type(nextValue, { delay: 10 });
+}
 
 test.describe("Error Handling", () => {
   test.beforeEach(async ({ page }) => {
@@ -30,9 +48,7 @@ test.describe("Error Handling", () => {
     await page.click('button[type="submit"]');
 
     // Should show a connection error, not crash
-    await expect(
-      page.locator('[role="alert"], .bg-red-50, text=Failed'),
-    ).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("alert")).toBeVisible({ timeout: 10000 });
   });
 
   test("invalid YAML submission shows validation error from server", async ({
@@ -44,26 +60,13 @@ test.describe("Error Handling", () => {
     await page.click('button[type="submit"]');
     await expect(page).toHaveURL(/\/dashboard$/);
 
-    // Go to policy editor
-    await page.click('a[href="/dashboard/policies"]');
-    await expect(page.locator("text=Policy Editor")).toBeVisible();
+    await gotoPoliciesPage(page);
+    await replaceEditorContent(page, "global:\n  default_action: deny\n");
 
-    // Wait for Monaco and type invalid YAML
-    const editor = page.locator(".monaco-editor textarea");
-    await editor.waitFor({ state: "attached", timeout: 10000 });
-    await editor.focus();
-    const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
-    await page.keyboard.press(selectAll);
-    await page.keyboard.type("global:\n  default_action: deny\n", {
-      delay: 10,
-    });
-
-    // Save should trigger 422
-    const saveButton = page.locator("button", { hasText: "Save" });
+    const saveButton = page.getByRole("button", { name: "Save" });
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
 
-    // Should show error alert
-    await expect(page.locator('[role="alert"], .bg-red-50')).toBeVisible();
+    await expect(page.getByRole("alert")).toBeVisible();
   });
 });

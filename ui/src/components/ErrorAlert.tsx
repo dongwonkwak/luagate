@@ -10,7 +10,11 @@ export function ErrorAlert({
   onDismiss,
 }: ErrorAlertProps) {
   return (
-    <div className="rounded-md border border-red-200 bg-red-50 p-4">
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="rounded-md border border-red-200 bg-red-50 p-4"
+    >
       <div className="flex items-start justify-between">
         <div>
           <h3 className="text-sm font-medium text-red-800">{title}</h3>

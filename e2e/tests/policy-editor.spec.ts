@@ -1,5 +1,28 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { setupAdminMock, VALID_TOKEN } from "../fixtures/admin-server";
+
+async function gotoPoliciesPage(page: Page) {
+  await page.goto("/dashboard/policies");
+  await expect(page).toHaveURL(/\/dashboard\/policies$/);
+  await expect(
+    page.getByRole("heading", { name: "Policy Editor" }),
+  ).toBeVisible();
+}
+
+async function getPolicyEditor(page: Page) {
+  const editor = page.getByLabel("Policy YAML Editor");
+  await expect(editor).toBeVisible({ timeout: 15000 });
+  return editor;
+}
+
+async function replaceEditorContent(page: Page, nextValue: string) {
+  const editor = await getPolicyEditor(page);
+  const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
+
+  await editor.focus();
+  await page.keyboard.press(selectAll);
+  await page.keyboard.type(nextValue, { delay: 10 });
+}
 
 test.describe("Policy Editor", () => {
   test.beforeEach(async ({ page }) => {
@@ -13,117 +36,64 @@ test.describe("Policy Editor", () => {
   });
 
   test("loads and displays policy YAML in editor", async ({ page }) => {
-    // Navigate to policies page
-    await page.click('a[href="/dashboard/policies"]');
-    await expect(page).toHaveURL(/\/dashboard\/policies/);
-
-    // Should show Policy Editor heading
-    await expect(page.locator("text=Policy Editor")).toBeVisible();
-
-    // Should display ETag
-    await expect(page.locator("text=ETag:")).toBeVisible();
+    await gotoPoliciesPage(page);
+    await getPolicyEditor(page);
+    await expect(page.getByText("ETag:")).toBeVisible();
   });
 
   test("save button is disabled when no changes", async ({ page }) => {
-    await page.click('a[href="/dashboard/policies"]');
-    await expect(page.locator("text=Policy Editor")).toBeVisible();
-
-    // Save button should be disabled (no changes)
-    const saveButton = page.locator("button", { hasText: "Save" });
+    await gotoPoliciesPage(page);
+    const saveButton = page.getByRole("button", { name: "Save" });
     await expect(saveButton).toBeDisabled();
   });
 
   test("shows success message after saving valid policy", async ({ page }) => {
-    await page.click('a[href="/dashboard/policies"]');
-    await expect(page.locator("text=Policy Editor")).toBeVisible();
-
-    // Wait for Monaco editor to load and type in it
-    const editor = page.locator(".monaco-editor textarea");
-    await editor.waitFor({ state: "attached", timeout: 10000 });
-
-    // Modify editor content by selecting all and typing
-    await editor.focus();
-    const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
-    await page.keyboard.press(selectAll);
-    await page.keyboard.type(
+    await gotoPoliciesPage(page);
+    await replaceEditorContent(
+      page,
       'version: "1.0"\nglobal:\n  default_action: allow\n',
-      { delay: 10 },
     );
 
-    // Save button should be enabled now
-    const saveButton = page.locator("button", { hasText: "Save" });
+    const saveButton = page.getByRole("button", { name: "Save" });
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
 
-    // Should show success message
-    await expect(
-      page.locator("text=Policy saved successfully"),
-    ).toBeVisible();
+    await expect(page.getByText("Policy saved successfully.")).toBeVisible();
   });
 
   test("shows error message for invalid YAML (missing version)", async ({
     page,
   }) => {
-    await page.click('a[href="/dashboard/policies"]');
-    await expect(page.locator("text=Policy Editor")).toBeVisible();
+    await gotoPoliciesPage(page);
+    await replaceEditorContent(page, "global:\n  default_action: deny\n");
 
-    // Wait for Monaco editor
-    const editor = page.locator(".monaco-editor textarea");
-    await editor.waitFor({ state: "attached", timeout: 10000 });
-
-    // Type invalid YAML (no version key)
-    await editor.focus();
-    const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
-    await page.keyboard.press(selectAll);
-    await page.keyboard.type("global:\n  default_action: deny\n", {
-      delay: 10,
-    });
-
-    // Click Save
-    const saveButton = page.locator("button", { hasText: "Save" });
+    const saveButton = page.getByRole("button", { name: "Save" });
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
 
-    // Should show error (422 from mock)
-    await expect(page.locator('[role="alert"], .bg-red-50')).toBeVisible();
+    await expect(page.getByRole("alert")).toBeVisible();
   });
 
   test("consecutive saves use updated ETag", async ({ page }) => {
-    await page.click('a[href="/dashboard/policies"]');
-    await expect(page.locator("text=Policy Editor")).toBeVisible();
+    await gotoPoliciesPage(page);
 
-    const editor = page.locator(".monaco-editor textarea");
-    await editor.waitFor({ state: "attached", timeout: 10000 });
-    const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
-
-    // First save
-    await editor.focus();
-    await page.keyboard.press(selectAll);
-    await page.keyboard.type(
+    await replaceEditorContent(
+      page,
       'version: "1.0"\nglobal:\n  default_action: allow\n',
-      { delay: 10 },
     );
-    const saveButton = page.locator("button", { hasText: "Save" });
+    const saveButton = page.getByRole("button", { name: "Save" });
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
-    await expect(
-      page.locator("text=Policy saved successfully"),
-    ).toBeVisible();
+    await expect(page.getByText("Policy saved successfully.")).toBeVisible();
 
-    // Second save — must use updated ETag from first save response
-    await editor.focus();
-    await page.keyboard.press(selectAll);
-    await page.keyboard.type(
+    await replaceEditorContent(
+      page,
       'version: "1.0"\nglobal:\n  default_action: deny\n',
-      { delay: 10 },
     );
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
 
-    // Should succeed (not 409) — proves ETag was correctly updated
-    await expect(
-      page.locator("text=Policy saved successfully"),
-    ).toBeVisible();
+    await expect(page.getByText("Policy saved successfully.")).toBeVisible();
   });
 
   test("accepts unquoted If-Match when policy version matches", async ({
@@ -156,16 +126,11 @@ test.describe("Policy Editor", () => {
   });
 
   test("reload button triggers hot reload", async ({ page }) => {
-    await page.click('a[href="/dashboard/policies"]');
-    await expect(page.locator("text=Policy Editor")).toBeVisible();
+    await gotoPoliciesPage(page);
 
-    // Click Reload
-    const reloadButton = page.locator("button", { hasText: "Reload" });
+    const reloadButton = page.getByRole("button", { name: "Reload" });
     await reloadButton.click();
 
-    // Should show success
-    await expect(
-      page.locator("text=Policy reloaded successfully"),
-    ).toBeVisible();
+    await expect(page.getByText("Policy reloaded successfully.")).toBeVisible();
   });
 });
