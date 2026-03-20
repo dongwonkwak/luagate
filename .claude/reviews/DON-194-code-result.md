@@ -9,6 +9,12 @@
 
 ---
 
-## 재리뷰 (2026-03-20)
+## 2차 리뷰 (2026-03-20)
 
 - [x] [tests/scripts/test_hooks.sh](/home/dongwon/project/luagate-don-194/tests/scripts/test_hooks.sh#L11) still does not execute or assert the behavior of [`.claude/hooks/post-implement-verify.sh`](/home/dongwon/project/luagate-don-194/.claude/hooks/post-implement-verify.sh#L1), so the original test-gap item remains partially unresolved: `pre-review-check.sh` and `check-pending-review.sh` are covered, but the Stop hook still has no regression test for tracked/staged/untracked change detection or the `make lint` / `make test-unit` trigger path. → 수정: post-implement-verify.sh 테스트 5건 추가 (tracked/staged/untracked 변경 감지 + .md 미감지 검증). 25/25 통과.
+
+---
+
+## 3차 리뷰 (2026-03-20)
+
+미해결 항목 없음
