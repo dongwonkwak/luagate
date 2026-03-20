@@ -59,16 +59,17 @@
 ### 2. 트레이싱 수준: HTTP 요청 루트 span + 내부 단계 child spans
 
 ```
-[root] HTTP Request (rewrite → log)
+[root] HTTP Request (rewrite → response sent)
 ├── [child] policy_eval     (access_by_lua)
 ├── [child] security_scan   (access_by_lua, FFI)
-├── [child] proxy           (content_by_lua → upstream)
-└── [child] log_finalize    (log_by_lua)
+└── [child] proxy           (header_filter_by_lua → upstream 응답 수신)
 ```
 
-- **루트 span**: `rewrite_by_lua`에서 시작, `log_by_lua`에서 종료
-- **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy, log_finalize)
+- **루트 span**: `rewrite_by_lua`에서 시작, `header_filter_by_lua`에서 종료 (응답 전송 시점). `log_by_lua`는 Nginx가 응답을 보낸 후 실행되므로 루트 span에 포함하지 않는다. 이를 통해 루트 span duration이 기존 `latency_ms` (요청 수신 ~ 응답 전송 완료)와 일치한다.
+- **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy)
 - **FFI 호출 span**: security_scan child 내에 scanner/decoder FFI 호출 span 포함
+- **log_by_lua 역할**: 루트 span 종료는 `header_filter_by_lua`에서 이미 수행됨. `log_by_lua`에서는 완료된 span을 worker-local 버퍼에 추가만 한다.
+- **outbound traceparent 주입**: `access_by_lua` 단계에서 `ngx.req.set_header("traceparent", ...)`로 업스트림 요청 헤더에 설정한다. 이는 `proxy_pass` 전에 실행되므로 Nginx가 헤더를 업스트림에 전달한다.
 
 ### 3. Export 방식: OTLP/HTTP (JSON)
 
@@ -83,14 +84,17 @@
 ### 4. Export 메커니즘: worker 레벨 span 버퍼 + 타이머 flush
 
 ```
-[access/log_by_lua] → span 완료 → worker-local 버퍼에 추가
-                                         │
-[ngx.timer.at 주기적 (5초)]              ↓
+[init_worker_by_lua] → worker당 1회: 주기적 flush 타이머 등록
+                              │
+[log_by_lua]         → span 완료 → worker-local 버퍼에 추가
+                              │
+[ngx.timer.every 주기적 (5초)] ↓
                               버퍼 drain → cosocket으로 OTLP/HTTP POST
 ```
 
+- **타이머 등록**: `init_worker_by_lua`에서 `ngx.timer.every(flush_interval, flush_fn)`으로 worker당 1회 등록. 요청 경로에서 타이머를 생성하지 않는다 (타이머 중복 생성 방지).
 - 각 worker는 독립적인 span 버퍼를 유지 (shared dict 불필요)
-- `ngx.timer.at` 콜백에서 cosocket 사용 가능 → OTLP endpoint로 배치 전송
+- `ngx.timer.every` 콜백에서 cosocket 사용 가능 → OTLP endpoint로 배치 전송
 - 버퍼 크기 제한: worker당 최대 1000 spans (초과 시 oldest drop)
 - flush 주기: 5초 (설정 가능)
 
@@ -134,13 +138,14 @@ tracing:
 [inbound]  traceparent: 00-<trace_id>-<parent_span_id>-<flags>
                               │
 [LuaGate]  rewrite_by_lua: parse traceparent → 루트 span 생성
-           access_by_lua:   child spans
-           proxy:           outbound traceparent 헤더 생성
+           access_by_lua:   child spans + ngx.req.set_header("traceparent", ...)
+           proxy_pass:      Nginx가 설정된 traceparent 헤더를 upstream에 전달
                               │
 [upstream] traceparent: 00-<trace_id>-<luagate_span_id>-<flags>
 ```
 
 - inbound `traceparent` 없으면 새 trace_id 생성
+- outbound `traceparent`는 `access_by_lua`에서 `ngx.req.set_header()`로 주입 (proxy_pass 전에 실행되므로 Nginx가 자동 전달)
 - `tracestate` 헤더는 pass-through (수정 없이 전달)
 - `X-Request-ID` 헤더는 기존대로 유지 (별도)
 

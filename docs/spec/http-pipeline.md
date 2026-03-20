@@ -125,7 +125,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 ### 2.5 log_by_lua (요청 완료 후 비동기 로그)
 
 - Nginx 응답 후 처리 (클라이언트 응답에 영향 없음)
-- **28개 필드** JSON 레코드 생성 — 상세 필드 목록: [log-schema.md](./log-schema.md)
+- **30개 필드** JSON 레코드 생성 — 상세 필드 목록: [log-schema.md](./log-schema.md) (ADR-010에서 `trace_id`, `span_id` 2개 추가)
 - `luagate_metrics` shared dict 카운터 증가 (ADR-001)
 - `luagate_connections` active count 갱신
 - **active_version 기록 규칙**: 요청 시작 시 스냅샷한 active_version만 기록. log 시점의 버전 변경은 반영하지 않는다.
