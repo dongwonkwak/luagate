@@ -120,12 +120,12 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 - `access_by_lua`에서 allow 판정된 요청만 도달
 - Nginx `proxy_pass` 지시자로 업스트림 서버에 프록시
 - 업스트림 latency 측정: `$upstream_response_time`
-- 헤더 전달: `X-Request-ID`, `X-Forwarded-For`, `X-Real-IP`
+- 헤더 전달: `Host`, `X-Request-ID`, `X-Forwarded-For`, `X-Real-IP` (`conf/nginx.conf`의 `proxy_set_header` 기준)
 
 ### 2.5 log_by_lua (요청 완료 후 비동기 로그)
 
 - Nginx 응답 후 처리 (클라이언트 응답에 영향 없음)
-- **28개 필드** JSON 레코드 생성 — 상세 필드 목록: [log-schema.md](./log-schema.md)
+- **30개 필드** JSON 레코드 생성 — 상세 필드 목록: [log-schema.md](./log-schema.md) (ADR-010에서 `trace_id`, `span_id` 2개 추가)
 - `luagate_metrics` shared dict 카운터 증가 (ADR-001)
 - `luagate_connections` active count 갱신
 - **active_version 기록 규칙**: 요청 시작 시 스냅샷한 active_version만 기록. log 시점의 버전 변경은 반영하지 않는다.
@@ -136,7 +136,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 
 | 변수 | 타입 | 설명 | Producer 단계 |
 |------|------|------|-------------|
-| `$luagate_request_id` | string | 요청 UUID | rewrite_by_lua |
+| `$luagate_request_id` | string | 요청 ID (opaque string — 클라이언트 X-Request-ID 또는 Nginx $request_id). [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) | Nginx map |
 | `$luagate_action` | string | `allow` \| `deny` | access_by_lua |
 | `$luagate_matched_rule` | string \| null | 매칭된 규칙 ID. 없으면 null | access_by_lua |
 | `$luagate_decision_source` | string | decision_source enum | access_by_lua |
@@ -144,10 +144,12 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | `$luagate_rule_name` | string \| null | 스캐너 매칭 rule_name. 없으면 null | access_by_lua |
 | `$luagate_active_version` | string | 요청 시점 active_version | rewrite_by_lua |
 | `$luagate_request_state` | string | request_state enum | log_by_lua |
+| `$luagate_trace_id` | string \| null | W3C trace ID (32-hex). 트레이싱 활성화 시 항상 기록 (sampled 여부 무관). 비활성화/pre-Lua rejection 시 null. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) | rewrite_by_lua |
+| `$luagate_span_id` | string \| null | 루트 span ID (16-hex). 트레이싱 활성화 시 항상 기록. 비활성화/pre-Lua rejection 시 null. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) | rewrite_by_lua |
 
 > **기본값 선할당**: `rewrite_by_lua` 진입 시 아래 기본값으로 초기화.
 > `access_by_lua`에서 실제 판정 결과로 override, `log_by_lua`에서 finalize.
-> 이를 통해 nginx_core early short-circuit(malformed request, 400/413/414) 시에도 28필드가 채워진다.
+> 이를 통해 nginx_core early short-circuit(malformed request, 400/413/414) 시에도 30필드가 채워진다.
 > **Null 표현**: Nginx 기본 `-` 대신 JSON `null`을 사용한다 (log-schema.md §2 참조).
 
 | 변수 | 기본값 |
@@ -236,7 +238,7 @@ local result = decoder.normalize(path_raw, query_raw)
 
 ```lua
 ngx.ctx.luagate = {
-  request_id        = "UUID",
+  request_id        = "string",  -- opaque: X-Request-ID 또는 $request_id (ADR-010)
   path_raw          = string,
   path_normalized   = string,
   query_raw         = string,   -- raw query string (원본)
@@ -307,5 +309,5 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 - [spec/security-scanner.md](./security-scanner.md) — 보안 스캐너 상세
 - [spec/policy-engine.md](./policy-engine.md) — 정책 평가 엔진 상세
-- [spec/log-schema.md](./log-schema.md) — 로그 스키마 상세 (HTTP 28필드)
+- [spec/log-schema.md](./log-schema.md) — 로그 스키마 상세 (HTTP 30필드)
 - [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — Rust FFI 모듈 인터페이스

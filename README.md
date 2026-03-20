@@ -137,7 +137,7 @@ luagate/
 ├── src/            # Rust FFI 소스 (scanner, decoder, stream)
 ├── conf/           # nginx.conf 및 정책 YAML
 ├── docs/
-│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 001~009, 011)
+│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 001~011)
 │   └── spec/       # 스펙 문서 (10개)
 ├── tests/          # 단위(busted) + 통합(Test::Nginx) 테스트
 ├── e2e/            # Playwright E2E 테스트
@@ -197,6 +197,7 @@ luagate/
 | [ADR-007](docs/design/adr/ADR-007-log-redaction-and-retention.md) | 로그 Redaction 정책 + 보존/파기 기간 |
 | [ADR-008](docs/design/adr/ADR-008-multi-instance-policy-sync.md) | 멀티 인스턴스 정책 동기화 |
 | [ADR-009](docs/design/adr/ADR-009-ffi-timeout-enforcement.md) | FFI 타임아웃 강제 |
+| [ADR-010](docs/design/adr/ADR-010-opentelemetry-tracing.md) | OpenTelemetry 트레이싱 |
 | [ADR-011](docs/design/adr/ADR-011-mcp-server.md) | MCP 서버 설계 |
 
 ### 운영
