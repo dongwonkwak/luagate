@@ -54,6 +54,14 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | UI 컴포넌트/페이지 | frontend-developer → tester |
 | UI + API 변경 동시 | implementer + frontend-developer → tester |
 
+### context-handoff 호출 규칙
+
+위 결정 표에서 에이전트 전환(`→`)이 발생할 때마다 coordinator는 `context-handoff` 스킬을 invoke한다.
+
+- **invoke 시점**: 선행 에이전트 작업 완료 직후, 다음 에이전트 호출 직전
+- **예시**: `implementer → tester` 전환 시 coordinator가 `context-handoff`를 invoke하여 구현 파일 경로/테스트 포인트를 구조화한 뒤 tester에게 전달
+- **생략 불가**: 동일 에이전트 내 연속 작업이 아닌 한, 에이전트 전환 시 반드시 invoke
+
 ## 이슈 개발 지시 처리
 
 "DON-XXX 구현/해줘/작업/진행" 패턴의 지시를 받으면 **반드시** `implement-issue` 스킬을 invoke한다.
@@ -96,6 +104,7 @@ implementer 완료 → CLAUDE.md coordinator → security-reviewer 호출
 | `new-react-component` | `.claude/skills/new-react-component/` | 새 React 컴포넌트 생성 시 |
 | `new-api-client` | `.claude/skills/new-api-client/` | 새 Admin API 클라이언트 함수 생성 시 |
 | `new-playwright-test` | `.claude/skills/new-playwright-test/` | 새 Playwright E2E 테스트 생성 시 |
+| `context-handoff` | `.claude/skills/context-handoff/` | 에이전트 간 작업 인계 시 (coordinator가 invoke) |
 
 ## 이슈 완료 Exit Criteria 체크리스트
 
