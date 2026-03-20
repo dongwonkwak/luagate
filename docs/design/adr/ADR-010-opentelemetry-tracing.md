@@ -201,6 +201,15 @@ access.log에 2개 NULLABLE 필드 추가:
 | OTLP endpoint 장애 시 버퍼 누적 | flush 실패 시 버퍼 강제 drain (drop) + 메트릭 카운터 |
 | 높은 샘플 비율로 인한 성능 저하 | production 기본 1%, 설정 검증으로 100% 방지 |
 | `ngx.timer.at` 타이머 고갈 | pending timer 수 모니터링, max 제한 |
+| worker 종료/교체 시 span 유실 | 아래 Worker Shutdown 정책 참조 |
+
+**Worker Shutdown 정책**: Nginx worker가 종료(graceful shutdown, hot reload에 의한 교체)될 때 `ngx.timer.every` 콜백은 `premature=true`로 호출된다. 이 시점에서 best-effort final flush를 수행한다:
+
+1. `premature=true` 감지 시 버퍼에 남은 span을 즉시 OTLP/HTTP POST 시도 (cosocket 사용 가능)
+2. flush 실패 시 span을 드롭하고 `luagate_tracing_spans_dropped_total` 메트릭을 증가
+3. 손실 범위: 마지막 flush 이후 ~ shutdown 사이의 최대 `flush_interval_ms` (5초) 분량. 1% 샘플링 기준 무시할 수준
+
+이는 의도된 trade-off이다. 트레이싱은 관측성 기능이므로 완전한 무손실을 보장하지 않는다 (fail-open 원칙).
 
 ---
 
@@ -208,7 +217,9 @@ access.log에 2개 NULLABLE 필드 추가:
 
 1. **DON-180**: `lua/luagate/tracing/` 모듈 구현 (context, span, sampler, exporter, buffer)
 2. log-schema.md에 `trace_id`, `span_id` 필드 추가
-3. `rewrite_by_lua`에서 trace context 초기화
-4. `access_by_lua`에서 child span 생성
-5. `log_by_lua`에서 루트 span 종료 + 버퍼 추가
-6. docker-compose.yml에 Jaeger/OTLP collector 개발용 서비스 추가
+3. `init_worker_by_lua`에서 exporter 초기화 + `ngx.timer.every` flush 타이머 등록
+4. `rewrite_by_lua`에서 trace context 초기화 + 루트 span 시작
+5. `access_by_lua`에서 child span 생성 + outbound `traceparent` 헤더 주입
+6. `header_filter_by_lua`에서 루트 span 종료 (latency_ms와 일치)
+7. `log_by_lua`에서 완료된 span을 worker-local 버퍼에 추가
+8. docker-compose.yml에 Jaeger/OTLP collector 개발용 서비스 추가
