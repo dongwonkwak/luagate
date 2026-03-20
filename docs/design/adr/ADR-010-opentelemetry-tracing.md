@@ -77,7 +77,7 @@
 - **pre-Lua rejection**: Nginx가 malformed request를 Lua phase 진입 전에 거부하는 경우 (400/413/414), 트레이싱 span은 생성되지 않는다. `trace_id`/`span_id` 로그 필드는 기본값 null로 기록된다. 이는 의도된 동작이며, inbound `traceparent`가 있어도 Lua가 실행되지 않으므로 파싱 자체가 불가하다
 - **proxy child span**: `access_by_lua` 종료 시점에 `ngx.now()`로 시작 시각(`proxy_start_ts`)을 기록한다. duration은 `$upstream_response_time` 합산값을 사용한다 (upstream 서버 응답 시간만 반영, 클라이언트 송신 지연 제외). 이를 통해 `SpanKind=CLIENT` span이 순수 upstream 의존성 latency만 표현하여, Jaeger/Tempo 서비스 맵에서 upstream 지연을 정확히 분석할 수 있다. 클라이언트 송신 시간은 루트 span (`SpanKind=SERVER`)의 duration에 이미 포함되어 있으므로 별도 계측이 불필요하다. raw `$upstream_response_time` 문자열은 span attribute `luagate.upstream_response_time`으로 보존한다.
 - **upstream retry/failover**: Nginx가 retry/failover를 수행하면 `$upstream_response_time`이 쉼표 구분 다중 값이 될 수 있다 (예: `"0.5, 1.2"`). 이 경우 **단일 proxy span으로 합산**한다 — 전체 upstream 소요 시간(마지막 값의 종료 시점)을 proxy span duration으로 기록하고, attempt 횟수를 span attribute `luagate.upstream_attempts`로 남긴다. attempt별 개별 span 생성은 Phase 2 이후 범위로 둔다. outbound `traceparent`의 `span_id`는 최초 attempt 시점에 생성한 proxy span의 ID를 사용하며, retry 시에도 동일한 `span_id`를 전달한다 (upstream 관점에서 같은 parent).
-- **upstream 실패 (connect/DNS 등)**: `$upstream_response_time`이 빈 문자열 또는 nil인 경우 (connect 실패, DNS 해석 실패 등), proxy span을 `log_by_lua` 시점에서 즉시 종료한다. 이때 span에 `otel.status_code=ERROR`, `error.type=upstream_connect_failure`, `http.response.status_code=502` 등 에러 attribute를 설정한다. duration은 proxy span 시작 ~ log_by_lua 시점으로 기록한다 (실제 대기 시간 반영).
+- **upstream 실패 (connect/DNS 등)**: `$upstream_response_time`이 빈 문자열 또는 nil인 경우 (connect 실패, DNS 해석 실패 등), `$upstream_connect_time`이 있으면 해당 값을 duration으로 사용한다. 둘 다 nil이면 duration=0으로 기록한다. span status `ERROR` + `error.type=upstream_connect_failure` + `http.response.status_code=502` 속성을 설정한다. 성공/실패 모두 upstream 측 시간만 반영하여 `SpanKind=CLIENT` span의 의미를 일관되게 유지한다.
 - **outbound traceparent 주입**: `access_by_lua` 단계에서 proxy child span을 생성한 뒤, 해당 span의 `span_id`를 parent로 하여 `ngx.req.set_header("traceparent", "00-<trace_id>-<proxy_span_id>-<flags>")`를 설정한다. 이렇게 하면 업스트림 서비스의 span이 proxy child의 자식으로 올바르게 연결된다.
 
 ### 3. Export 방식: OTLP/HTTP (JSON)
@@ -113,6 +113,7 @@
 - 버퍼 크기 제한: worker당 최대 4096 spans (초과 시 oldest drop). 산출 근거: SLO 10,000 req/s ÷ 4 workers = 2,500 req/s/worker × 1% 샘플링 = 25 req/s × 5 spans/req × 5초 flush = 625 spans. 버스트/배압 여유 6.5배 포함 4096으로 설정
 - flush 주기: 5초 (설정 가능)
 - **버퍼 동시 접근 제어**: `log_by_lua`의 span append와 timer 콜백의 flush는 같은 worker에서 실행되지만, timer 콜백이 cosocket I/O 중 yield하면 그 사이에 `log_by_lua`가 실행될 수 있다. 이를 방지하기 위해 flush 시작 시 현재 버퍼를 새 빈 테이블로 **atomic swap**한다: `local batch = buffer; buffer = {}`. swap 후 `log_by_lua`는 새 빈 버퍼에 append하고, timer는 swap된 batch를 전송한다. Lua table 할당은 원자적이므로 lock이 필요 없다
+- **Single-flight flush**: worker-local boolean 플래그 `flushing`으로 중복 flush를 방지한다. timer 콜백 진입 시 `if flushing then return end; flushing = true` → flush 완료 후 `flushing = false`. collector가 느려 flush가 `flush_interval_ms`를 초과하면 다음 timer 콜백은 skip되고 span은 버퍼에 계속 쌓인다 (cap 초과 시 oldest drop). 이를 통해 동일 worker에서 여러 flush가 동시에 cosocket을 사용하는 상황을 원천 차단한다
 
 ### 5. 샘플링 전략: Head-based 확률적 샘플링
 
@@ -176,7 +177,8 @@ tracing:
 
 | span attribute | redaction 규칙 |
 |---------------|---------------|
-| `http.url` | query_string에 ADR-007 §2 민감 파라미터 마스킹 적용 (`token=***` 등) |
+| `url.full` (CLIENT span) | query_string에 ADR-007 §2 민감 파라미터 마스킹 적용 (`token=***` 등) |
+| `url.path` (SERVER span) | 그대로 포함 (query 미포함이므로 redaction 불필요) |
 | `http.request.header.authorization` | **수집 금지** — span attribute에 포함하지 않음 |
 | `http.request.header.cookie` | **수집 금지** — span attribute에 포함하지 않음 |
 | `http.request.header.x-api-key` | **수집 금지** — span attribute에 포함하지 않음 |
