@@ -97,8 +97,9 @@
 - **타이머 등록**: `init_worker_by_lua`에서 `ngx.timer.every(flush_interval, flush_fn)`으로 worker당 1회 등록. 요청 경로에서 타이머를 생성하지 않는다 (타이머 중복 생성 방지).
 - 각 worker는 독립적인 span 버퍼를 유지 (shared dict 불필요)
 - `ngx.timer.every` 콜백에서 cosocket 사용 가능 → OTLP endpoint로 배치 전송
-- 버퍼 크기 제한: worker당 최대 1000 spans (초과 시 oldest drop)
+- 버퍼 크기 제한: worker당 최대 8192 spans (초과 시 oldest drop). 산출 근거: SLO 10,000 req/s ÷ worker 4개 × 1% 샘플링 × 4 spans/req × 5초 flush = 5,000 spans. 여유 포함 8192로 설정
 - flush 주기: 5초 (설정 가능)
+- **버퍼 동시 접근 제어**: `log_by_lua`의 span append와 timer 콜백의 flush는 같은 worker에서 실행되지만, timer 콜백이 cosocket I/O 중 yield하면 그 사이에 `log_by_lua`가 실행될 수 있다. 이를 방지하기 위해 flush 시작 시 현재 버퍼를 새 빈 테이블로 **atomic swap**한다: `local batch = buffer; buffer = {}`. swap 후 `log_by_lua`는 새 빈 버퍼에 append하고, timer는 swap된 batch를 전송한다. Lua table 할당은 원자적이므로 lock이 필요 없다
 
 ### 5. 샘플링 전략: Head-based 확률적 샘플링
 
@@ -119,6 +120,8 @@
 | 있음 | `sampled=0` | parent-based: 샘플링 안 함 (상위 결정 존중) | **항상 기록** (상관관계 유지) | X |
 | 없음 | — | 새 trace_id 생성 + 로컬 rate 적용 | 샘플링 시 기록, 미샘플 시 null | 샘플링 시만 |
 
+> **inbound 없음 + locally unsampled**: 새 trace_id는 생성하지만 sampled=0으로 결정된 경우, outbound `traceparent`를 **전파하지 않는다** (헤더 미설정). 이유: LuaGate가 trace의 최초 originator이고 export도 하지 않으므로, downstream에 `sampled=0` 컨텍스트를 전파해도 어떤 hop에서도 span이 수집되지 않아 의미가 없다. `trace_id`/`span_id` 로그도 null이므로 상관관계가 존재하지 않는다.
+>
 > **핵심 결정 — parent-based 샘플링**: inbound `traceparent`가 있으면 sampled 플래그를 그대로 존중한다 (parent-based). LuaGate가 독자적으로 재샘플링하지 않는다. 이를 통해 partial trace (상위 hop은 export 안 했는데 LuaGate만 export) 문제를 방지하고, 분산 환경에서 일관된 end-to-end 트레이스를 보장한다.
 > **로그 기록**: inbound trace가 있으면 sampled 플래그와 무관하게 `trace_id`/`span_id`를 항상 access.log에 기록한다. 외부 트레이싱 시스템에서 LuaGate 로그와의 상관관계가 끊기지 않도록 한다.
 > **outbound 전파**: inbound sampled 플래그를 그대로 outbound `traceparent`에 전달한다.
