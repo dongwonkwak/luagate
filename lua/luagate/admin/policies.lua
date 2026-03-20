@@ -287,7 +287,7 @@ function _M.handle_put_policies()
 
     local mismatch_msg
     current_source, mismatch_msg = validate_source_if_match(if_match)
-    if mismatch_msg and not dry_run then
+    if mismatch_msg then
       send_error(409, "version_mismatch", "reload", mismatch_msg)
       return
     end

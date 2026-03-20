@@ -293,13 +293,7 @@ If-Match: "<source_version>"
   "new_stream_version": "b4e3f2a1...",
   "http_result": "committed",
   "stream_result": "committed",
-  "warnings": [
-    {
-      "type": "conflict",
-      "rule_ids": ["rule-a", "rule-b"],
-      "message": "same scope, priority, opposing action"
-    }
-  ]
+  "warnings": []
 }
 ```
 
@@ -318,7 +312,7 @@ Content-Length: <bytes>
 
 **처리 순서**: [1] parse → [2] validate → [3] conflict_detect → [4] hash(SHA256). commit/file write 없음.
 
-**If-Match**: 선택 (dry-run은 저장하지 않으므로 optimistic lock 불필요)
+**If-Match**: 선택 (dry-run은 저장하지 않으므로 생략 가능). 단, 제공 시 `source_version`과 비교하여 불일치이면 `409 version_mismatch` 반환 (일반 PUT과 동일)
 
 **응답 200 (검증 성공):**
 

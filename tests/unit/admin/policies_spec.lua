@@ -892,7 +892,7 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     assert.is_true(body.dry_run)
   end)
 
-  it("accepts If-Match header but ignores mismatch", function()
+  it("returns 409 when If-Match header mismatches", function()
     _G.ngx.req.get_headers = function()
       return {
         ["If-Match"] = '"wrong_version"',
@@ -903,11 +903,11 @@ describe("PUT /api/v1/policies?dry_run=true", function()
 
     policies.handle_put_policies()
 
-    assert.are.equal(200, _G.ngx.status)
+    assert.are.equal(409, _G.ngx.status)
     local said = _G.ngx._get_said()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
-    assert.is_true(body.dry_run)
+    assert.are.equal("version_mismatch", body.error)
   end)
 
   it("returns 422 on parse failure", function()
