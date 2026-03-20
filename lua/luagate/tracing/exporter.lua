@@ -37,6 +37,9 @@ function _M.configure(opts)
   if opts.service_name then
     _config.service_name = opts.service_name
   end
+  if opts.batch_size then
+    _config.batch_size = opts.batch_size
+  end
 end
 
 --- Convert spans to OTLP JSON format.
@@ -147,8 +150,19 @@ local function export_otlp_http(spans)
   end
 end
 
+--- Export a single chunk of spans.
+-- @param chunk table  Array of span objects
+local function export_chunk(chunk)
+  if _config.exporter == "stdout" then
+    export_stdout(chunk)
+  else
+    export_otlp_http(chunk)
+  end
+end
+
 --- Flush buffered spans.
 -- ADR-010 §4: single-flight guard + atomic buffer swap.
+-- Splits into batch_size chunks to respect OTLP payload limits.
 -- @param premature boolean  true if called during worker shutdown
 function _M.flush(premature)
   -- Single-flight: skip if another flush is in progress
@@ -164,11 +178,18 @@ function _M.flush(premature)
     return
   end
 
-  -- Export based on configured exporter type
-  if _config.exporter == "stdout" then
-    export_stdout(batch)
+  -- Split into batch_size chunks (ADR-010 §5 config)
+  local batch_size = _config.batch_size or 1024
+  if #batch <= batch_size then
+    export_chunk(batch)
   else
-    export_otlp_http(batch)
+    for i = 1, #batch, batch_size do
+      local chunk = {}
+      for j = i, math.min(i + batch_size - 1, #batch) do
+        chunk[#chunk + 1] = batch[j]
+      end
+      export_chunk(chunk)
+    end
   end
 
   _flushing = false

@@ -94,6 +94,7 @@ function _M.init(config_path)
     export_timeout_ms = tracing.export_timeout_ms or 10000,
     exporter = tracing.exporter or "otlp_http",
     service_name = tracing.service_name or "luagate",
+    batch_size = tracing.batch_size or 1024,
   })
 
   _config = {
@@ -228,9 +229,21 @@ function _M.inject_outbound(trace_ctx, proxy_span)
   ngx.req.set_header("traceparent", tp)
 
   -- ADR-010 §7: tracestate handling
-  -- Inbound trace: pass-through existing tracestate (no action needed)
-  -- New trace: clear any stale tracestate
-  if not trace_ctx.has_inbound then
+  if trace_ctx.has_inbound then
+    -- Validate tracestate: W3C spec requires key=value pairs separated by commas.
+    -- Malformed/invalid tracestate → drop (ADR-010 §7)
+    local ts = ngx.req.get_headers()["tracestate"]
+    if ts and type(ts) == "string" and #ts > 0 then
+      -- Basic validation: at least one key=value pair
+      if not ts:match("^[%w_%-*/]+=[%w_%-+/.]+") then
+        ngx.req.clear_header("tracestate")
+      end
+      -- Valid: pass-through (no modification)
+    else
+      ngx.req.clear_header("tracestate")
+    end
+  else
+    -- New trace: clear any stale tracestate
     ngx.req.clear_header("tracestate")
   end
 end

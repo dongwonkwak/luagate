@@ -502,6 +502,22 @@ function _M.access()
     if ok_tracing then
       local proxy_span = tracing.start_child_span(trace_ctx, "proxy", "SPAN_KIND_CLIENT")
       if proxy_span then
+        -- ADR-010 §2: CLIENT span required attributes (OTel Semantic Conventions v1.25+)
+        local span_mod = require("luagate.tracing.span")
+        span_mod.set_attribute(proxy_span, "http.request.method", ngx.req.get_method())
+        -- url.full: redaction applied by using path_normalized + redacted query
+        local scheme = ngx.var.scheme or "http"
+        local host = ngx.var.host or ""
+        local path = ctx.path_normalized or ngx.var.uri or ""
+        local qs = ngx.var.luagate_query_string or ""
+        local url_full = scheme .. "://" .. host .. path
+        if qs ~= "" then
+          url_full = url_full .. "?" .. qs
+        end
+        span_mod.set_attribute(proxy_span, "url.full", url_full)
+        span_mod.set_attribute(proxy_span, "server.address", host)
+        span_mod.set_attribute(proxy_span, "server.port", tonumber(ngx.var.server_port) or 0)
+
         ctx.proxy_span = proxy_span
         ctx.proxy_start_ts = ngx.now()
         tracing.inject_outbound(trace_ctx, proxy_span)
@@ -583,11 +599,17 @@ function _M.log_phase()
           if upstream_rt and upstream_rt ~= "" and upstream_rt ~= "-" then
             -- ADR-010 §2: handle comma-separated retry values
             local total = 0
+            local attempts = 0
             for val in upstream_rt:gmatch("[^,%s]+") do
               total = total + (tonumber(val) or 0)
+              attempts = attempts + 1
             end
             local span_mod = require("luagate.tracing.span")
             span_mod.set_attribute(proxy_span, "luagate.upstream_response_time", upstream_rt)
+            -- ADR-010 §2: record attempt count for retry/failover
+            if attempts > 1 then
+              span_mod.set_attribute(proxy_span, "luagate.upstream_attempts", attempts)
+            end
             local proxy_end_ns = (ctx.proxy_start_ts + total) * 1e9
             span_mod.finish(proxy_span, proxy_end_ns)
 
