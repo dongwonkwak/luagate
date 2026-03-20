@@ -25,7 +25,13 @@ Linear에서 이슈를 조회하여 의존성을 분석하고, 블로커가 없�
    - 블로커 없는 이슈 중 우선순위 최고 이슈 선택
    - 동순위 시 이슈 번호 오름차순
 
-4. **리뷰 횟수 판단** (선택 이슈에 대해)
+4. **핸드오프 코멘트 조회** (선택 이슈에 대해)
+   - `list_comments(issueId: "DON-XXX")` 호출
+   - "작업 인계" 키워드가 포함된 코멘트 검색
+   - 있으면 핸드오프 맥락을 `implement-issue` 프롬프트에 포함
+   - 없으면 생략 (최초 작업)
+
+5. **리뷰 횟수 판단** (선택 이슈에 대해)
    2회 리뷰 조건 중 하나라도 해당 시 2회:
    - ADR 수정 또는 신규 ADR 필요
    - 스펙 문서 2개 이상 수정
@@ -34,11 +40,12 @@ Linear에서 이슈를 조회하여 의존성을 분석하고, 블로커가 없�
    - Dependencies 3개 이상
    - 이슈 라벨에 "architecture" 포함
 
-5. **실행 계획 보고**
+6. **실행 계획 보고**
    ```
    선택 이슈: DON-XXX — <제목>
    우선순위: <Priority>
    리뷰 계획: 1회 리뷰 | 2회 리뷰 (사유: <조건>)
+   핸드오프: 있음 (from_agent → to_agent) | 없음
    예상 에이전트: architect → implementer → tester → [codex review] → security-reviewer
 
    진행하려면: "DON-XXX 진행해줘" 또는 implement-issue 스킬 실행
