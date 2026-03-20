@@ -71,8 +71,8 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `active_version` | string | NOT NULL | `$luagate_active_version` | rewrite_by_lua | **요청 시작 시 스냅샷** (decision 시점 아님) |
 | `worker_id` | integer | NOT NULL | `$luagate_worker_id` | rewrite_by_lua | ngx.worker.id() |
 | `ffi_timeout` | boolean | NOT NULL | ctx.ffi_timeout | access_by_lua | FFI Layer 2 watchdog timeout 여부. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md). 기본값 `false` |
-| `trace_id` | string (32-hex) | NULLABLE | `$luagate_trace_id` | rewrite_by_lua | W3C TraceContext trace ID. 트레이싱 비활성화 시 null. inbound `traceparent` 존재 시 sampled 플래그와 무관하게 항상 기록. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) |
-| `span_id` | string (16-hex) | NULLABLE | `$luagate_span_id` | rewrite_by_lua | 루트 span ID. 트레이싱 비활성화 시 null. inbound `traceparent` 존재 시 sampled 플래그와 무관하게 항상 기록. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) |
+| `trace_id` | string (32-hex) | NULLABLE | `$luagate_trace_id` | rewrite_by_lua | W3C TraceContext trace ID. 트레이싱 활성화 시 항상 기록 (sampled 여부 무관). 비활성화 또는 pre-Lua rejection 시 null. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) |
+| `span_id` | string (16-hex) | NULLABLE | `$luagate_span_id` | rewrite_by_lua | 루트 span ID. 트레이싱 활성화 시 항상 기록. 비활성화 또는 pre-Lua rejection 시 null. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) |
 
 > **path_raw 정의**: `$request_uri`(query 포함)가 아니라, `?` 이전만 잘라낸 Lua 계산값.
 > ```lua

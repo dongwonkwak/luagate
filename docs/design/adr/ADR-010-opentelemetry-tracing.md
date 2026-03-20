@@ -67,6 +67,10 @@
 ```
 
 - **루트 span**: `rewrite_by_lua`에서 생성하되 시작 시각을 `ngx.req.start_time()`으로 backdate한다 (요청 수신 시각). `log_by_lua`에서 종료. 이를 통해 루트 span duration이 `latency_ms` (`$request_time` = 요청 수신 ~ 응답 전송 완료)와 일치한다.
+- **SpanKind 및 HTTP Semantic Convention** (OpenTelemetry Semantic Conventions for HTTP):
+  - 루트 span: `SpanKind=SERVER` (LuaGate가 HTTP 서버 역할). 필수 속성: `http.method`, `http.url`, `http.status_code`, `http.scheme`, `net.host.name`, `net.host.port`
+  - proxy child span: `SpanKind=CLIENT` (LuaGate가 upstream에 대해 HTTP 클라이언트 역할). 필수 속성: `http.method`, `http.url`, `http.status_code`, `net.peer.name`, `net.peer.port`
+  - normalize/policy_eval/security_scan child spans: `SpanKind=INTERNAL` (내부 처리 단계)
 - **child span**: 주요 내부 단계별 생성 (normalize, policy_eval, security_scan, proxy)
 - **normalize child span**: `rewrite_by_lua`에서 생성. decoder FFI (path/query 정규화) 호출을 포함한다. http-pipeline.md §2.2의 rewrite 정규화 단계에 해당
 - **security_scan child span**: `access_by_lua`에서 생성. scanner FFI 호출만 포함 (decoder는 rewrite에서 이미 실행됨)
@@ -100,6 +104,12 @@
 - **타이머 등록**: `init_worker_by_lua`에서 `ngx.timer.every(flush_interval, flush_fn)`으로 worker당 1회 등록. 요청 경로에서 타이머를 생성하지 않는다 (타이머 중복 생성 방지).
 - 각 worker는 독립적인 span 버퍼를 유지 (shared dict 불필요)
 - `ngx.timer.every` 콜백에서 cosocket 사용 가능 → OTLP endpoint로 배치 전송
+- **Exporter HTTP transport 계약**:
+  - HTTP 클라이언트: `lua-resty-http` 사용 (raw cosocket 직접 사용 금지 — HTTP/1.1 chunked, keepalive, redirect 처리를 직접 구현하면 버그 위험)
+  - DNS resolver: `lua-resty-http`가 내부적으로 `ngx.socket.tcp`의 resolver를 사용. `nginx.conf`의 `resolver` 지시자 설정 필수 (기본: `127.0.0.11` Docker 내부 DNS 또는 명시적 DNS 서버)
+  - TLS/HTTPS: `lua-resty-http`의 `ssl_verify` 옵션으로 처리. OTLP endpoint가 HTTPS인 경우 `lua_ssl_trusted_certificate` 지시자로 CA 인증서 경로 설정 필수
+  - Keepalive: `lua-resty-http`의 `set_keepalive()` 사용 (기본 idle timeout 60초, pool size 10). flush마다 새 연결을 맺지 않음
+  - Timeout: connect 5초, send 5초, read 10초 (설정 가능, `export_timeout_ms`로 통합 제어)
 - 버퍼 크기 제한: worker당 최대 4096 spans (초과 시 oldest drop). 산출 근거: SLO 10,000 req/s ÷ 4 workers = 2,500 req/s/worker × 1% 샘플링 = 25 req/s × 5 spans/req × 5초 flush = 625 spans. 버스트/배압 여유 6.5배 포함 4096으로 설정
 - flush 주기: 5초 (설정 가능)
 - **버퍼 동시 접근 제어**: `log_by_lua`의 span append와 timer 콜백의 flush는 같은 worker에서 실행되지만, timer 콜백이 cosocket I/O 중 yield하면 그 사이에 `log_by_lua`가 실행될 수 있다. 이를 방지하기 위해 flush 시작 시 현재 버퍼를 새 빈 테이블로 **atomic swap**한다: `local batch = buffer; buffer = {}`. swap 후 `log_by_lua`는 새 빈 버퍼에 append하고, timer는 swap된 batch를 전송한다. Lua table 할당은 원자적이므로 lock이 필요 없다
@@ -121,9 +131,9 @@
 |---------------------|---------------|-------------|---------------------|-------------|
 | 있음 | `sampled=1` | parent-based: 강제 샘플링 (로컬 rate 무시) | 기록 | O |
 | 있음 | `sampled=0` | parent-based: 샘플링 안 함 (상위 결정 존중) | **항상 기록** (상관관계 유지) | X |
-| 없음 | — | 새 trace_id 생성 + 로컬 rate 적용 | 샘플링 시 기록, 미샘플 시 null | 샘플링 시만 |
+| 없음 | — | 새 trace_id 생성 + 로컬 rate 적용 | **항상 기록** (downstream 역추적 보장) | 샘플링 시만 |
 
-> **inbound 없음 + locally unsampled**: 새 trace_id를 생성하고 `sampled=0`으로 outbound `traceparent`를 **전파한다**. W3C Trace Context 표준에 따라, originator는 샘플링 여부와 무관하게 trace context를 downstream에 전파해야 한다. downstream hop이 독자적으로 재샘플링하여 trace를 이어받을 수 있기 때문이다. 단, LuaGate 자체는 span을 export하지 않으며 `trace_id`/`span_id` 로그 필드도 null로 기록한다 (로컬 비용 최소화).
+> **inbound 없음 + locally unsampled**: 새 trace_id를 생성하고 `sampled=0`으로 outbound `traceparent`를 **전파한다**. W3C Trace Context 표준에 따라, originator는 샘플링 여부와 무관하게 trace context를 downstream에 전파해야 한다. `trace_id`/`span_id`는 access.log에 **항상 기록**한다 — downstream hop이 해당 trace를 샘플링한 경우 LuaGate 로그에서 역추적할 수 있어야 하기 때문이다. span export만 하지 않는다.
 >
 > **핵심 결정 — parent-based 샘플링**: inbound `traceparent`가 있으면 sampled 플래그를 그대로 존중한다 (parent-based). LuaGate가 독자적으로 재샘플링하지 않는다. 이를 통해 partial trace (상위 hop은 export 안 했는데 LuaGate만 export) 문제를 방지하고, 분산 환경에서 일관된 end-to-end 트레이스를 보장한다.
 > **로그 기록**: inbound trace가 있으면 sampled 플래그와 무관하게 `trace_id`/`span_id`를 항상 access.log에 기록한다. 외부 트레이싱 시스템에서 LuaGate 로그와의 상관관계가 끊기지 않도록 한다.
@@ -223,8 +233,8 @@ access.log에 2개 NULLABLE 필드 추가:
 
 | 필드 | 타입 | JSON Nullability | 설명 |
 |------|------|-----------------|------|
-| `trace_id` | string (32-hex) | NULLABLE | W3C TraceContext trace ID. 트레이싱 비활성화 시 null. inbound `traceparent` 존재 시 sampled 플래그와 무관하게 항상 기록. inbound 없고 locally unsampled 시 null |
-| `span_id` | string (16-hex) | NULLABLE | 루트 span ID. 트레이싱 비활성화 시 null. inbound `traceparent` 존재 시 sampled 플래그와 무관하게 항상 기록. inbound 없고 locally unsampled 시 null |
+| `trace_id` | string (32-hex) | NULLABLE | W3C TraceContext trace ID. 트레이싱 비활성화 시 또는 pre-Lua rejection 시 null. 트레이싱 활성화 시 **항상 기록** (sampled 여부, inbound 유무와 무관) |
+| `span_id` | string (16-hex) | NULLABLE | 루트 span ID. 트레이싱 비활성화 시 또는 pre-Lua rejection 시 null. 트레이싱 활성화 시 **항상 기록** |
 
 > 기존 `request_id` 필드는 변경 없음. `trace_id`와 `request_id`의 상관은 span attribute를 통해 제공.
 
