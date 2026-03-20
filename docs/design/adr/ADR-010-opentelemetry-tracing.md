@@ -69,6 +69,7 @@
 - **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy)
 - **FFI 호출 span**: security_scan child 내에 scanner/decoder FFI 호출 span 포함
 - **proxy child span**: `access_by_lua` 종료 시점에 시작, `log_by_lua`에서 `$upstream_response_time` 기반으로 종료 시각을 역산하여 기록. 이를 통해 proxy span은 업스트림 왕복 시간을 정확히 반영한다.
+- **upstream retry/failover**: Nginx가 retry/failover를 수행하면 `$upstream_response_time`이 쉼표 구분 다중 값이 될 수 있다 (예: `"0.5, 1.2"`). 이 경우 **단일 proxy span으로 합산**한다 — 전체 upstream 소요 시간(마지막 값의 종료 시점)을 proxy span duration으로 기록하고, attempt 횟수를 span attribute `luagate.upstream_attempts`로 남긴다. attempt별 개별 span 생성은 Phase 2 이후 범위로 둔다. outbound `traceparent`의 `span_id`는 최초 attempt 시점에 생성한 proxy span의 ID를 사용하며, retry 시에도 동일한 `span_id`를 전달한다 (upstream 관점에서 같은 parent).
 - **outbound traceparent 주입**: `access_by_lua` 단계에서 proxy child span을 생성한 뒤, 해당 span의 `span_id`를 parent로 하여 `ngx.req.set_header("traceparent", "00-<trace_id>-<proxy_span_id>-<flags>")`를 설정한다. 이렇게 하면 업스트림 서비스의 span이 proxy child의 자식으로 올바르게 연결된다.
 
 ### 3. Export 방식: OTLP/HTTP (JSON)
@@ -107,8 +108,18 @@
 | Development | 100% (1.0) |
 
 - **Head-based**: `rewrite_by_lua`에서 샘플링 결정, 이후 모든 child span에 전파
-- **inbound `traceparent` 존중**: 외부에서 sampled=1로 들어오면 무조건 트레이싱
 - **설정**: `conf/luagate.yaml`의 `tracing.sample_rate` 필드
+
+**Inbound sampled 플래그별 동작**:
+
+| inbound traceparent | sampled 플래그 | LuaGate 동작 | trace_id/span_id 로그 | span export |
+|---------------------|---------------|-------------|---------------------|-------------|
+| 있음 | `sampled=1` | 강제 샘플링 (로컬 rate 무시) | 기록 | O |
+| 있음 | `sampled=0` | inbound trace_id 유지 + 로컬 rate 적용하여 재샘플링 결정 | **항상 기록** (상관관계 유지) | 재샘플링 당첨 시만 |
+| 없음 | — | 새 trace_id 생성 + 로컬 rate 적용 | 샘플링 시 기록, 미샘플 시 null | 샘플링 시만 |
+
+> **핵심 결정**: inbound trace가 있으면 (`traceparent` 존재) sampled 플래그와 무관하게 `trace_id`/`span_id`를 항상 access.log에 기록한다. 이를 통해 외부 트레이싱 시스템에서 LuaGate 로그와의 상관관계가 끊기지 않는다. span export 여부만 샘플링으로 제어한다.
+> **outbound 전파**: inbound sampled=0이고 LuaGate 재샘플링에도 미당첨이면, outbound `traceparent`의 sampled 플래그도 0으로 유지하여 downstream에 샘플링 결정을 전파한다.
 
 ```yaml
 # conf/luagate.yaml
@@ -135,7 +146,9 @@ tracing:
 | `request_id` | string (클라이언트 `X-Request-ID` 또는 Nginx `$request_id`) | Nginx `map` 지시자 (conf/nginx.conf) | 내부 로그 상관, `X-Request-ID` 업스트림/응답 헤더 |
 | `trace_id` | W3C 32자 hex | `rewrite_by_lua` (inbound 없을 때 생성) | 분산 트레이싱 |
 
-- `request_id`를 `trace_id`로 **승격하지 않는다**. `request_id`는 클라이언트가 전달한 임의 값일 수 있어 형식이 보장되지 않으며, `trace_id`는 반드시 W3C 128-bit hex (32자) 형식이어야 한다. 생성 경로와 의미가 다르므로 별도 유지한다. 기존 로그 소비자와의 호환성도 유지해야 한다.
+- `request_id`를 `trace_id`로 **승격하지 않는다**. `request_id`는 클라이언트가 전달한 임의 값일 수 있어 형식이 보장되지 않으며 (opaque string), `trace_id`는 반드시 W3C 128-bit hex (32자) 형식이어야 한다. 생성 경로와 의미가 다르므로 별도 유지한다.
+
+> **request_id 타입 재정의**: 기존 log-schema.md는 `request_id`를 "UUID v4"로 기술했으나, 실제 런타임 계약은 클라이언트 `X-Request-ID` 헤더를 그대로 채택한다 (`conf/nginx.conf:54-57` map). 따라서 `request_id`의 타입을 **opaque string**으로 재정의한다. 클라이언트가 UUID v4를 보내면 UUID v4이고, 임의 문자열을 보내면 그대로 기록된다. 이 ADR과 함께 log-schema.md의 `request_id` 타입 설명을 동기화한다.
 - span attribute `luagate.request_id`로 매핑하여 로그-트레이스 상관을 지원한다.
 - access.log에 `trace_id`, `span_id` 필드를 NULLABLE로 추가한다 (트레이싱 비활성화 또는 미샘플 시 null).
 

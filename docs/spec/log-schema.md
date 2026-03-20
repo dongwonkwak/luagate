@@ -44,7 +44,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | 필드 | 타입 | JSON Nullability | log_format 토큰 | Producer Phase | Source Semantics |
 |------|------|-----------------|----------------|----------------|-----------------|
 | `timestamp` | string (ISO-8601 UTC) | NOT NULL | `$time_iso8601` | log_by_lua | 요청 수신 시각 (ngx.req.start_time() 기반) |
-| `request_id` | string (UUID v4) | NOT NULL | `$luagate_request_id` | rewrite_by_lua | 요청 고유 ID. `X-Request-ID` 응답 헤더로도 전달 |
+| `request_id` | string | NOT NULL | `$luagate_request_id` | Nginx map | 요청 고유 ID. 클라이언트 `X-Request-ID` 헤더 우선, 없으면 Nginx `$request_id` fallback. `X-Request-ID` 응답/업스트림 헤더로도 전달. [ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) |
 | `src_ip` | string | NOT NULL | `$luagate_src_ip` | rewrite_by_lua | PROXY Protocol > XFF (trusted proxy 내) > $remote_addr |
 | `src_port` | integer | NOT NULL | `$remote_port` | rewrite_by_lua | 클라이언트 원본 포트 |
 | `dst_port` | integer | NOT NULL | `$server_port` | rewrite_by_lua | LuaGate 수신 포트 |
