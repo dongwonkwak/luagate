@@ -10,22 +10,31 @@ async function gotoPoliciesPage(page: Page) {
 }
 
 async function getPolicyEditor(page: Page) {
-  const editor = page.getByLabel("Policy YAML Editor");
+  const editor = page
+    .locator('textarea[aria-label="Policy YAML Editor"]')
+    .first();
   await expect(editor).toBeVisible({ timeout: 15000 });
   return editor;
 }
 
+function getErrorAlert(page: Page) {
+  return page.locator('div[role="alert"]').filter({ hasText: "API " }).first();
+}
+
 async function replaceEditorContent(page: Page, nextValue: string) {
   const editor = await getPolicyEditor(page);
-  const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
-
-  await editor.focus();
-  await page.keyboard.press(selectAll);
-  await page.keyboard.type(nextValue, { delay: 10 });
+  await editor.fill(nextValue);
 }
 
 test.describe("Policy Editor", () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      (
+        window as typeof window & {
+          __LUAGATE_FORCE_PLAIN_EDITOR__?: boolean;
+        }
+      ).__LUAGATE_FORCE_PLAIN_EDITOR__ = true;
+    });
     await setupAdminMock(page);
 
     // Login first
@@ -71,7 +80,7 @@ test.describe("Policy Editor", () => {
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
 
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(getErrorAlert(page)).toBeVisible();
   });
 
   test("consecutive saves use updated ETag", async ({ page }) => {

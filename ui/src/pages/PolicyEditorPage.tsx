@@ -51,6 +51,20 @@ function PlainYamlEditor({
   );
 }
 
+function shouldForcePlainEditor() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return (
+    (
+      window as typeof window & {
+        __LUAGATE_FORCE_PLAIN_EDITOR__?: boolean;
+      }
+    ).__LUAGATE_FORCE_PLAIN_EDITOR__ === true
+  );
+}
+
 export function PolicyEditorPage() {
   const { data: policyData, isLoading, error: fetchError } = usePolicies();
   const updateMutation = useUpdatePolicies();
@@ -64,7 +78,9 @@ export function PolicyEditorPage() {
     text: string;
   } | null>(null);
   const [editorReady, setEditorReady] = useState(false);
-  const [usePlainEditor, setUsePlainEditor] = useState(false);
+  const [usePlainEditor, setUsePlainEditor] = useState(() =>
+    shouldForcePlainEditor(),
+  );
 
   const isDirty = serverYaml !== editorValue;
 

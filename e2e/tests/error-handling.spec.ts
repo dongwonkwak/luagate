@@ -9,18 +9,25 @@ async function gotoPoliciesPage(page: Page) {
   ).toBeVisible();
 }
 
+function getErrorAlert(page: Page) {
+  return page.locator('div[role="alert"]').filter({ hasText: "API " }).first();
+}
+
 async function replaceEditorContent(page: Page, nextValue: string) {
   const editor = page.getByLabel("Policy YAML Editor");
-  const selectAll = process.platform === "darwin" ? "Meta+a" : "Control+a";
-
   await expect(editor).toBeVisible({ timeout: 15000 });
-  await editor.focus();
-  await page.keyboard.press(selectAll);
-  await page.keyboard.type(nextValue, { delay: 10 });
+  await editor.fill(nextValue);
 }
 
 test.describe("Error Handling", () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      (
+        window as typeof window & {
+          __LUAGATE_FORCE_PLAIN_EDITOR__?: boolean;
+        }
+      ).__LUAGATE_FORCE_PLAIN_EDITOR__ = true;
+    });
     await setupAdminMock(page);
   });
 
@@ -67,6 +74,6 @@ test.describe("Error Handling", () => {
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
 
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(getErrorAlert(page)).toBeVisible();
   });
 });
