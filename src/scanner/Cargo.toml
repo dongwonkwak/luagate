@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "luagate_scanner"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 regex = "1.9"

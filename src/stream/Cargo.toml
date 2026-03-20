@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "luagate_stream"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 

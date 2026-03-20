@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "luagate_decoder"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 percent-encoding = "2.3"

@@ -1,0 +1,66 @@
+# ── fuzz.yml ───────────────────────────────────────────────────────────────
+# GitHub Actions: Weekly security fuzzing for Rust FFI crates
+# DON-176: cargo fuzz targets for luagate_scanner, luagate_decoder, luagate_stream
+#
+# Schedule: weekly (Sunday 03:00 UTC), 30 min timeout per target
+# ───────────────────────────────────────────────────────────────────────────
+
+name: Security Fuzzing
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'  # Sunday 03:00 UTC
+  workflow_dispatch:       # Manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: scanner
+            crate_dir: src/scanner
+            bin: fuzz_scanner
+          - name: decoder
+            crate_dir: src/decoder
+            bin: fuzz_decoder
+          - name: stream
+            crate_dir: src/stream
+            bin: fuzz_sni
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Seed corpus from checked-in seeds
+        working-directory: ${{ matrix.target.crate_dir }}
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target.bin }}
+          cp -r fuzz/seed/${{ matrix.target.bin }}/* fuzz/corpus/${{ matrix.target.bin }}/ 2>/dev/null || true
+
+      - name: Run fuzzer (30 min)
+        working-directory: ${{ matrix.target.crate_dir }}
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target.bin }} -- \
+            -max_total_time=1800 \
+            -max_len=8192
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target.name }}
+          path: |
+            ${{ matrix.target.crate_dir }}/fuzz/artifacts/
+          retention-days: 30
