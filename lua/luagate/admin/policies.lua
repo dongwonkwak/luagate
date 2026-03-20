@@ -85,8 +85,44 @@ local function sha256_hex(s)
   return str_mod.to_hex(digest), nil
 end
 
+--- Extract MCP metadata from request headers (ADR-011 §8).
+-- Determines actor_type ("mcp" or "api") based on X-MCP-Client header presence.
+-- @return table  MCP metadata fields (actor_type always present)
+local function header_to_string(value)
+  if type(value) == "string" then
+    return value
+  end
+
+  if type(value) == "table" then
+    local first = value[1]
+    if type(first) == "string" then
+      return first
+    end
+  end
+
+  return nil
+end
+
+local function extract_mcp_metadata()
+  local headers = ngx.req.get_headers()
+  local mcp_client = header_to_string(headers["X-MCP-Client"])
+
+  if not mcp_client then
+    return { actor_type = "api" }
+  end
+
+  return {
+    actor_type = "mcp",
+    client_name = mcp_client,
+    tool_name = header_to_string(headers["X-MCP-Tool"]),
+    session_id = header_to_string(headers["X-MCP-Session-Id"]),
+    request_id = header_to_string(headers["X-Request-ID"]),
+  }
+end
+
 --- Write structured audit log entry.
 -- Uses [luagate:audit] prefix for log routing (ADR-004 §6.3).
+-- Includes MCP metadata when X-MCP-Client header is present (ADR-011 §8).
 -- @param event  string  Event name (e.g. "policy_update_success")
 -- @param fields table   Additional fields to include
 -- @return boolean  true if audit write succeeded
@@ -95,6 +131,12 @@ local function audit_log(event, fields)
   fields.timestamp = ngx.utctime()
   fields.event = event
   fields.actor_ip = ngx.var.remote_addr or "unknown"
+
+  -- Merge MCP metadata (ADR-011 §8)
+  local mcp = extract_mcp_metadata()
+  for k, v in pairs(mcp) do
+    fields[k] = v
+  end
 
   local json = cjson.encode(fields)
   if not json then

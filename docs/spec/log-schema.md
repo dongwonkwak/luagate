@@ -407,6 +407,21 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
+### 5.2 MCP 메타데이터 필드 (ADR-011 §8)
+
+MCP 서버를 통한 Admin API 호출 시, 모든 감사 로그 이벤트에 아래 필드가 추가된다.
+
+| 필드 | 타입 | JSON Nullability | 조건 | 설명 |
+|------|------|-----------------|------|------|
+| `actor_type` | string | NOT NULL | 항상 | `"mcp"` (X-MCP-Client 헤더 존재 시) 또는 `"api"` (기본값) |
+| `client_name` | string | NULLABLE | MCP only | `X-MCP-Client` 헤더값. 일반 API 호출 시 필드 생략 |
+| `tool_name` | string | NULLABLE | MCP only | `X-MCP-Tool` 헤더값. 일반 API 호출 시 필드 생략 |
+| `session_id` | string | NULLABLE | MCP only | `X-MCP-Session-Id` 헤더값. 일반 API 호출 시 필드 생략 |
+| `request_id` | string | NULLABLE | MCP only | `X-Request-ID` 헤더값. 일반 API 호출 시 필드 생략 |
+
+> **하위 호환성**: `X-MCP-Client` 헤더가 없는 기존 API 호출은 `actor_type: "api"`만 추가되며,
+> MCP 전용 필드는 생략된다.
+
 ## 6. src_ip 우선순위 (HTTP + Stream 공통)
 
 | 우선순위 | 소스 | 조건 |

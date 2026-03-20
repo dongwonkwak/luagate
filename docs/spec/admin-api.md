@@ -627,6 +627,52 @@ reload 성공/실패/partial 각 경우의 감사 로그 엔트리 shape:
 }
 ```
 
+### 7.1 MCP 메타데이터 (ADR-011 §8)
+
+MCP 서버를 통한 요청 시 감사 로그에 추가 메타데이터가 기록된다. `X-MCP-Client` 헤더 유무로 `actor_type`을 결정한다.
+
+| 필드 | 타입 | 조건 | 설명 |
+|------|------|------|------|
+| `actor_type` | string | 항상 | `"mcp"` (MCP 헤더 존재 시) 또는 `"api"` (기본값) |
+| `client_name` | string | MCP only | `X-MCP-Client` 헤더값 (예: `"claude-desktop"`) |
+| `tool_name` | string | MCP only | `X-MCP-Tool` 헤더값 (예: `"luagate_update_policies"`) |
+| `session_id` | string | MCP only | `X-MCP-Session-Id` 헤더값 |
+| `request_id` | string | MCP only | `X-Request-ID` 헤더값 |
+
+**MCP 호출 시 감사 로그 예시:**
+
+```json
+{
+  "timestamp": "2026-03-20T12:00:00Z",
+  "event": "policy_update_success",
+  "actor_ip": "127.0.0.1",
+  "actor_type": "mcp",
+  "client_name": "claude-desktop",
+  "tool_name": "luagate_update_policies",
+  "session_id": "sess-abc123",
+  "request_id": "req-xyz789",
+  "trigger": "api",
+  "previous_version": "a3f2c1d4...",
+  "new_version": "b4e3f2a1..."
+}
+```
+
+**일반 API 호출 시 감사 로그 예시 (하위 호환):**
+
+```json
+{
+  "timestamp": "2026-03-20T12:00:00Z",
+  "event": "policy_update_success",
+  "actor_ip": "127.0.0.1",
+  "actor_type": "api",
+  "trigger": "api",
+  "previous_version": "a3f2c1d4...",
+  "new_version": "b4e3f2a1..."
+}
+```
+
+> **하위 호환성**: `X-MCP-Client` 헤더가 없는 기존 API 호출은 `actor_type: "api"`로 기록되며, MCP 전용 필드(`client_name`, `tool_name`, `session_id`, `request_id`)는 생략된다.
+
 ## 8. CORS
 
 기본 **off**. 필요 시 nginx.conf에서 explicit origin allowlist로만 활성화:
