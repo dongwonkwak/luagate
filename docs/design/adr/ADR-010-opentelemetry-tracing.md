@@ -25,7 +25,7 @@
 
 ### 현재 상태
 
-1. `request_id`: UUID v4, `rewrite_by_lua`에서 생성, access.log에 기록
+1. `request_id`: `rewrite_by_lua`에서 결정 (클라이언트 `X-Request-ID` 헤더 우선, 없으면 Nginx `$request_id` fallback), access.log에 기록
 2. 외부 트레이싱 시스템 연동: 없음 (OTLP exporter 미존재)
 3. upstream 전파: `X-Request-ID` 헤더만 전달, W3C Trace Context 미지원
 4. 내부 단계별 소요 시간 측정: 없음
@@ -59,17 +59,17 @@
 ### 2. 트레이싱 수준: HTTP 요청 루트 span + 내부 단계 child spans
 
 ```
-[root] HTTP Request (rewrite → response sent)
+[root] HTTP Request (rewrite → log)
 ├── [child] policy_eval     (access_by_lua)
 ├── [child] security_scan   (access_by_lua, FFI)
-└── [child] proxy           (header_filter_by_lua → upstream 응답 수신)
+└── [child] proxy           (access_by_lua 종료 ~ upstream 응답 완료)
 ```
 
-- **루트 span**: `rewrite_by_lua`에서 시작, `header_filter_by_lua`에서 종료 (응답 전송 시점). `log_by_lua`는 Nginx가 응답을 보낸 후 실행되므로 루트 span에 포함하지 않는다. 이를 통해 루트 span duration이 기존 `latency_ms` (요청 수신 ~ 응답 전송 완료)와 일치한다.
+- **루트 span**: `rewrite_by_lua`에서 시작, `log_by_lua`에서 종료. `$request_time`은 요청 수신 ~ 응답 전송 완료(body flush 포함) 시점을 `log_by_lua`에서 계산하므로, 루트 span duration이 기존 `latency_ms`와 정확히 일치한다. `header_filter_by_lua`는 응답 헤더 전송 시점이므로 streaming/chunked 응답에서 body 전송 시간이 빠져 부적합하다.
 - **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy)
 - **FFI 호출 span**: security_scan child 내에 scanner/decoder FFI 호출 span 포함
-- **log_by_lua 역할**: 루트 span 종료는 `header_filter_by_lua`에서 이미 수행됨. `log_by_lua`에서는 완료된 span을 worker-local 버퍼에 추가만 한다.
-- **outbound traceparent 주입**: `access_by_lua` 단계에서 `ngx.req.set_header("traceparent", ...)`로 업스트림 요청 헤더에 설정한다. 이는 `proxy_pass` 전에 실행되므로 Nginx가 헤더를 업스트림에 전달한다.
+- **proxy child span**: `access_by_lua` 종료 시점에 시작, `log_by_lua`에서 `$upstream_response_time` 기반으로 종료 시각을 역산하여 기록. 이를 통해 proxy span은 업스트림 왕복 시간을 정확히 반영한다.
+- **outbound traceparent 주입**: `access_by_lua` 단계에서 proxy child span을 생성한 뒤, 해당 span의 `span_id`를 parent로 하여 `ngx.req.set_header("traceparent", "00-<trace_id>-<proxy_span_id>-<flags>")`를 설정한다. 이렇게 하면 업스트림 서비스의 span이 proxy child의 자식으로 올바르게 연결된다.
 
 ### 3. Export 방식: OTLP/HTTP (JSON)
 
@@ -125,10 +125,10 @@ tracing:
 
 | 필드 | 형식 | 생성 시점 | 용도 |
 |------|------|----------|------|
-| `request_id` | UUID v4 (36자) | `rewrite_by_lua` | 내부 로그 상관, `X-Request-ID` 헤더 |
+| `request_id` | string (클라이언트 `X-Request-ID` 또는 Nginx `$request_id`) | `rewrite_by_lua` | 내부 로그 상관, `X-Request-ID` 응답 헤더 |
 | `trace_id` | W3C 32자 hex | `rewrite_by_lua` (inbound 없을 때 생성) | 분산 트레이싱 |
 
-- `request_id`를 `trace_id`로 **승격하지 않는다**. 형식이 다르고 (UUID v4 vs 32-hex), 기존 로그 소비자와의 호환성을 유지해야 한다.
+- `request_id`를 `trace_id`로 **승격하지 않는다**. `request_id`는 클라이언트가 전달한 값일 수 있어 형식이 보장되지 않으며 (UUID v4가 아닐 수 있음), `trace_id`는 반드시 W3C 128-bit hex 형식이어야 한다. 기존 로그 소비자와의 호환성도 유지해야 한다.
 - span attribute `luagate.request_id`로 매핑하여 로그-트레이스 상관을 지원한다.
 - access.log에 `trace_id`, `span_id` 필드를 NULLABLE로 추가한다 (트레이싱 비활성화 또는 미샘플 시 null).
 
@@ -138,14 +138,17 @@ tracing:
 [inbound]  traceparent: 00-<trace_id>-<parent_span_id>-<flags>
                               │
 [LuaGate]  rewrite_by_lua: parse traceparent → 루트 span 생성
-           access_by_lua:   child spans + ngx.req.set_header("traceparent", ...)
+           access_by_lua:   child spans 생성 → proxy child span의 span_id로
+                            ngx.req.set_header("traceparent", "00-<trace_id>-<proxy_span_id>-<flags>")
            proxy_pass:      Nginx가 설정된 traceparent 헤더를 upstream에 전달
                               │
-[upstream] traceparent: 00-<trace_id>-<luagate_span_id>-<flags>
+[upstream] traceparent: 00-<trace_id>-<proxy_span_id>-<flags>
+           → upstream span은 proxy child의 자식으로 연결됨
 ```
 
 - inbound `traceparent` 없으면 새 trace_id 생성
-- outbound `traceparent`는 `access_by_lua`에서 `ngx.req.set_header()`로 주입 (proxy_pass 전에 실행되므로 Nginx가 자동 전달)
+- outbound `traceparent`는 **proxy child span의 `span_id`**를 parent로 설정. 루트 `span_id`가 아닌 proxy span을 사용하여, 업스트림 서비스의 span이 트리 상에서 proxy의 자식으로 올바르게 위치한다
+- `access_by_lua`에서 `ngx.req.set_header()`로 주입 (proxy_pass 전에 실행되므로 Nginx가 자동 전달)
 - `tracestate` 헤더는 pass-through (수정 없이 전달)
 - `X-Request-ID` 헤더는 기존대로 유지 (별도)
 
@@ -219,7 +222,6 @@ access.log에 2개 NULLABLE 필드 추가:
 2. log-schema.md에 `trace_id`, `span_id` 필드 추가
 3. `init_worker_by_lua`에서 exporter 초기화 + `ngx.timer.every` flush 타이머 등록
 4. `rewrite_by_lua`에서 trace context 초기화 + 루트 span 시작
-5. `access_by_lua`에서 child span 생성 + outbound `traceparent` 헤더 주입
-6. `header_filter_by_lua`에서 루트 span 종료 (latency_ms와 일치)
-7. `log_by_lua`에서 완료된 span을 worker-local 버퍼에 추가
-8. docker-compose.yml에 Jaeger/OTLP collector 개발용 서비스 추가
+5. `access_by_lua`에서 child span 생성 (policy_eval, security_scan, proxy) + proxy span_id로 outbound `traceparent` 헤더 주입
+6. `log_by_lua`에서 루트 span 종료 (latency_ms = $request_time과 일치) + 완료된 span을 worker-local 버퍼에 추가
+7. docker-compose.yml에 Jaeger/OTLP collector 개발용 서비스 추가
