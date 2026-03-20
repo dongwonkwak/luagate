@@ -8,6 +8,23 @@
             "type": "command",
             "command": ".claude/hooks/pre-pr-test-gate.sh",
             "timeout": 300
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-review-check.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-implement-verify.sh",
+            "timeout": 300
           }
         ]
       }
