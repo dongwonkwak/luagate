@@ -120,7 +120,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 - `access_by_lua`에서 allow 판정된 요청만 도달
 - Nginx `proxy_pass` 지시자로 업스트림 서버에 프록시
 - 업스트림 latency 측정: `$upstream_response_time`
-- 헤더 전달: `X-Request-ID`, `X-Forwarded-For`, `X-Real-IP`, `traceparent`, `tracestate` ([ADR-010](../design/adr/ADR-010-opentelemetry-tracing.md) — 트레이싱 비활성화 시 traceparent/tracestate 미전달)
+- 헤더 전달: `Host`, `X-Request-ID`, `X-Forwarded-For`, `X-Real-IP` (`conf/nginx.conf`의 `proxy_set_header` 기준)
 
 ### 2.5 log_by_lua (요청 완료 후 비동기 로그)
 
