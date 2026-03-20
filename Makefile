@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr
+.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream up down implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr storybook storybook-build
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -176,6 +176,15 @@ ui-lint:
 ui-test:
 	@echo "==> Running UI unit tests (Vitest)..."
 	cd ui && npm run test
+
+# ── Storybook ─────────────────────────────────────────────────────────────
+storybook:
+	@echo "==> Starting Storybook dev server (localhost:6006)..."
+	cd ui && npm run storybook
+
+storybook-build:
+	@echo "==> Building Storybook static site..."
+	cd ui && npm run build-storybook
 
 # ── E2E (Playwright) ──────────────────────────────────────────────────────
 e2e:

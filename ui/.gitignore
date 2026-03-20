@@ -3,3 +3,5 @@ dist/
 .vite/
 *.local
 *.tsbuildinfo
+storybook-static/
+coverage/
