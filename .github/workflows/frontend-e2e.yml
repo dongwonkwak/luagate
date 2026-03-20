@@ -1,0 +1,109 @@
+name: Frontend E2E Tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.changes.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            e2e:
+              - 'ui/**'
+              - 'e2e/**'
+              - 'conf/**'
+              - 'policies/**'
+              - 'docker-compose.yml'
+              - 'docker-compose.test.yml'
+              - 'Dockerfile'
+              - 'Dockerfile.test'
+              - 'Makefile'
+              - 'lua/luagate/**'
+              - 'src/**'
+              - '.github/workflows/frontend-*.yml'
+
+  e2e:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build cached test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: luagate:test
+          cache-from: type=gha,scope=frontend-e2e
+          cache-to: type=gha,mode=max,scope=frontend-e2e
+
+      - name: Start LuaGate server
+        run: |
+          docker run -d --name luagate-e2e \
+            --network host \
+            -v ${{ github.workspace }}/policies/luagate.yaml:/conf/policies.yaml:ro \
+            -v ${{ github.workspace }}/conf/scanner-patterns:/conf/scanner-patterns:ro \
+            -e LUAGATE_ADMIN_TOKEN=test-e2e-token-for-ci-playwright-runner \
+            -e LUAGATE_ENV=development \
+            luagate:test
+          timeout 90 bash -c 'until curl -sf http://localhost:9090/health; do sleep 2; done' || {
+            echo "=== Container logs ===" >&2
+            docker logs luagate-e2e >&2
+            exit 1
+          }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - run: npm ci
+        working-directory: e2e
+
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+
+      - run: npx playwright test --reporter=github,html
+        working-directory: e2e
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:9090/dashboard
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+
+      - name: Stop services
+        if: always()
+        run: docker rm -f luagate-e2e || true
+
+  frontend-e2e-status:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, e2e]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [[ "${{ needs.detect-changes.result }}" == "failure" ]]; then
+            echo "detect-changes failed"
+            exit 1
+          fi
+          if [[ "${{ needs.e2e.result }}" == "failure" || "${{ needs.e2e.result }}" == "cancelled" ]]; then
+            echo "e2e tests failed or cancelled"
+            exit 1
+          fi
