@@ -18,3 +18,10 @@
 ## 3차 리뷰 (2026-03-20)
 
 미해결 항목 없음
+
+---
+
+## 4차 리뷰 (2026-03-20)
+
+- [x] [post-implement-verify.sh] `set -euo pipefail` 하에서 lint 실패 시 test-unit이 실행되지 않음. → 수정: lint와 test-unit을 독립 서브셸로 분리, 각각 실행 후 결과 집계.
+- [x] [post-implement-verify.sh] `.yml` 누락으로 docker-compose.yml, conf/alerts.yml 변경 감지 불가. → 수정: FILE_PATTERN에 `yml` 추가.
