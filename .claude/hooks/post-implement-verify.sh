@@ -5,12 +5,19 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
+FILE_PATTERN='\.(lua|rs|conf|yaml|sh|json|ts|tsx)$'
+
 # Check if there are uncommitted code changes worth verifying
-CODE_CHANGES=$(cd "$repo_root" && git diff --name-only HEAD 2>/dev/null | grep -E '\.(lua|rs|conf|yaml)$' || true)
+CODE_CHANGES=$(cd "$repo_root" && git diff --name-only HEAD 2>/dev/null | grep -E "$FILE_PATTERN" || true)
 
 if [ -z "$CODE_CHANGES" ]; then
   # Also check staged changes
-  CODE_CHANGES=$(cd "$repo_root" && git diff --cached --name-only 2>/dev/null | grep -E '\.(lua|rs|conf|yaml)$' || true)
+  CODE_CHANGES=$(cd "$repo_root" && git diff --cached --name-only 2>/dev/null | grep -E "$FILE_PATTERN" || true)
+fi
+
+if [ -z "$CODE_CHANGES" ]; then
+  # Also check untracked new files
+  CODE_CHANGES=$(cd "$repo_root" && git ls-files --others --exclude-standard 2>/dev/null | grep -E "$FILE_PATTERN" || true)
 fi
 
 if [ -z "$CODE_CHANGES" ]; then
