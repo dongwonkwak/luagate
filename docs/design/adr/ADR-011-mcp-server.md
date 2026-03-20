@@ -89,7 +89,7 @@ AI 코딩 에이전트와 IDE 통합(Claude Desktop, VS Code 등)이 확산되�
 | `luagate_get_policies` | GET /api/v1/policies | 정책 YAML + ETag 조회 |
 | `luagate_get_policy_versions` | GET /api/v1/policies/version | 현재 시점 버전 스냅샷 조회 (source_version, active_http_version, active_stream_version) |
 | `luagate_get_status` | GET /api/v1/status | 상태 + active_version + worker 수 |
-| `luagate_validate_policies` | PUT /api/v1/policies?dry_run=true | Dry-run: 문법/충돌 검증만, 적용 안 함 (**Admin API 확장 필요** — DON-191에서 구현) |
+| `luagate_validate_policies` | PUT /api/v1/policies?dry_run=true | Dry-run: 문법/충돌 검증만, 적용 안 함 (DON-208에서 구현 완료 — [admin-api.md §6.5.1](../../spec/admin-api.md)) |
 | `luagate_update_policies` | PUT /api/v1/policies | 정책 업데이트 (`expected_source_version` 필수, MCP 서버는 이를 `If-Match` 헤더로 변환) |
 | `luagate_rollback_policies` | PUT /api/v1/policies (이전 YAML + expected_source_version) | 이전 버전 YAML로 복원 (**기존 PUT 재사용**, `expected_source_version`은 `If-Match` 헤더로 변환, 이전 YAML은 클라이언트 세션 캐시 또는 향후 버전 이력 API에서 확보) |
 | `luagate_reload` | POST /api/v1/policies/reload | Hot reload (운영 복구용) |
@@ -173,7 +173,7 @@ Python FastMCP로 구현.
 
 ### 향후 과제
 
-- `luagate_validate_policies` dry-run 엔드포인트 Admin API에 추가 (현재 미존재)
+- ~~`luagate_validate_policies` dry-run 엔드포인트 Admin API에 추가~~ → DON-208에서 구현 완료
 - Streamable HTTP transport 구현 (원격 접근 필요 시)
 - MCP Resources 노출 검토 (정책 YAML을 Resource로 노출)
 

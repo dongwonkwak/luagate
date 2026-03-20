@@ -910,7 +910,7 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     assert.are.equal("version_mismatch", body.error)
   end)
 
-  it("returns 422 on parse failure", function()
+  it("returns 422 on parse failure with details", function()
     _parser_result = nil
     _parser_err = "YAML syntax error at line 42"
     policies = load_policies()
@@ -923,9 +923,11 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     local body = dkjson.decode(said[1])
     assert.are.equal("validation_failed", body.error)
     assert.are.equal("validate", body.stage)
+    assert.is_table(body.details)
+    assert.truthy(body.details[1]:find("parse error"))
   end)
 
-  it("returns 422 on validation failure", function()
+  it("returns 422 on validation failure with details", function()
     _validator_ok = nil
     _validator_err = "rule 'my-rule': action must be 'allow' or 'deny'"
     policies = load_policies()
@@ -937,6 +939,8 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
     assert.are.equal("validation_failed", body.error)
+    assert.is_table(body.details)
+    assert.truthy(body.details[1]:find("action must be"))
   end)
 
   it("reports conflicts as warnings (not 422)", function()
@@ -967,15 +971,19 @@ describe("PUT /api/v1/policies?dry_run=true", function()
   end)
 
   it("does not call loader.load_policy", function()
-    -- If load_policy were called, it would try to load from a temp file
-    -- that doesn't exist. Success means it was never called.
+    local load_policy_called = false
+    local loader_mod = require("luagate.policy.loader")
+    local original_load = loader_mod.load_policy
+    loader_mod.load_policy = function(...)
+      load_policy_called = true
+      return original_load(...)
+    end
+
     policies.handle_put_policies()
 
+    loader_mod.load_policy = original_load
     assert.are.equal(200, _G.ngx.status)
-    local said = _G.ngx._get_said()
-    local dkjson = require("dkjson")
-    local body = dkjson.decode(said[1])
-    assert.is_true(body.dry_run)
+    assert.is_false(load_policy_called, "loader.load_policy must not be called during dry_run")
   end)
 end)
 

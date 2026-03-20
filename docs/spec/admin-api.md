@@ -104,7 +104,7 @@ Retry-After: 42
 
 | 엔드포인트 | 동작 | If-Match |
 | --- | --- | --- |
-| `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`<source_version>` 형식 — `GET /api/v1/policies` ETag와 동일) |
+| `PUT /api/v1/policies` | source 저장(canonical file write) + validate + commit까지 **전체 파이프라인** | **필수** (`<source_version>` 형식 — `GET /api/v1/policies` ETag와 동일). `?dry_run=true` 시 선택 (§6.5.1) |
 | `POST /api/v1/policies/reload` | 현재 canonical file에서 reload 트리거만 | 선택 (`<http_active_version>` 형식) |
 
 > **PUT /api/v1/policies**: 저장 + validate + conflict_detect + compile + commit을 한 번에 수행한다.
@@ -117,8 +117,8 @@ Retry-After: 42
 - `GET /api/v1/policies` 응답에 `ETag: "<source_version>"` 포함
   - `source_version`은 canonical source 파일(conf/policies.yaml) 전체 raw bytes의 SHA256이다.
   - 응답 본문이 canonical source 파일을 그대로 반환하므로, ETag validator는 `source_version` 기준이다.
-- `PUT /api/v1/policies` 요청에 `If-Match: "<source_version>"` 필수 (`GET /api/v1/policies` ETag와 동일 기준)
-  - 불일치 시 → `409 Conflict` + `error: "version_mismatch"`
+- `PUT /api/v1/policies` 요청에 `If-Match: "<source_version>"` 필수 (`GET /api/v1/policies` ETag와 동일 기준). 예외: `?dry_run=true` 시 생략 가능 (§6.5.1)
+  - 불일치 시 → `409 Conflict` + `error: "version_mismatch"` (dry_run에서도 제공 시 동일 검증)
 - `POST /api/v1/policies/reload`에 `If-Match` 선택. 제공 시 `http:active_version`과 비교하여 불일치이면 `409 Conflict`
   - 불일치 시 → `error: "version_mismatch"`
 - **ETag / If-Match 기준값 분리**:
