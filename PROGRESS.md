@@ -301,3 +301,4 @@ append-only 구현 일지. 각 이슈 완료 시 아래 형식으로 추가한�
 | 2026-03-19 | DON-158 | React 관리 대시보드 UI 구현 | `ui/src/pages/`, `ui/src/hooks/`, `ui/src/components/`, `ui/src/types/` | Login, SystemStatus, PolicyEditor(Monaco), Metrics(Recharts), AuditLog(Soon). Codex 리뷰 5회. PR #57 |
 | 2026-03-19 | DON-172 | Docker Compose UI 서비스 + .env.example | `docker-compose.yml`, `conf/nginx.conf`, `.env.example` | nginx 0.0.0.0 + 고정 subnet, LUAGATE_ADMIN_TOKEN 필수. Codex 리뷰 3회. PR #55 |
 | 2026-03-19 | DON-191 | MCP 서버 구현 — Admin API를 MCP tools로 노출 | `mcp/` (TypeScript sidecar, 7 tools, stdio transport) | ADR-011 기반. 후속: DON-208(dry-run), DON-209(audit 통합). Codex 리뷰 4회. PR #56 |
+| 2026-03-20 | DON-194 | Claude Code Hooks 설정 | `.claude/hooks/post-implement-verify.sh`, `.claude/hooks/pre-review-check.sh`, `.claude/settings.json`, `scripts/check-pending-review.sh`, `tests/scripts/test_hooks.sh` | Codex 4차 리뷰 완료. 25/25 테스트 통과 |
