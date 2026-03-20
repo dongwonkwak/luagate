@@ -68,7 +68,7 @@
 - **루트 span**: `rewrite_by_lua`에서 생성하되 시작 시각을 `ngx.req.start_time()`으로 backdate한다 (요청 수신 시각). `log_by_lua`에서 종료. 이를 통해 루트 span duration이 `latency_ms` (`$request_time` = 요청 수신 ~ 응답 전송 완료)와 일치한다. `header_filter_by_lua`는 응답 헤더 전송 시점이므로 streaming/chunked 응답에서 body 전송 시간이 빠져 부적합하다.
 - **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy)
 - **FFI 호출 span**: security_scan child 내에 scanner/decoder FFI 호출 span 포함
-- **proxy child span**: `access_by_lua` 종료 시점에 시작, `log_by_lua`에서 `$upstream_response_time` 기반으로 종료 시각을 역산하여 기록. 이를 통해 proxy span은 업스트림 왕복 시간을 정확히 반영한다.
+- **proxy child span**: `access_by_lua` 종료 시점의 타임스탬프를 시작 시각으로 기록한다. 종료 시각은 `$upstream_response_time`이 아닌, `log_by_lua`에서 `ngx.now() - $request_time + proxy_start_offset`으로 계산한다. 이를 통해 proxy span은 `access_by_lua` 종료부터 Nginx가 upstream 응답을 수신 완료할 때까지의 전체 구간을 반영하며, retry/failover가 발생해도 단일 span으로 총 소요 시간을 정확히 기록한다. `$upstream_response_time`은 span attribute `luagate.upstream_response_time`으로 별도 보존한다 (attempt별 디버깅 용도).
 - **upstream retry/failover**: Nginx가 retry/failover를 수행하면 `$upstream_response_time`이 쉼표 구분 다중 값이 될 수 있다 (예: `"0.5, 1.2"`). 이 경우 **단일 proxy span으로 합산**한다 — 전체 upstream 소요 시간(마지막 값의 종료 시점)을 proxy span duration으로 기록하고, attempt 횟수를 span attribute `luagate.upstream_attempts`로 남긴다. attempt별 개별 span 생성은 Phase 2 이후 범위로 둔다. outbound `traceparent`의 `span_id`는 최초 attempt 시점에 생성한 proxy span의 ID를 사용하며, retry 시에도 동일한 `span_id`를 전달한다 (upstream 관점에서 같은 parent).
 - **upstream 실패 (connect/DNS 등)**: `$upstream_response_time`이 빈 문자열 또는 nil인 경우 (connect 실패, DNS 해석 실패 등), proxy span을 `log_by_lua` 시점에서 즉시 종료한다. 이때 span에 `otel.status_code=ERROR`, `error.type=upstream_connect_failure`, `http.response.status_code=502` 등 에러 attribute를 설정한다. duration은 proxy span 시작 ~ log_by_lua 시점으로 기록한다 (실제 대기 시간 반영).
 - **outbound traceparent 주입**: `access_by_lua` 단계에서 proxy child span을 생성한 뒤, 해당 span의 `span_id`를 parent로 하여 `ngx.req.set_header("traceparent", "00-<trace_id>-<proxy_span_id>-<flags>")`를 설정한다. 이렇게 하면 업스트림 서비스의 span이 proxy child의 자식으로 올바르게 연결된다.
@@ -185,8 +185,13 @@ tracing:
 - outbound `traceparent`는 **proxy child span의 `span_id`**를 parent로 설정. 루트 `span_id`가 아닌 proxy span을 사용하여, 업스트림 서비스의 span이 트리 상에서 proxy의 자식으로 올바르게 위치한다
 - `access_by_lua`에서 `ngx.req.set_header()`로 주입 (proxy_pass 전에 실행되므로 Nginx가 자동 전달)
 - **`tracestate` 헤더 처리**:
-  - inbound `traceparent`가 **있는** 경우: `tracestate`를 수정 없이 pass-through (기존 trace 연속)
-  - inbound `traceparent`가 **없는** 경우 (새 trace 생성): inbound `tracestate`가 있더라도 **전달하지 않는다** (stale state 전파 방지). 새 trace에는 `tracestate`를 설정하지 않거나 빈 값으로 초기화한다
+  - inbound `traceparent`가 **유효하게 있는** 경우: inbound `tracestate`를 수정 없이 pass-through (기존 trace 연속)
+  - inbound `traceparent`가 **없는** 경우 (새 trace 생성): outbound `tracestate` 헤더를 **설정하지 않는다** (`ngx.req.clear_header("tracestate")`로 제거). stale state 전파 방지
+- **malformed `traceparent` 처리** (W3C Trace Context Level 1 §2.2.5 준수):
+  - 파싱 실패 (잘못된 형식, 미지원 version, 유효하지 않은 trace-id/span-id): inbound 헤더를 **무시**하고 새 trace를 시작한다. 에러 로그를 남기지 않는다 (외부 클라이언트가 임의 값을 보낼 수 있으므로 노이즈 방지)
+  - all-zero trace-id (`00000000000000000000000000000000`) 또는 all-zero span-id (`0000000000000000`): W3C 스펙상 무효 — 새 trace를 시작한다
+  - duplicate `traceparent`: 첫 번째 값만 사용 (HTTP 표준에 따라)
+  - malformed/invalid `tracestate`: 해당 헤더를 **드롭**하고 outbound에 전달하지 않는다
 - `X-Request-ID` 헤더는 기존대로 유지 (별도)
 
 ---
