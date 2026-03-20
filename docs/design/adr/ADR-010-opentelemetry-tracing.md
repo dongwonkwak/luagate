@@ -25,7 +25,7 @@
 
 ### 현재 상태
 
-1. `request_id`: `rewrite_by_lua`에서 결정 (클라이언트 `X-Request-ID` 헤더 우선, 없으면 Nginx `$request_id` fallback), access.log에 기록
+1. `request_id`: `rewrite_by_lua`에서 생성 (Nginx `$request_id` 또는 Lua UUID v4 fallback — logging-contract.md §Correlation ID 참조), access.log에 기록. `X-Request-ID`는 응답 헤더로 전달하는 용도이며 클라이언트 입력을 수용하지 않는다
 2. 외부 트레이싱 시스템 연동: 없음 (OTLP exporter 미존재)
 3. upstream 전파: `X-Request-ID` 헤더만 전달, W3C Trace Context 미지원
 4. 내부 단계별 소요 시간 측정: 없음
@@ -125,12 +125,26 @@ tracing:
 
 | 필드 | 형식 | 생성 시점 | 용도 |
 |------|------|----------|------|
-| `request_id` | string (클라이언트 `X-Request-ID` 또는 Nginx `$request_id`) | `rewrite_by_lua` | 내부 로그 상관, `X-Request-ID` 응답 헤더 |
+| `request_id` | string (Nginx `$request_id` 또는 Lua UUID v4) | `rewrite_by_lua` | 내부 로그 상관, `X-Request-ID` 응답 헤더 |
 | `trace_id` | W3C 32자 hex | `rewrite_by_lua` (inbound 없을 때 생성) | 분산 트레이싱 |
 
-- `request_id`를 `trace_id`로 **승격하지 않는다**. `request_id`는 클라이언트가 전달한 값일 수 있어 형식이 보장되지 않으며 (UUID v4가 아닐 수 있음), `trace_id`는 반드시 W3C 128-bit hex 형식이어야 한다. 기존 로그 소비자와의 호환성도 유지해야 한다.
+- `request_id`를 `trace_id`로 **승격하지 않는다**. `request_id`는 Nginx `$request_id` (32-hex) 또는 Lua UUID v4 형식이며, `trace_id`는 반드시 W3C 128-bit hex (32자) 형식이어야 한다. 형식이 유사하지만 생성 경로와 의미가 다르므로 별도 유지한다. 기존 로그 소비자와의 호환성도 유지해야 한다.
 - span attribute `luagate.request_id`로 매핑하여 로그-트레이스 상관을 지원한다.
 - access.log에 `trace_id`, `span_id` 필드를 NULLABLE로 추가한다 (트레이싱 비활성화 또는 미샘플 시 null).
+
+### Span Attribute Redaction (ADR-007 연동)
+
+트레이스 백엔드로 전송되는 span attribute에도 ADR-007의 PII redaction 규칙을 동일하게 적용한다. access.log가 안전해도 trace 경로로 raw 데이터가 우회 유출되는 것을 방지한다.
+
+| span attribute | redaction 규칙 |
+|---------------|---------------|
+| `http.url` | query_string에 ADR-007 §2 민감 파라미터 마스킹 적용 (`token=***` 등) |
+| `http.request.header.authorization` | **수집 금지** — span attribute에 포함하지 않음 |
+| `http.request.header.cookie` | **수집 금지** — span attribute에 포함하지 않음 |
+| `http.request.header.x-api-key` | **수집 금지** — span attribute에 포함하지 않음 |
+| `luagate.deny_reason` | 그대로 포함 (PII 아님, 정책 판정 사유) |
+
+> **원칙**: span attribute 화이트리스트 방식 — §2에 정의된 attribute만 수집하며, 임의의 HTTP 헤더를 span에 포함하지 않는다. 이를 통해 redaction 누락으로 인한 데이터 유출을 구조적으로 방지한다.
 
 ### 7. W3C Trace Context 전파
 
@@ -149,7 +163,9 @@ tracing:
 - inbound `traceparent` 없으면 새 trace_id 생성
 - outbound `traceparent`는 **proxy child span의 `span_id`**를 parent로 설정. 루트 `span_id`가 아닌 proxy span을 사용하여, 업스트림 서비스의 span이 트리 상에서 proxy의 자식으로 올바르게 위치한다
 - `access_by_lua`에서 `ngx.req.set_header()`로 주입 (proxy_pass 전에 실행되므로 Nginx가 자동 전달)
-- `tracestate` 헤더는 pass-through (수정 없이 전달)
+- **`tracestate` 헤더 처리**:
+  - inbound `traceparent`가 **있는** 경우: `tracestate`를 수정 없이 pass-through (기존 trace 연속)
+  - inbound `traceparent`가 **없는** 경우 (새 trace 생성): inbound `tracestate`가 있더라도 **전달하지 않는다** (stale state 전파 방지). 새 trace에는 `tracestate`를 설정하지 않거나 빈 값으로 초기화한다
 - `X-Request-ID` 헤더는 기존대로 유지 (별도)
 
 ---
@@ -208,9 +224,11 @@ access.log에 2개 NULLABLE 필드 추가:
 
 **Worker Shutdown 정책**: Nginx worker가 종료(graceful shutdown, hot reload에 의한 교체)될 때 `ngx.timer.every` 콜백은 `premature=true`로 호출된다. 이 시점에서 best-effort final flush를 수행한다:
 
-1. `premature=true` 감지 시 버퍼에 남은 span을 즉시 OTLP/HTTP POST 시도 (cosocket 사용 가능)
+1. `premature=true` 감지 시 버퍼에 남은 span을 즉시 OTLP/HTTP POST 시도
 2. flush 실패 시 span을 드롭하고 `luagate_tracing_spans_dropped_total` 메트릭을 증가
 3. 손실 범위: 마지막 flush 이후 ~ shutdown 사이의 최대 `flush_interval_ms` (5초) 분량. 1% 샘플링 기준 무시할 수준
+
+**premature 콜백에서 cosocket 사용 가능성**: OpenResty `ngx.timer.at`/`ngx.timer.every`의 premature 콜백에서도 cosocket(TCP/UDP)은 사용 가능하다. OpenResty 문서에 따르면 timer 콜백은 "가벼운 스레드(light thread)" 컨텍스트에서 실행되며 cosocket API가 완전히 지원된다. `premature=true`는 worker 종료 신호일 뿐 API 제약을 추가하지 않는다. 단, worker shutdown timeout(`worker_shutdown_timeout` 지시자) 내에 완료해야 하므로 `export_timeout_ms`를 이 값보다 짧게 설정해야 한다.
 
 이는 의도된 trade-off이다. 트레이싱은 관측성 기능이므로 완전한 무손실을 보장하지 않는다 (fail-open 원칙).
 
