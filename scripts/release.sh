@@ -15,6 +15,10 @@ if ! git diff --quiet 2>/dev/null; then
   echo "Error: working tree has uncommitted changes. Commit or stash first." >&2
   exit 1
 fi
+if [ -n "$(git status --porcelain --untracked-files=normal 2>/dev/null | grep '^?? ' || true)" ]; then
+  echo "Error: working tree has untracked files. Add, ignore, or remove them first." >&2
+  exit 1
+fi
 
 # 태그 중복 확인
 if git rev-parse "$TAG" >/dev/null 2>&1; then
