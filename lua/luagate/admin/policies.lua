@@ -101,7 +101,7 @@ local function extract_mcp_metadata()
     client_name = mcp_client,
     tool_name = headers["X-MCP-Tool"],
     session_id = headers["X-MCP-Session-Id"],
-    request_id = headers["X-Request-Id"],
+    request_id = headers["X-Request-ID"],
   }
 end
 

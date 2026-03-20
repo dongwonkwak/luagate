@@ -417,7 +417,7 @@ MCP 서버를 통한 Admin API 호출 시, 모든 감사 로그 이벤트에 아
 | `client_name` | string | NULLABLE | MCP only | `X-MCP-Client` 헤더값. 일반 API 호출 시 필드 생략 |
 | `tool_name` | string | NULLABLE | MCP only | `X-MCP-Tool` 헤더값. 일반 API 호출 시 필드 생략 |
 | `session_id` | string | NULLABLE | MCP only | `X-MCP-Session-Id` 헤더값. 일반 API 호출 시 필드 생략 |
-| `request_id` | string | NULLABLE | MCP only | `X-Request-Id` 헤더값. 일반 API 호출 시 필드 생략 |
+| `request_id` | string | NULLABLE | MCP only | `X-Request-ID` 헤더값. 일반 API 호출 시 필드 생략 |
 
 > **하위 호환성**: `X-MCP-Client` 헤더가 없는 기존 API 호출은 `actor_type: "api"`만 추가되며,
 > MCP 전용 필드는 생략된다.

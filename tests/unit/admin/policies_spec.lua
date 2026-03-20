@@ -1239,7 +1239,7 @@ describe("MCP metadata in audit logs", function()
         ["X-MCP-Client"] = "claude-desktop",
         ["X-MCP-Tool"] = "luagate_update_policies",
         ["X-MCP-Session-Id"] = "sess-abc123",
-        ["X-Request-Id"] = "req-xyz789",
+        ["X-Request-ID"] = "req-xyz789",
       }
     end
     _G.ngx.req.get_method = function()

@@ -72,13 +72,31 @@ local function _reject(reason)
   -- Structured audit log: ADR-004 ss6.3 / log-schema.md ss5 auth_failure schema
   local actor_ip = ngx.var.remote_addr or "unknown"
   local path = ngx.var.uri or "unknown"
-  local audit_record = cjson.encode({
+  -- MCP metadata (ADR-011 §8): include actor_type in all audit events
+  local headers = ngx.req.get_headers()
+  local mcp_client = headers["X-MCP-Client"]
+  local mcp_fields = {}
+  if mcp_client then
+    mcp_fields.actor_type = "mcp"
+    mcp_fields.client_name = mcp_client
+    mcp_fields.tool_name = headers["X-MCP-Tool"]
+    mcp_fields.session_id = headers["X-MCP-Session-Id"]
+    mcp_fields.request_id = headers["X-Request-ID"]
+  else
+    mcp_fields.actor_type = "api"
+  end
+
+  local audit_data = {
     timestamp = ngx.utctime(),
     event = "auth_failure",
     actor_ip = actor_ip,
     path = path,
     reason = reason,
-  })
+  }
+  for k, v in pairs(mcp_fields) do
+    audit_data[k] = v
+  end
+  local audit_record = cjson.encode(audit_data)
   -- ERR level ensures capture in default error_log; "[luagate:audit]" prefix
   -- enables log routing to dedicated audit.log (grep/fluentd filter).
   ngx.log(ngx.ERR, "[luagate:audit] ", audit_record or '{"event":"auth_failure","reason":"' .. reason .. '"}')

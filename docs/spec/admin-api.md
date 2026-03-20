@@ -637,7 +637,7 @@ MCP 서버를 통한 요청 시 감사 로그에 추가 메타데이터가 기�
 | `client_name` | string | MCP only | `X-MCP-Client` 헤더값 (예: `"claude-desktop"`) |
 | `tool_name` | string | MCP only | `X-MCP-Tool` 헤더값 (예: `"luagate_update_policies"`) |
 | `session_id` | string | MCP only | `X-MCP-Session-Id` 헤더값 |
-| `request_id` | string | MCP only | `X-Request-Id` 헤더값 |
+| `request_id` | string | MCP only | `X-Request-ID` 헤더값 |
 
 **MCP 호출 시 감사 로그 예시:**
 

@@ -54,12 +54,25 @@ end
 -- Token values are NEVER logged (ADR-004 ss6.2).
 -- Returns true on success, false on failure (audit-first: failure = reject mutation).
 local function audit_log(event, actor_ip)
-  local record = cjson.encode({
+  -- MCP metadata (ADR-011 §8): include actor_type in all audit events
+  local headers = ngx.req.get_headers()
+  local mcp_client = headers["X-MCP-Client"]
+  local audit_data = {
     timestamp = ngx.utctime(),
     event = event,
     actor_ip = actor_ip or ngx.var.remote_addr or "unknown",
     path = "/api/v1/admin/token/rotate",
-  })
+  }
+  if mcp_client then
+    audit_data.actor_type = "mcp"
+    audit_data.client_name = mcp_client
+    audit_data.tool_name = headers["X-MCP-Tool"]
+    audit_data.session_id = headers["X-MCP-Session-Id"]
+    audit_data.request_id = headers["X-Request-ID"]
+  else
+    audit_data.actor_type = "api"
+  end
+  local record = cjson.encode(audit_data)
   if not record then
     ngx.log(ngx.ERR, "[luagate] audit log encode failed for event: ", event)
     return false
