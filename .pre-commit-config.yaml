@@ -10,6 +10,7 @@ repos:
         args: ["--maxkb=500"]
       - id: check-yaml
         files: \.(yaml|yml)$
+        exclude: ^helm/.*/templates/
       - id: no-commit-to-branch
         args: ["--branch", "main"]
 

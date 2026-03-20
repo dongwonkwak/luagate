@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "luagate.fullname" . }}
+  labels:
+    {{- include "luagate.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "luagate.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "luagate.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+            - name: admin
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: LUAGATE_ENV
+              value: {{ .Values.env | quote }}
+            - name: LUAGATE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "luagate.fullname" . }}
+                  key: admin-token
+            - name: LUAGATE_TRACE_SAMPLE_RATE
+              value: {{ .Values.traceSampleRate | quote }}
+          # Probes use HTTP data plane — Admin API is loopback-only (ADR-004 §6.3b)
+          # and kubelet source IP would be rejected by the nginx allowlist.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # Policy file must be writable — PUT /api/v1/policies uses os.rename()
+            - name: policies
+              mountPath: /conf
+      initContainers:
+        {{- if .Values.policies }}
+        # Seed canonical policy file from ConfigMap into the writable emptyDir
+        - name: policy-seed
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "cp /policy-src/policies.yaml /conf/policies.yaml"]
+          volumeMounts:
+            - name: policies
+              mountPath: /conf
+            - name: policy-src
+              mountPath: /policy-src
+              readOnly: true
+        {{- end }}
+      volumes:
+        # Writable volume for canonical policy file (supports PUT /api/v1/policies)
+        - name: policies
+          emptyDir: {}
+        {{- if .Values.policies }}
+        - name: policy-src
+          configMap:
+            name: {{ include "luagate.fullname" . }}-policies
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

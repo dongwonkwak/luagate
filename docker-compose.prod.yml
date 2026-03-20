@@ -1,0 +1,75 @@
+services:
+  # Init container: seed policies from host into writable volume on first run.
+  # The host file must use the canonical schema (top-level rules/stream_rules).
+  # Default: fail-closed (deny all) per policy-engine.md / ADR-002.
+  policy-seed:
+    image: luagate:${VERSION:-latest}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if [ ! -f /conf/policies.yaml ]; then
+          echo "Seeding default policies into /conf/policies.yaml..."
+          cat > /conf/policies.yaml <<'POLICY'
+        version: "1"
+        global:
+          default_action: deny
+          log_level: info
+        rules: []
+        stream_rules: []
+        POLICY
+        else
+          echo "Policies already exist, skipping seed."
+        fi
+    volumes:
+      - luagate_policies:/conf
+    restart: "no"
+
+  luagate:
+    image: luagate:${VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      policy-seed:
+        condition: service_completed_successfully
+    ports:
+      - "80:8080"
+      - "443:8443"
+      # Admin API NOT published to host — loopback-only per ADR-004 §6.3b.
+      # Use `docker exec` for admin access.
+    volumes:
+      # Policy file writable — PUT /api/v1/policies needs os.rename() on canonical file
+      - luagate_policies:/conf
+      - ./conf/scanner-patterns:/conf/scanner-patterns:ro
+      - luagate_logs:/var/log/luagate
+    environment:
+      - LUAGATE_ENV=production
+      - LUAGATE_ADMIN_TOKEN
+      - LUAGATE_TRACE_SAMPLE_RATE=0.01
+    healthcheck:
+      # Use HTTP data plane for healthcheck — Admin API is loopback-only
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    networks:
+      luagate-net:
+        ipv4_address: 172.29.0.2
+
+networks:
+  luagate-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1
+
+volumes:
+  luagate_policies:
+  luagate_logs:

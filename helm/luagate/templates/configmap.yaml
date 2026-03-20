@@ -1,0 +1,11 @@
+{{- if .Values.policies }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "luagate.fullname" . }}-policies
+  labels:
+    {{- include "luagate.labels" . | nindent 4 }}
+data:
+  policies.yaml: |
+    {{- .Values.policies | nindent 4 }}
+{{- end }}

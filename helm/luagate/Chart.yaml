@@ -1,0 +1,14 @@
+apiVersion: v2
+name: luagate
+description: LuaGate — OpenResty-based API gateway with policy engine
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - api-gateway
+  - openresty
+  - lua
+  - policy-engine
+home: https://github.com/dongwonkwak/luagate
+maintainers:
+  - name: dongwon

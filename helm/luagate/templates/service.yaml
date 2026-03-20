@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "luagate.fullname" . }}
+  labels:
+    {{- include "luagate.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.service.httpsPort }}
+      targetPort: https
+      protocol: TCP
+      name: https
+    # Admin API (9090) intentionally NOT exposed via Service.
+    # ADR-004 §6.3b: loopback-only. Use kubectl port-forward for admin access.
+  selector:
+    {{- include "luagate.selectorLabels" . | nindent 4 }}

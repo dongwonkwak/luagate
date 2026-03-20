@@ -1,0 +1,100 @@
+# -- Number of LuaGate replicas
+replicaCount: 1
+
+image:
+  # -- Container image repository
+  repository: luagate
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Image tag (defaults to Chart appVersion)
+  tag: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+# -- Admin API token (REQUIRED). Stored in a Kubernetes Secret.
+# LuaGate refuses to start if this is empty (fail-closed).
+# Set via: helm install --set adminToken=<your-secret-token>
+adminToken: ""
+
+# -- LuaGate environment (production, staging, development)
+env: production
+
+# -- OTLP trace sample rate (0.0 - 1.0)
+traceSampleRate: "0.01"
+
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- HTTP proxy port
+  httpPort: 8080
+  # -- HTTPS proxy port
+  httpsPort: 8443
+  # -- Admin API port
+  adminPort: 9090
+
+ingress:
+  # -- Enable ingress resource
+  enabled: false
+  # -- Ingress class name
+  className: ""
+  # -- Ingress annotations
+  annotations: {}
+  # -- Ingress hosts
+  hosts:
+    - host: luagate.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- Ingress TLS configuration
+  tls: []
+
+resources:
+  limits:
+    # -- CPU limit
+    cpu: "2"
+    # -- Memory limit
+    memory: 512Mi
+  requests:
+    # -- CPU request
+    cpu: 250m
+    # -- Memory request
+    memory: 128Mi
+
+autoscaling:
+  # -- Enable Horizontal Pod Autoscaler
+  enabled: false
+  # -- Minimum replicas
+  minReplicas: 1
+  # -- Maximum replicas
+  maxReplicas: 10
+  # -- Target CPU utilization (%)
+  targetCPUUtilizationPercentage: 80
+  # -- Target memory utilization (%)
+  targetMemoryUtilizationPercentage: 80
+
+# -- Policy file content (YAML string, seeded into /conf/policies.yaml).
+# Must conform to the LuaGate policy schema: top-level `version`, `global`,
+# `rules` (HTTP), and `stream_rules` keys.
+# Default: fail-closed (deny all) per policy-engine.md / ADR-002.
+# Override with --set-file policies=<your-policy.yaml> for custom rules.
+policies: |
+  version: "1"
+  global:
+    default_action: deny
+    log_level: info
+  rules: []
+  stream_rules: []
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
