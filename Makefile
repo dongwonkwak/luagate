@@ -94,15 +94,17 @@ lint:
 	markdownlint docs/
 
 # ── Benchmark ──────────────────────────────────────────────────────────────
-bench: bench-http bench-stream
+bench:
+	@echo "==> Running full benchmark suite..."
+	bash tests/bench/run-all.sh
 
 bench-http:
-	@echo "==> Running HTTP benchmark (wrk)..."
-	wrk -t4 -c100 -d30s http://localhost:8080/api/v1/users
+	@echo "==> Running HTTP allow benchmark (wrk)..."
+	bash tests/bench/http-allow.sh
 
 bench-stream:
-	@echo "==> Running Stream benchmark..."
-	@echo "  (Stream benchmark tool TBD)"
+	@echo "==> Running TCP stream benchmark..."
+	bash tests/bench/stream-tcp.sh
 
 # ── Docker ─────────────────────────────────────────────────────────────────
 up:
