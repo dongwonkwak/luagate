@@ -16,11 +16,14 @@ services:
       - ./policies:/etc/luagate/policies:ro
       - ./policies/luagate.yaml:/conf/policies.yaml:ro
       - ./conf/scanner-patterns:/conf/scanner-patterns:ro
+      - ./conf/luagate.yaml:/conf/luagate.yaml:ro
     environment:
       - LUAGATE_ENV=development
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:?Set LUAGATE_ADMIN_TOKEN in .env or environment}
+      - LUAGATE_TRACE_SAMPLE_RATE=1.0
     depends_on:
       - upstream-mock
+      - jaeger
     networks:
       - luagate-net
     restart: unless-stopped
@@ -64,6 +67,19 @@ services:
         ipv4_address: 172.29.0.10
     depends_on:
       - luagate
+    restart: unless-stopped
+
+  # ── Tracing (dev only, ADR-010) ────────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: luagate-jaeger
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - luagate-net
     restart: unless-stopped
 
   alertmanager:

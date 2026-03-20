@@ -222,6 +222,18 @@ function _M.rewrite()
     decoder_error = decoder_error,
     decoder_ffi_timeout = decoder_ffi_timeout,
   }
+
+  -- 8. Tracing: init trace context + root span (ADR-010 §2)
+  local ok_tracing, tracing = pcall(require, "luagate.tracing.init")
+  if ok_tracing and tracing.is_enabled() then
+    local trace_ctx = tracing.start_request_trace()
+    if trace_ctx then
+      ngx.ctx.luagate.trace = trace_ctx
+      -- Set nginx vars for log fields (always, regardless of sampling)
+      ngx.var.luagate_trace_id = trace_ctx.trace_id
+      ngx.var.luagate_span_id = trace_ctx.root_span.span_id
+    end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -482,6 +494,20 @@ function _M.access()
 
   -- 9. Allow: mark as completed; log phase will finalise request_state
   ctx.request_state = "completed"
+
+  -- 10. Tracing: create proxy child span + inject outbound traceparent (ADR-010 §2, §7)
+  local trace_ctx = ctx.trace
+  if trace_ctx then
+    local ok_tracing, tracing = pcall(require, "luagate.tracing.init")
+    if ok_tracing then
+      local proxy_span = tracing.start_child_span(trace_ctx, "proxy", "SPAN_KIND_CLIENT")
+      if proxy_span then
+        ctx.proxy_span = proxy_span
+        ctx.proxy_start_ts = ngx.now()
+        tracing.inject_outbound(trace_ctx, proxy_span)
+      end
+    end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -542,6 +568,47 @@ function _M.log_phase()
     end
   else
     ngx.log(ngx.ERR, "[luagate] failed to load metrics.collector: ", tostring(collector))
+  end
+
+  -- 4. Tracing: finish proxy span + root span, add to buffer (ADR-010 §2, §4)
+  if ctx then
+    local trace_ctx = ctx.trace
+    if trace_ctx then
+      local ok_tracing, tracing = pcall(require, "luagate.tracing.init")
+      if ok_tracing then
+        -- Finish proxy child span with upstream_response_time
+        local proxy_span = ctx.proxy_span
+        if proxy_span then
+          local upstream_rt = ngx.var.upstream_response_time
+          if upstream_rt and upstream_rt ~= "" and upstream_rt ~= "-" then
+            -- ADR-010 §2: handle comma-separated retry values
+            local total = 0
+            for val in upstream_rt:gmatch("[^,%s]+") do
+              total = total + (tonumber(val) or 0)
+            end
+            local span_mod = require("luagate.tracing.span")
+            span_mod.set_attribute(proxy_span, "luagate.upstream_response_time", upstream_rt)
+            local proxy_end_ns = (ctx.proxy_start_ts + total) * 1e9
+            span_mod.finish(proxy_span, proxy_end_ns)
+
+            -- Response status on proxy span
+            local proxy_status = tonumber(ngx.var.status) or 0
+            span_mod.set_attribute(proxy_span, "http.response.status_code", proxy_status)
+            if proxy_status >= 500 then
+              span_mod.set_error(proxy_span, tostring(proxy_status))
+            end
+          else
+            -- No upstream response (connect failure)
+            local span_mod = require("luagate.tracing.span")
+            span_mod.finish(proxy_span)
+            span_mod.set_error(proxy_span, "upstream_connect_failure")
+          end
+        end
+
+        -- Finish the entire request trace
+        tracing.finish_request_trace(trace_ctx)
+      end
+    end
   end
 end
 
