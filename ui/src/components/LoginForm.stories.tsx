@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { userEvent, within } from "@storybook/test";
 import { LoginPage } from "../pages/LoginPage";
 import {
   AppProviders,
@@ -46,6 +47,13 @@ export const InvalidToken: Story = {
       "/v1/policies/version": errorResponse(401, "Invalid token"),
     });
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText("Bearer Token");
+    await userEvent.type(input, "wrong-token");
+    const button = canvas.getByRole("button", { name: /login/i });
+    await userEvent.click(button);
+  },
 };
 
 export const ServerError: Story = {
@@ -54,5 +62,12 @@ export const ServerError: Story = {
     return mockFetch({
       "/v1/policies/version": errorResponse(500, "Internal Server Error"),
     });
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText("Bearer Token");
+    await userEvent.type(input, "any-token");
+    const button = canvas.getByRole("button", { name: /login/i });
+    await userEvent.click(button);
   },
 };
