@@ -74,6 +74,19 @@ describe("tracing.context", function()
       assert.is_nil(context.parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01"))
     end)
 
+    it("returns nil for unsupported version (e.g. ff)", function()
+      assert.is_nil(context.parse_traceparent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"))
+    end)
+
+    it("handles duplicate headers (table) by using first value", function()
+      local result = context.parse_traceparent({
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1-bbbbbbbbbbbbbbbb-00",
+      })
+      assert.is_not_nil(result)
+      assert.are.equal("4bf92f3577b34da6a3ce929d0e0e4736", result.trace_id)
+    end)
+
     it("lowercases trace_id and parent_id", function()
       local result = context.parse_traceparent("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
       assert.is_not_nil(result)

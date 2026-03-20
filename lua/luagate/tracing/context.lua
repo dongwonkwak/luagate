@@ -67,7 +67,7 @@ local ALL_ZERO_SPAN_ID = string.rep("0", 16)
 -- @param header string|nil  Raw traceparent header value
 -- @return table|nil  { trace_id, parent_id, sampled } or nil if invalid
 function _M.parse_traceparent(header)
-  if not header or type(header) ~= "string" then
+  if not header then
     return nil
   end
 
@@ -79,10 +79,20 @@ function _M.parse_traceparent(header)
     end
   end
 
+  if type(header) ~= "string" then
+    return nil
+  end
+
   -- Match: version(2hex)-trace_id(32hex)-parent_id(16hex)-flags(2hex)
   local version, trace_id, parent_id, flags = header:match("^(%x%x)%-(%x+)%-(%x+)%-(%x%x)$")
 
   if not version then
+    return nil
+  end
+
+  -- W3C Trace Context Level 1: only version "00" is supported.
+  -- Unknown/future versions (e.g. "ff") must be rejected per spec.
+  if version ~= "00" then
     return nil
   end
 

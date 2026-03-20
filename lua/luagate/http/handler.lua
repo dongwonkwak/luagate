@@ -598,9 +598,20 @@ function _M.log_phase()
               span_mod.set_error(proxy_span, tostring(proxy_status))
             end
           else
-            -- No upstream response (connect failure)
+            -- No upstream response (connect/DNS failure) — ADR-010 §2
             local span_mod = require("luagate.tracing.span")
-            span_mod.finish(proxy_span)
+            -- Try $upstream_connect_time as fallback duration
+            local uct = ngx.var.upstream_connect_time
+            if uct and uct ~= "" and uct ~= "-" then
+              local ct = tonumber(uct) or 0
+              local proxy_end_ns = (ctx.proxy_start_ts + ct) * 1e9
+              span_mod.finish(proxy_span, proxy_end_ns)
+            else
+              -- Both nil → duration=0
+              local proxy_end_ns = ctx.proxy_start_ts * 1e9
+              span_mod.finish(proxy_span, proxy_end_ns)
+            end
+            span_mod.set_attribute(proxy_span, "http.response.status_code", 502)
             span_mod.set_error(proxy_span, "upstream_connect_failure")
           end
         end

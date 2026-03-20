@@ -39,6 +39,8 @@ RUN apk add --no-cache \
  && apk add --no-cache --virtual .build-deps gcc musl-dev make \
  && luarocks-5.1 install lyaml YAML_DIR=/usr \
       LUA_INCDIR=/usr/local/openresty/luajit/include/luajit-2.1 \
+ && luarocks-5.1 install lua-resty-http \
+      LUA_INCDIR=/usr/local/openresty/luajit/include/luajit-2.1 \
  && apk del .build-deps
 
 # Copy Rust FFI shared libraries into the system loader path so ffi.load()
@@ -48,8 +50,9 @@ COPY --from=rust-builder /build/artifacts/ /usr/local/lib/
 # Copy Lua modules into a dedicated subdir — preserves bundled resty/* libs
 COPY lua/luagate /usr/local/openresty/lualib/luagate/
 
-# Copy nginx config file only
+# Copy config files
 COPY conf/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+COPY conf/luagate.yaml /conf/luagate.yaml
 
 # Copy Dashboard UI build output
 COPY --from=ui-builder /build/ui/dist/ /etc/luagate/ui/dist/
