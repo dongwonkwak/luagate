@@ -68,7 +68,7 @@
 - **루트 span**: `rewrite_by_lua`에서 생성하되 시작 시각을 `ngx.req.start_time()`으로 backdate한다 (요청 수신 시각). `log_by_lua`에서 종료. 이를 통해 루트 span duration이 `latency_ms` (`$request_time` = 요청 수신 ~ 응답 전송 완료)와 일치한다. `header_filter_by_lua`는 응답 헤더 전송 시점이므로 streaming/chunked 응답에서 body 전송 시간이 빠져 부적합하다.
 - **child span**: 주요 내부 단계별 생성 (policy_eval, security_scan, proxy)
 - **FFI 호출 span**: security_scan child 내에 scanner/decoder FFI 호출 span 포함
-- **proxy child span**: `access_by_lua` 종료 시점의 타임스탬프를 시작 시각으로 기록한다. 종료 시각은 `$upstream_response_time`이 아닌, `log_by_lua`에서 `ngx.now() - $request_time + proxy_start_offset`으로 계산한다. 이를 통해 proxy span은 `access_by_lua` 종료부터 Nginx가 upstream 응답을 수신 완료할 때까지의 전체 구간을 반영하며, retry/failover가 발생해도 단일 span으로 총 소요 시간을 정확히 기록한다. `$upstream_response_time`은 span attribute `luagate.upstream_response_time`으로 별도 보존한다 (attempt별 디버깅 용도).
+- **proxy child span**: `access_by_lua` 종료 시점에 `ngx.now()`로 시작 시각(`proxy_start_ts`)을 기록한다. `log_by_lua`에서 `ngx.now()`로 종료 시각을 기록하고, duration = 종료 시각 - `proxy_start_ts`로 계산한다. 이를 통해 proxy span은 `access_by_lua` 종료부터 Nginx가 upstream 응답 수신 + 클라이언트 전송 완료까지의 전체 구간을 반영하며, retry/failover가 발생해도 단일 span으로 총 소요 시간을 정확히 기록한다. `$upstream_response_time`은 span attribute `luagate.upstream_response_time`으로 별도 보존한다 (attempt별 디버깅 용도).
 - **upstream retry/failover**: Nginx가 retry/failover를 수행하면 `$upstream_response_time`이 쉼표 구분 다중 값이 될 수 있다 (예: `"0.5, 1.2"`). 이 경우 **단일 proxy span으로 합산**한다 — 전체 upstream 소요 시간(마지막 값의 종료 시점)을 proxy span duration으로 기록하고, attempt 횟수를 span attribute `luagate.upstream_attempts`로 남긴다. attempt별 개별 span 생성은 Phase 2 이후 범위로 둔다. outbound `traceparent`의 `span_id`는 최초 attempt 시점에 생성한 proxy span의 ID를 사용하며, retry 시에도 동일한 `span_id`를 전달한다 (upstream 관점에서 같은 parent).
 - **upstream 실패 (connect/DNS 등)**: `$upstream_response_time`이 빈 문자열 또는 nil인 경우 (connect 실패, DNS 해석 실패 등), proxy span을 `log_by_lua` 시점에서 즉시 종료한다. 이때 span에 `otel.status_code=ERROR`, `error.type=upstream_connect_failure`, `http.response.status_code=502` 등 에러 attribute를 설정한다. duration은 proxy span 시작 ~ log_by_lua 시점으로 기록한다 (실제 대기 시간 반영).
 - **outbound traceparent 주입**: `access_by_lua` 단계에서 proxy child span을 생성한 뒤, 해당 span의 `span_id`를 parent로 하여 `ngx.req.set_header("traceparent", "00-<trace_id>-<proxy_span_id>-<flags>")`를 설정한다. 이렇게 하면 업스트림 서비스의 span이 proxy child의 자식으로 올바르게 연결된다.
@@ -115,12 +115,13 @@
 
 | inbound traceparent | sampled 플래그 | LuaGate 동작 | trace_id/span_id 로그 | span export |
 |---------------------|---------------|-------------|---------------------|-------------|
-| 있음 | `sampled=1` | 강제 샘플링 (로컬 rate 무시) | 기록 | O |
-| 있음 | `sampled=0` | inbound trace_id 유지 + 로컬 rate 적용하여 재샘플링 결정 | **항상 기록** (상관관계 유지) | 재샘플링 당첨 시만 |
+| 있음 | `sampled=1` | parent-based: 강제 샘플링 (로컬 rate 무시) | 기록 | O |
+| 있음 | `sampled=0` | parent-based: 샘플링 안 함 (상위 결정 존중) | **항상 기록** (상관관계 유지) | X |
 | 없음 | — | 새 trace_id 생성 + 로컬 rate 적용 | 샘플링 시 기록, 미샘플 시 null | 샘플링 시만 |
 
-> **핵심 결정**: inbound trace가 있으면 (`traceparent` 존재) sampled 플래그와 무관하게 `trace_id`/`span_id`를 항상 access.log에 기록한다. 이를 통해 외부 트레이싱 시스템에서 LuaGate 로그와의 상관관계가 끊기지 않는다. span export 여부만 샘플링으로 제어한다.
-> **outbound 전파**: inbound sampled=0이고 LuaGate 재샘플링에도 미당첨이면, outbound `traceparent`의 sampled 플래그도 0으로 유지하여 downstream에 샘플링 결정을 전파한다.
+> **핵심 결정 — parent-based 샘플링**: inbound `traceparent`가 있으면 sampled 플래그를 그대로 존중한다 (parent-based). LuaGate가 독자적으로 재샘플링하지 않는다. 이를 통해 partial trace (상위 hop은 export 안 했는데 LuaGate만 export) 문제를 방지하고, 분산 환경에서 일관된 end-to-end 트레이스를 보장한다.
+> **로그 기록**: inbound trace가 있으면 sampled 플래그와 무관하게 `trace_id`/`span_id`를 항상 access.log에 기록한다. 외부 트레이싱 시스템에서 LuaGate 로그와의 상관관계가 끊기지 않도록 한다.
+> **outbound 전파**: inbound sampled 플래그를 그대로 outbound `traceparent`에 전달한다.
 
 ```yaml
 # conf/luagate.yaml

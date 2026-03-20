@@ -149,7 +149,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 
 > **기본값 선할당**: `rewrite_by_lua` 진입 시 아래 기본값으로 초기화.
 > `access_by_lua`에서 실제 판정 결과로 override, `log_by_lua`에서 finalize.
-> 이를 통해 nginx_core early short-circuit(malformed request, 400/413/414) 시에도 28필드가 채워진다.
+> 이를 통해 nginx_core early short-circuit(malformed request, 400/413/414) 시에도 30필드가 채워진다.
 > **Null 표현**: Nginx 기본 `-` 대신 JSON `null`을 사용한다 (log-schema.md §2 참조).
 
 | 변수 | 기본값 |
@@ -309,5 +309,5 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 - [spec/security-scanner.md](./security-scanner.md) — 보안 스캐너 상세
 - [spec/policy-engine.md](./policy-engine.md) — 정책 평가 엔진 상세
-- [spec/log-schema.md](./log-schema.md) — 로그 스키마 상세 (HTTP 28필드)
+- [spec/log-schema.md](./log-schema.md) — 로그 스키마 상세 (HTTP 30필드)
 - [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — Rust FFI 모듈 인터페이스
