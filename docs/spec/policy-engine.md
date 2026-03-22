@@ -197,7 +197,7 @@ load_policy(filepath):
     [4] 충돌/음영 감지 (enabled=true 규칙만 대상)
         - 충돌 → WARN 로그, 계속 진행
     [5] SHA256 해시 계산 (전체 파일 내용 기준)
-    [6] compile: priority 오름차순 정렬 + radix tree 빌드
+    [6] compile: priority 오름차순 정렬 (CIDR 매칭은 평가 시 Lua 연산)
         - compile 실패 → 전체 거부 (전체 또는 전무)
     [7] commit:
         - HTTP 서브시스템 교체
