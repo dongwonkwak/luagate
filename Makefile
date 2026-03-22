@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker lint bench bench-http bench-stream test-chaos up down deploy-prod deploy-prod-down helm-lint helm-template implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr storybook storybook-build
+.PHONY: build test test-unit test-unit-lua test-unit-rust test-integration-http test-integration-stream test-reload test-docker test-multi-instance lint bench bench-http bench-stream test-chaos up down deploy-prod deploy-prod-down helm-lint helm-template implement install-hooks clean ui-dev ui-build ui-lint ui-test e2e pre-pr storybook storybook-build
 
 TEST_ADMIN_TOKEN ?= test-secret-token-for-integration
 DOCKER_COMPOSE_TEST_FLAGS ?= --build
@@ -62,6 +62,11 @@ test-reload:
 	else \
 	  echo "  (skipping — tests/unit/reload/ not yet created)"; \
 	fi
+
+# ── Multi-Instance Integration Test ───────────────────────────────────────
+test-multi-instance:
+	@echo "==> Running multi-instance policy sync test (Docker required)..."
+	bash tests/integration/multi-instance/test_policy_sync.sh
 
 # ── Docker Test ────────────────────────────────────────────────────────────
 test-docker:

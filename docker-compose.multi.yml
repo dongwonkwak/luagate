@@ -1,0 +1,105 @@
+# docker-compose.multi.yml — 2-instance LuaGate for policy sync integration test
+# Usage: docker compose -f docker-compose.multi.yml up -d
+#
+# Architecture (ADR-008 §8.3):
+#   luagate-1 (8080, 9090 admin) ← POST /reload target
+#   luagate-2 (8081, 9091 admin) ← POST /reload target
+#   Both share /conf via a named volume (canonical policy file path)
+#
+# Path note: loader.init_load("conf/policies.yaml") resolves relative to
+# the process working directory (/), so the canonical path is /conf/policies.yaml.
+# nginx.conf is at /usr/local/openresty/nginx/conf/nginx.conf (OpenResty prefix).
+#
+# Related: ADR-008 (멀티 인스턴스 정책 동기화)
+
+services:
+  # Init container: seed shared-conf volume with policy + scanner patterns
+  conf-init:
+    image: busybox:1.36
+    container_name: luagate-conf-init
+    volumes:
+      - shared-conf:/conf-target
+      - ./policies/luagate.yaml:/conf-src/policies.yaml:ro
+      - ./conf/scanner-patterns:/conf-src/scanner-patterns:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        cp /conf-src/policies.yaml /conf-target/policies.yaml
+        cp -r /conf-src/scanner-patterns /conf-target/scanner-patterns
+        echo "conf-init done"
+
+  luagate-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luagate-multi-1
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - shared-conf:/conf
+    environment:
+      - LUAGATE_ENV=test
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token-32bytes}
+    networks:
+      luagate-multi-net:
+    depends_on:
+      conf-init:
+        condition: service_completed_successfully
+      upstream-mock:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  luagate-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luagate-multi-2
+    ports:
+      - "8081:8080"
+      - "9091:9090"
+    volumes:
+      - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - shared-conf:/conf
+    environment:
+      - LUAGATE_ENV=test
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token-32bytes}
+    networks:
+      luagate-multi-net:
+    depends_on:
+      conf-init:
+        condition: service_completed_successfully
+      upstream-mock:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  upstream-mock:
+    image: nginx:1.25-alpine
+    container_name: upstream-mock-multi
+    volumes:
+      - ./tests/fixtures:/usr/share/nginx/html:ro
+    networks:
+      - luagate-multi-net
+
+volumes:
+  shared-conf:
+
+networks:
+  luagate-multi-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1

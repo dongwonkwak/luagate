@@ -35,10 +35,10 @@ jobs:
 
       - name: Start LuaGate
         run: |
-          echo "LUAGATE_ADMIN_TOKEN=ci-chaos-test-token" > .env
+          echo "LUAGATE_ADMIN_TOKEN=ci-chaos-test-token-for-admin-healthcheck" > .env
           docker compose up -d --build
         env:
-          LUAGATE_ADMIN_TOKEN: ci-chaos-test-token
+          LUAGATE_ADMIN_TOKEN: ci-chaos-test-token-for-admin-healthcheck
 
       - name: Wait for LuaGate
         run: |
@@ -56,7 +56,7 @@ jobs:
       - name: Run chaos tests
         run: bash tests/chaos/test_hot_reload.sh
         env:
-          LUAGATE_ADMIN_TOKEN: ci-chaos-test-token
+          LUAGATE_ADMIN_TOKEN: ci-chaos-test-token-for-admin-healthcheck
           WRK_DURATION: ${{ github.event.inputs.wrk_duration }}
           RELOAD_COUNT: ${{ github.event.inputs.reload_count }}
 
