@@ -62,7 +62,7 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 
 | Zone | 역할 | Key Model | Write Owner | Atomicity Unit |
 | --- | --- | --- | --- | --- |
-| `luagate_policy` | 정책 버전 포인터 + 버전별 blob | **Envelope**: `http:active_version`, `stream:active_version`(포인터) + `policy:<ver>:blob`, `policy:<ver>:meta`(blob); `source_version`(commit 기준) | reload worker | active_version pointer 교체 단위 (subsystem별 독립) |
+| `luagate_policy` | 정책 버전 포인터 + 버전별 blob + 런타임 상태 | **Envelope**: `http:active_version`, `stream:active_version`(포인터) + `policy:<ver>:blob`, `policy:<ver>:meta`(blob); `source_version`(commit 기준); `policy_loaded_at`(epoch); `worker_start_time:<wid>`(per-worker epoch, DON-222) | reload worker / init_worker | active_version pointer 교체 단위 (subsystem별 독립) |
 | `luagate_stream_metrics` | Stream 메트릭 (ADR-004) | 단순 카운터: `stream:metrics:*` | 각 worker (incr) | 키 단위 |
 | `luagate_metrics` | HTTP 메트릭 | 단순 카운터: `metrics:*` + Histogram: `latency:*` (ADR-006 §3.2 참조) | 각 worker (incr) | 키 단위 |
 | `luagate_connections` | 활성 연결 수 | 단순 카운터: `active_http`, `active_stream` | 해당 worker | 키 단위 |

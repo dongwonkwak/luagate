@@ -27,6 +27,9 @@ Value: JSON string (정렬된 규칙 배열)
 
 Key: "staged_policy_version"
 Value: "<sha256-hex>" (가장 최근 PUT 버전)
+
+Key: "worker_start_time:<wid>"        # DON-222
+Value: ngx.now() epoch (per-worker, init_worker 시 기록)
 ```
 
 **TTL**: 0 (만료 없음)

@@ -14,6 +14,7 @@ export interface HealthResponse {
 export interface StatusResponse {
   luagate_version: string;
   uptime_seconds: number;
+  policy_age_seconds: number;
   worker_count: number;
   active_http_version: string;
   active_stream_version: string;

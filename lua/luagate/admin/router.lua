@@ -228,8 +228,8 @@ end
 
 --- GET /api/v1/status — detailed server status.
 -- Exposes a minimal status snapshot derived from shared dict state.
--- Uptime is approximated from the last successful policy load timestamp when
--- available, which is the earliest startup-time signal currently persisted.
+-- DON-222: uptime_seconds is per-worker process uptime (since init_worker),
+-- policy_age_seconds is time since last successful policy load.
 local function handle_status()
   local policy_dict = ngx.shared.luagate_policy
   local http_version = policy_dict and policy_dict:get("http:active_version")
@@ -241,14 +241,23 @@ local function handle_status()
     worker_count = 1
   end
 
+  -- DON-222: Read per-worker start time recorded at init_worker_by_lua
+  local wid = ngx.worker.id()
+  local start_time = policy_dict and policy_dict:get("worker_start_time:" .. wid)
   local uptime_seconds = 0
+  if start_time and start_time > 0 then
+    uptime_seconds = math.max(0, math.floor(ngx.now() - start_time))
+  end
+
+  local policy_age_seconds = 0
   if loaded_at_epoch and loaded_at_epoch > 0 then
-    uptime_seconds = math.max(0, math.floor(ngx.now() - loaded_at_epoch))
+    policy_age_seconds = math.max(0, math.floor(ngx.now() - loaded_at_epoch))
   end
 
   send_json(200, {
     luagate_version = LUAGATE_VERSION,
     uptime_seconds = uptime_seconds,
+    policy_age_seconds = policy_age_seconds,
     worker_count = worker_count,
     active_http_version = http_version or "none",
     active_stream_version = stream_version or "none",
