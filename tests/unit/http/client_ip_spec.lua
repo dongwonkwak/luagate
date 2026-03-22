@@ -206,6 +206,13 @@ describe("luagate.http.client_ip", function()
       -- Walk right: 10.0.0.1 (trusted) → 203.0.113.50 (non-trusted, valid) → return
       assert.equals("203.0.113.50", client_ip.parse_xff("1.1.1.1, 203.0.113.50, 10.0.0.1"))
     end)
+
+    it("stops at first untrusted token when it is not a valid IPv4", function()
+      client_ip.configure({ "10.0.0.1" })
+      -- After the trusted proxy, the nearest untrusted hop is IPv6 and must
+      -- terminate parsing instead of allowing an earlier spoofed IPv4.
+      assert.is_nil(client_ip.parse_xff("1.1.1.1, 2001:db8::1, 10.0.0.1"))
+    end)
   end)
 
   -- =======================================================================
@@ -275,6 +282,14 @@ describe("luagate.http.client_ip", function()
       ngx.var.proxy_protocol_addr = nil
       ngx.var.http_x_forwarded_for = "unknown, bad-ip"
       -- All XFF entries are invalid → parse_xff returns nil → fallback to remote_addr
+      assert.equals("10.0.0.1", client_ip.resolve())
+    end)
+
+    it("falls back when the first untrusted XFF token is invalid", function()
+      client_ip.configure({ "10.0.0.1" })
+      ngx.var.remote_addr = "10.0.0.1"
+      ngx.var.proxy_protocol_addr = nil
+      ngx.var.http_x_forwarded_for = "1.1.1.1, 2001:db8::1, 10.0.0.1"
       assert.equals("10.0.0.1", client_ip.resolve())
     end)
 

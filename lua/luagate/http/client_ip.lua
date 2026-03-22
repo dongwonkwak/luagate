@@ -143,13 +143,15 @@ function _M.parse_xff(xff_header)
   end
 
   -- Walk from right to left (closest to server first).
-  -- Skip trusted proxies; return first non-trusted valid IPv4.
-  -- Invalid tokens (e.g. "unknown", malformed) are skipped to prevent
-  -- src_ip_cidr policy rules from silently missing all matches.
+  -- Skip trusted proxies, then inspect only the first untrusted boundary.
+  -- If that token is not a valid IPv4, stop and let the caller fall back.
   for i = #ips, 1, -1 do
     local ip = ips[i]
-    if is_valid_ipv4(ip) and not is_trusted(ip) then
-      return ip
+    if not is_trusted(ip) then
+      if is_valid_ipv4(ip) then
+        return ip
+      end
+      return nil
     end
   end
 
