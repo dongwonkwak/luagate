@@ -124,6 +124,10 @@ package.preload["luagate.policy.loader"] = function()
     is_reload_in_progress = function()
       return false
     end,
+    set_source_version = function(version)
+      _loader_versions.source_version = version
+      return true, nil
+    end,
   }
 end
 
@@ -876,6 +880,120 @@ describe("PUT /api/v1/policies", function()
       end
     end
     assert.is_true(has_audit, "audit log for policy_update_failure should be written")
+  end)
+
+  it("returns 200 and backfills source_version when result.skipped and source_version is nil", function()
+    -- Simulate: hash unchanged (skipped), but source_version never committed
+    _loader_versions.source_version = nil
+    _loader_result = {
+      ok = true,
+      skipped = true,
+      new_version = nil,
+      previous_http_version = "abc123",
+      previous_stream_version = "abc123",
+      http_ok = true,
+      stream_ok = true,
+      http_err = nil,
+      stream_err = nil,
+      conflicts = {},
+      shadowed = {},
+      err = nil,
+    }
+    -- If-Match must equal the computed SHA256 of the file content (stub: content itself)
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"' .. yaml_body .. '"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    -- source_version should now be backfilled with the computed SHA256 (= yaml_body in stub)
+    assert.are.equal(yaml_body, _loader_versions.source_version)
+  end)
+
+  it("returns 200 and logs WARN when set_source_version fails during backfill", function()
+    -- Simulate: hash unchanged (skipped), source_version nil triggers backfill
+    _loader_versions.source_version = nil
+    _loader_result = {
+      ok = true,
+      skipped = true,
+      new_version = nil,
+      previous_http_version = "abc123",
+      previous_stream_version = "abc123",
+      http_ok = true,
+      stream_ok = true,
+      http_err = nil,
+      stream_err = nil,
+      conflicts = {},
+      shadowed = {},
+      err = nil,
+    }
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"' .. yaml_body .. '"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    -- Override set_source_version on the cached loader to simulate failure
+    local loader = package.loaded["luagate.policy.loader"]
+    loader.set_source_version = function(_version)
+      return false, "shdict full"
+    end
+
+    policies.handle_put_policies()
+
+    -- Should still return 200 (non-fatal failure)
+    assert.are.equal(200, _G.ngx.status)
+    -- source_version should remain nil (backfill failed)
+    assert.is_nil(_loader_versions.source_version)
+    -- WARN log should contain the failure message
+    local logged = _G.ngx._get_logged()
+    local has_warn = false
+    for _, entry in ipairs(logged) do
+      if entry:find("source_version backfill failed") and entry:find("shdict full") then
+        has_warn = true
+        break
+      end
+    end
+    assert.is_true(has_warn, "WARN log for source_version backfill failure should be written")
+  end)
+
+  it("returns 200 and does NOT overwrite source_version when result.skipped and source_version exists", function()
+    -- Simulate: hash unchanged (skipped), source_version already present
+    _loader_versions.source_version = "existing_hash"
+    _loader_result = {
+      ok = true,
+      skipped = true,
+      new_version = nil,
+      previous_http_version = "abc123",
+      previous_stream_version = "abc123",
+      http_ok = true,
+      stream_ok = true,
+      http_err = nil,
+      stream_err = nil,
+      conflicts = {},
+      shadowed = {},
+      err = nil,
+    }
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"existing_hash"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+    -- source_version should remain unchanged (no overwrite)
+    assert.are.equal("existing_hash", _loader_versions.source_version)
   end)
 
   it("rejects Content-Encoding header", function()

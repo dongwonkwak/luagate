@@ -111,6 +111,8 @@ Retry-After: 42
 > 응답 contract는 **success-only atomicity** 기준이다: `200 OK`일 때만 `source_version == active_http_version == active_stream_version`가 성립한다.
 > 실패 응답에서는 canonical file(`conf/policies.yaml`)을 변경하지 않는다. 단, commit 단계에서 한쪽 swap 또는 file write 실패 시 이전 버전으로 **best-effort rollback**을 시도하며, rollback까지 실패하면 `500 commit_failed`와 함께 HTTP/Stream active version이 일시적으로 불일치할 수 있다 (ADR-005 §1).
 > 이 경우 운영자는 `SIGHUP` 또는 수동 복구로 일관성을 회복해야 한다.
+>
+> **예외**: 동일 해시 no-op PUT(`result.skipped`)에서 `source_version` backfill이 shared dict 오류로 실패한 경우, `source_version`이 일시적으로 `nil`일 수 있다. 이 상태는 다음 성공적 PUT 또는 POST /reload에서 자동 복구된다.
 
 ## 5. ETag / If-Match
 

@@ -715,4 +715,32 @@ function _M.get_active_versions()
   }
 end
 
+--- Backfill source_version in shared dict when it is nil.
+-- Used by the admin PUT handler to fix the source_version gap when
+-- result.skipped is true but source_version was never committed
+-- (e.g. before the first hot-reload cycle).
+-- @param version string  SHA256 hex digest to store
+-- @return boolean ok
+-- @return string|nil err
+function _M.set_source_version(version)
+  local dict = get_dict()
+  if not dict then
+    return false, "no shared dict"
+  end
+  -- Atomic backfill: dict:add() writes only when key does not exist.
+  -- This eliminates the TOCTOU race between get() and safe_set() —
+  -- if a concurrent PUT committed a newer source_version between our
+  -- reload lock release and this call, add() returns false/"exists"
+  -- and the stale hash is never written.
+  local ok, err = dict:add("source_version", version)
+  if not ok then
+    if err == "exists" then
+      -- Key already present — another request committed first; no-op.
+      return true, nil
+    end
+    return false, err
+  end
+  return true, nil
+end
+
 return _M

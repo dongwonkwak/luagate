@@ -558,6 +558,17 @@ function _M.handle_put_policies()
     -- Same hash — no change needed, cleanup temp
     os.remove(tmp_path)
 
+    -- Backfill source_version when it is nil (e.g. before first hot-reload
+    -- commit).  Without this, GET /version returns source_version=nil even
+    -- after a successful no-op PUT, violating the 200 OK invariant
+    -- (admin-api.md §5).
+    if not loader.get_active_versions().source_version then
+      local sv_ok, sv_err = loader.set_source_version(new_version)
+      if not sv_ok then
+        ngx.log(ngx.WARN, "[luagate:admin] source_version backfill failed: ", tostring(sv_err))
+      end
+    end
+
     -- Nginx core also evaluates If-Match preconditions for successful writes.
     -- Echo the validated source-version ETag on the success response so the
     -- application-level optimistic lock does not get overridden with 412.
