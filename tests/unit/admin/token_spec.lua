@@ -419,5 +419,59 @@ describe("token rotation handler", function()
       -- Restore
       cjson_mod.encode = original_encode
     end)
+
+    it("audit 실패 rollback 중 grace token 복원 실패를 감지하고 incomplete로 응답한다", function()
+      local dict = ctx.get_dict()
+      local prev_active = string.rep("D", 32)
+      local prev_grace = string.rep("E", 32)
+      local new_token = string.rep("F", 32)
+      local original_set = dict.set
+
+      dict:set("luagate_admin_token", prev_active)
+      dict:set("luagate_admin_token_old", prev_grace, 30)
+
+      local cjson_mod = package.loaded["cjson.safe"]
+      local original_encode = cjson_mod.encode
+      cjson_mod.encode = function(tbl)
+        if type(tbl) == "table" and tbl.event then
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      dict.set = function(self, key, val, ttl)
+        if key == "luagate_admin_token_old" and val == prev_grace then
+          return nil, "no memory"
+        end
+        return original_set(self, key, val, ttl)
+      end
+
+      ctx.set_body('{"new_token": "' .. new_token .. '"}')
+
+      token_mod.handle_post_rotate()
+
+      local body = ctx.get_body()
+      assert.truthy(body:find("audit_write_failed"), "should return audit_write_failed")
+      assert.truthy(body:find("rollback incomplete"), "should surface incomplete rollback")
+      assert.are.equal(prev_active, dict:get("luagate_admin_token"), "active token should still be restored")
+      assert.are.equal(
+        prev_active,
+        dict:get("luagate_admin_token_old"),
+        "failed grace restore should leave the replacement grace token in place"
+      )
+
+      local logs = ctx.get_logs()
+      local found_incomplete = false
+      for _, entry in ipairs(logs) do
+        if entry.msg:find("token rotation rollback incomplete") then
+          found_incomplete = true
+          break
+        end
+      end
+      assert.is_true(found_incomplete, "rollback failure should be logged")
+
+      cjson_mod.encode = original_encode
+      dict.set = original_set
+    end)
   end)
 end)

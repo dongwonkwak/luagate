@@ -85,6 +85,20 @@ local function audit_log(event, actor_ip)
   return true
 end
 
+local function restore_token_state(state_dict, key, value, ttl)
+  if value == nil then
+    state_dict:delete(key)
+    return true
+  end
+
+  local ok, err = state_dict:set(key, value, ttl)
+  if not ok then
+    return false, err
+  end
+
+  return true
+end
+
 -- ---------------------------------------------------------------------------
 -- Handler
 -- ---------------------------------------------------------------------------
@@ -177,18 +191,26 @@ function _M.handle_post_rotate()
   -- Audit after successful mutation (audit drop = rollback + reject)
   local audit_ok = audit_log("token_rotated")
   if not audit_ok then
+    local rollback_errors = {}
+
     -- Rollback: restore previous active token
-    if current_token then
-      state_dict:set(KEY_ACTIVE_TOKEN, current_token)
-    else
-      state_dict:delete(KEY_ACTIVE_TOKEN)
+    local restore_ok, restore_err = restore_token_state(state_dict, KEY_ACTIVE_TOKEN, current_token)
+    if not restore_ok then
+      rollback_errors[#rollback_errors + 1] = "restore active token failed: " .. tostring(restore_err)
     end
+
     -- Rollback: restore previous old_token (grace token from prior rotation)
-    if prev_old_token then
-      state_dict:set(KEY_OLD_TOKEN, prev_old_token, GRACE_PERIOD_TTL)
-    else
-      state_dict:delete(KEY_OLD_TOKEN)
+    restore_ok, restore_err = restore_token_state(state_dict, KEY_OLD_TOKEN, prev_old_token, GRACE_PERIOD_TTL)
+    if not restore_ok then
+      rollback_errors[#rollback_errors + 1] = "restore grace token failed: " .. tostring(restore_err)
     end
+
+    if #rollback_errors > 0 then
+      ngx.log(ngx.ERR, "[luagate] token rotation rollback incomplete: ", table.concat(rollback_errors, "; "))
+      send_error(500, "audit_write_failed", "Audit log failed — rollback incomplete", "audit")
+      return
+    end
+
     send_error(500, "audit_write_failed", "Audit log failed — mutation rolled back", "audit")
     return
   end
