@@ -199,10 +199,36 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 curl -s -H "Authorization: Bearer $TOKEN" \
   http://localhost:9090/metrics | grep luagate_policy_loaded
 
-# 2. HTTP-only 배포인지 확인
-# HTTP-only 배포에서는 stream=0이 정상
+# 2. active_stream_version 확인
 curl -s http://localhost:9090/health | jq .active_stream_version
+
+# 3. nginx.conf에 stream 블록이 존재하는지 확인
+grep -c 'stream {' /etc/openresty/nginx.conf
 ```
 
+### `active_stream_version`이 null/"none"인 경우 판단 기준
+
+`active_stream_version`이 null 또는 `"none"`이라고 해서 항상 정상은 아니다.
+반드시 배포 설정과 대조하여 원인을 구분해야 한다.
+
+| 조건 | `nginx.conf`에 stream 블록 | 판단 | 조치 |
+|------|---------------------------|------|------|
+| (1) HTTP-only 배포 | 없음 | **정상** — stream 서브시스템 미사용 | 없음 |
+| (2) Stream-enabled 배포 | 있음 | **장애** — stream 정책 로드 실패 또는 포인터 깨짐 | 아래 복구 절차 진행 |
+
+**장애(2)인 경우 복구 절차**:
+
+```bash
+# stream 정책 수동 reload 시도
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9090/api/v1/policies/reload | jq .
+
+# 실패 시 에러 로그 확인
+tail -50 /var/log/luagate/error.log | grep -i stream
+```
+
+> **주의**: `LuagateStreamPolicyNotLoaded` alert가 발생했는데 `active_stream_version`만 보고
+> "HTTP-only 배포이므로 정상"으로 오인하지 않도록, 반드시 `nginx.conf`의 stream 블록 존재 여부를 함께 확인할 것.
+>
 > **참고**: 이 alert는 기본 `conf/alerts.yml`에는 포함되지 않는다.
 > stream-enabled 배포에서만 별도 alert rule로 추가한다.

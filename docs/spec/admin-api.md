@@ -155,7 +155,7 @@ GET /health
 | `status` | string | `"ok"` 또는 `"unhealthy"` |
 | `source_version` | string\|null | Canonical source (YAML) SHA256 해시. [ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.2 |
 | `active_http_version` | string\|null | HTTP 서브시스템 active 정책 버전 |
-| `active_stream_version` | string\|null | Stream 서브시스템 active 정책 버전 |
+| `active_stream_version` | string\|null | Stream 서브시스템 active 정책 버전. null/"none"일 때: `nginx.conf`에 stream 블록이 없으면 HTTP-only 배포(정상), stream 블록이 있으면 stream 정책 로드 장애 — `LuagateStreamPolicyNotLoaded` alert 확인 필요 |
 | `policy_loaded_at` | string\|null | 마지막 성공적 정책 로드 시각 (ISO-8601 UTC) |
 | `ffi_watchdog_leak_count` | array\<integer\> | Per-worker detached thread leak 카운터 배열 (인덱스 = worker id). [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
 | `ffi_watchdog_timeouts` | integer | 전체 worker의 leak count 합산. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
