@@ -4,13 +4,36 @@
 # Architecture (ADR-008 §8.3):
 #   luagate-1 (8080, 9090 admin) ← POST /reload target
 #   luagate-2 (8081, 9091 admin) ← POST /reload target
-#   Both share /conf via a named volume (canonical policy file path)
+#   Both share conf/policies.yaml via a named volume
 #
 # Sync flow: external deploy → shared volume → POST /reload on each instance
 #
 # Related: ADR-008 (멀티 인스턴스 정책 동기화)
 
 services:
+  # Init container: seed shared-policies volume with initial policy file.
+  # Uses the LuaGate image itself to also copy mime.types and other default
+  # conf files that OpenResty needs at startup.
+  conf-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luagate-conf-init
+    volumes:
+      - shared-conf:/conf-target
+      - ./conf/nginx.conf:/conf-src/nginx.conf:ro
+      - ./policies/luagate.yaml:/conf-src/policies.yaml:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        # Copy all default OpenResty conf files (mime.types, etc.)
+        cp /usr/local/openresty/nginx/conf/* /conf-target/ 2>/dev/null || true
+        # Override with our nginx.conf and initial policy
+        cp /conf-src/nginx.conf /conf-target/nginx.conf
+        cp /conf-src/policies.yaml /conf-target/policies.yaml
+        echo "conf-init done"
+
   luagate-1:
     build:
       context: .
@@ -29,7 +52,10 @@ services:
     networks:
       luagate-multi-net:
     depends_on:
-      - upstream-mock
+      conf-init:
+        condition: service_completed_successfully
+      upstream-mock:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
       interval: 5s
@@ -54,28 +80,15 @@ services:
     networks:
       luagate-multi-net:
     depends_on:
-      - upstream-mock
+      conf-init:
+        condition: service_completed_successfully
+      upstream-mock:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
       interval: 5s
       timeout: 3s
       retries: 10
-
-  # Init container: seed shared-conf volume with nginx.conf + initial policy
-  conf-init:
-    image: busybox:1.36
-    container_name: luagate-conf-init
-    volumes:
-      - shared-conf:/conf-target
-      - ./conf/nginx.conf:/conf-src/nginx.conf:ro
-      - ./policies/luagate.yaml:/conf-src/policies.yaml:ro
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - |
-        cp /conf-src/nginx.conf /conf-target/nginx.conf
-        cp /conf-src/policies.yaml /conf-target/policies.yaml
-        echo "conf-init done"
 
   upstream-mock:
     image: nginx:1.25-alpine
