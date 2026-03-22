@@ -1,10 +1,12 @@
 # docker-compose.multi.yml — 2-instance LuaGate for policy sync integration test
 # Usage: docker compose -f docker-compose.multi.yml up -d
 #
-# Architecture:
-#   luagate-1 (8080, 9090 admin) ← policy deploy target
-#   luagate-2 (8081, 9091 admin) ← sync verification target
-#   Both share /etc/luagate/policies via a named volume
+# Architecture (ADR-008 §8.3):
+#   luagate-1 (8080, 9090 admin) ← POST /reload target
+#   luagate-2 (8081, 9091 admin) ← POST /reload target
+#   Both share /conf via a named volume (canonical policy file path)
+#
+# Sync flow: external deploy → shared volume → POST /reload on each instance
 #
 # Related: ADR-008 (멀티 인스턴스 정책 동기화)
 
@@ -19,20 +21,20 @@ services:
       - "9090:9090"
     volumes:
       - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
-      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
-      - shared-policies:/etc/luagate/policies
-      - ./policies/luagate.yaml:/conf/policies.yaml:ro
+      - shared-conf:/usr/local/openresty/nginx/conf
       - ./conf/scanner-patterns:/conf/scanner-patterns:ro
     environment:
       - LUAGATE_ENV=test
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token}
     networks:
-      - luagate-multi-net
+      luagate-multi-net:
+    depends_on:
+      - upstream-mock
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
 
   luagate-2:
     build:
@@ -44,20 +46,36 @@ services:
       - "9091:9090"
     volumes:
       - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
-      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
-      - shared-policies:/etc/luagate/policies
-      - ./policies/luagate.yaml:/conf/policies.yaml:ro
+      - shared-conf:/usr/local/openresty/nginx/conf
       - ./conf/scanner-patterns:/conf/scanner-patterns:ro
     environment:
       - LUAGATE_ENV=test
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token}
     networks:
-      - luagate-multi-net
+      luagate-multi-net:
+    depends_on:
+      - upstream-mock
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+
+  # Init container: seed shared-conf volume with nginx.conf + initial policy
+  conf-init:
+    image: busybox:1.36
+    container_name: luagate-conf-init
+    volumes:
+      - shared-conf:/conf-target
+      - ./conf/nginx.conf:/conf-src/nginx.conf:ro
+      - ./policies/luagate.yaml:/conf-src/policies.yaml:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        cp /conf-src/nginx.conf /conf-target/nginx.conf
+        cp /conf-src/policies.yaml /conf-target/policies.yaml
+        echo "conf-init done"
 
   upstream-mock:
     image: nginx:1.25-alpine
@@ -68,8 +86,12 @@ services:
       - luagate-multi-net
 
 volumes:
-  shared-policies:
+  shared-conf:
 
 networks:
   luagate-multi-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1

@@ -66,6 +66,31 @@ jobs:
           LUAGATE_TEST_IMAGE: luagate-test:gha
         # make test-docker: shard별 Compose 실행 + EXIT_CODE 전파 (이미지는 선행 빌드 결과 재사용)
 
+  test-multi-instance:
+    name: Multi-Instance Policy Sync
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build LuaGate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: luagate:multi-test
+          load: true
+          cache-from: type=gha,scope=multi-instance
+          cache-to: type=gha,mode=max,scope=multi-instance
+
+      - name: Run multi-instance policy sync test
+        run: make test-multi-instance
+        env:
+          LUAGATE_ADMIN_TOKEN: test-multi-instance-token
+
   test-docker-compat:
     name: Test::Nginx (Docker)
     runs-on: ubuntu-latest
