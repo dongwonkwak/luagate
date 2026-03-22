@@ -1126,6 +1126,30 @@ describe("PUT /api/v1/policies", function()
     assert.truthy(body.details[1]:find("UTF%-8"))
   end)
 
+  it("rejects repeated Content-Type headers with non-UTF-8 charset without 500", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = {
+          "application/x-yaml; charset=iso-8859-1",
+          "application/x-yaml; charset=utf-8",
+        },
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
   it("accepts charset=UTF-8 (case insensitive) in Content-Type", function()
     _G.ngx.req.get_headers = function()
       return {
@@ -1408,6 +1432,29 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     _G.ngx.req.get_headers = function()
       return {
         ["Content-Type"] = "application/x-yaml; charset=iso-8859-1",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it("rejects repeated Content-Type headers in dry_run mode without 500", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["Content-Type"] = {
+          "application/x-yaml; charset=iso-8859-1",
+          "application/x-yaml; charset=utf-8",
+        },
         Authorization = "Bearer valid-test-token",
       }
     end

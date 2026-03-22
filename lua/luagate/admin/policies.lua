@@ -326,7 +326,7 @@ function _M.handle_put_policies()
   -- Before body read to avoid loading non-UTF-8 payloads into memory.
   -- Handles RFC variations: case-insensitive key, optional whitespace
   -- around '=', and optional quoting of the value.
-  local content_type = ngx.req.get_headers()["Content-Type"]
+  local content_type = header_to_string(ngx.req.get_headers()["Content-Type"])
   if content_type then
     local charset = content_type:lower():match('charset%s*=%s*"?([^;%s"]+)')
     if charset and charset ~= "utf-8" then
