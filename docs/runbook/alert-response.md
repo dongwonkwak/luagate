@@ -157,7 +157,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 ## LuagateWorkerDown
 
 **심각도**: critical
-**조건**: Prometheus scrape 실패 또는 `luagate_policy_loaded == 0` (1분 지속)
+**조건**: Prometheus scrape 실패 또는 `luagate_policy_loaded{subsystem="http"} == 0` (1분 지속)
 
 ### 즉시 조치
 
@@ -175,12 +175,33 @@ docker compose restart luagate
 # systemd
 sudo systemctl restart openresty
 
-# 4. 정책 로드 상태 확인
+# 4. 정책 로드 상태 확인 (subsystem별)
 curl -s -H "Authorization: Bearer $TOKEN" \
   http://localhost:9090/metrics | grep luagate_policy_loaded
 ```
 
-> **참고**: `luagate_policy_loaded`는 HTTP와 Stream 양쪽 active version이 모두 있어야 1을 반환한다.
-> HTTP-only 배포에서는 `/health` 엔드포인트를 사용하여 상태를 확인한다.
+> **참고**: `luagate_policy_loaded`는 `subsystem` 라벨로 HTTP/Stream을 구분한다.
+> HTTP-only 배포에서 `{subsystem="stream"} 0`은 정상이다.
 
 → 상세 복구: [disaster-recovery.md](./disaster-recovery.md)
+
+---
+
+## LuagateStreamPolicyNotLoaded
+
+**심각도**: warning
+**조건**: `luagate_policy_loaded{subsystem="stream"} == 0` (5분 지속)
+
+### 즉시 조치
+
+```bash
+# 1. Stream 정책 로드 상태 확인
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9090/metrics | grep luagate_policy_loaded
+
+# 2. HTTP-only 배포인지 확인
+# HTTP-only 배포에서는 stream=0이 정상 — alert 무시 가능
+curl -s http://localhost:9090/health | jq .active_stream_version
+```
+
+> **참고**: HTTP-only 배포에서는 이 alert가 정상적으로 발생한다. 배포 유형에 따라 alert rule을 비활성화할 수 있다.

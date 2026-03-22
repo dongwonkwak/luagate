@@ -362,16 +362,21 @@ local function handle_metrics()
   -- ── Policy loaded gauge (ADR-008 §8.2) ────────────────────────────
   -- Version hashes are exposed only via /health (not as Prometheus labels)
   -- to comply with ADR-006 cardinality rules. This gauge tracks whether
-  -- policy is loaded (1) or not (0).
-  prom_header(buf, "luagate_policy_loaded", "gauge", "Whether policy is loaded (1=loaded, 0=not loaded).")
+  -- policy is loaded (1) or not (0) per subsystem.
+  -- DON-213: subsystem label allows HTTP-only deployments to report loaded=1
+  -- without requiring stream active_version.
+  prom_header(buf, "luagate_policy_loaded", "gauge", "Whether policy is loaded per subsystem (1=loaded, 0=not loaded).")
   local policy_dict = ngx.shared.luagate_policy
   if policy_dict then
     local http_ver = policy_dict:get("http:active_version")
     local stream_ver = policy_dict:get("stream:active_version")
-    local loaded = (http_ver and http_ver ~= "none" and stream_ver and stream_ver ~= "none") and 1 or 0
-    prom_line(buf, "luagate_policy_loaded", "", loaded)
+    local http_loaded = (http_ver and http_ver ~= "none") and 1 or 0
+    local stream_loaded = (stream_ver and stream_ver ~= "none") and 1 or 0
+    prom_line(buf, "luagate_policy_loaded", '{subsystem="http"}', http_loaded)
+    prom_line(buf, "luagate_policy_loaded", '{subsystem="stream"}', stream_loaded)
   else
-    prom_line(buf, "luagate_policy_loaded", "", 0)
+    prom_line(buf, "luagate_policy_loaded", '{subsystem="http"}', 0)
+    prom_line(buf, "luagate_policy_loaded", '{subsystem="stream"}', 0)
   end
 
   -- ── Send response ──────────────────────────────────────────────────

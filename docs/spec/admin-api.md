@@ -485,7 +485,15 @@ luagate_active_connections{type="stream"} 3
 # TYPE luagate_shared_dict_capacity_bytes gauge
 luagate_shared_dict_capacity_bytes{zone="luagate_policy"} 10485760
 luagate_shared_dict_free_bytes{zone="luagate_policy"} 8388608
+
+# HELP luagate_policy_loaded Whether policy is loaded per subsystem (1=loaded, 0=not loaded).
+# TYPE luagate_policy_loaded gauge
+luagate_policy_loaded{subsystem="http"} 1
+luagate_policy_loaded{subsystem="stream"} 0
 ```
+
+`luagate_policy_loaded`는 `subsystem` 라벨로 HTTP/Stream을 구분한다.
+HTTP-only 배포에서 `{subsystem="stream"} 0`은 정상이다.
 
 log-schema.md §7 메트릭 전체 목록 참조.
 

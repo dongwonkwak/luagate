@@ -854,16 +854,23 @@ describe("router.dispatch", function()
       assert.truthy(output:find("luagate_policy_reload_failures_total 2"), "failures가 2여야 한다")
     end)
 
-    it("policy loaded gauge 포함 (ADR-008)", function()
+    it("policy loaded gauge: HTTP+Stream 모두 로드 시 각각 1 (ADR-008, DON-213)", function()
       output = get_metrics_output({})
 
       assert.truthy(output:find("luagate_policy_loaded"), "policy loaded gauge가 있어야 한다")
-      assert.truthy(output:find("luagate_policy_loaded 1"), "정책 로드 상태에서 값이 1이어야 한다")
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="http"} 1'),
+        "HTTP subsystem이 로드되면 1이어야 한다"
+      )
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="stream"} 1'),
+        "Stream subsystem이 로드되면 1이어야 한다"
+      )
       -- ADR-006: version hash 라벨이 없어야 한다
       assert.is_nil(output:find("luagate_policy_version_info"), "version_info 메트릭은 없어야 한다 (ADR-006)")
     end)
 
-    it("policy loaded gauge는 stream active_version이 없으면 0", function()
+    it("policy loaded gauge: HTTP-only 배포 시 http=1, stream=0 (DON-213)", function()
       _G.ngx = make_ngx({
         var = { uri = "/metrics" },
         shared = {
@@ -884,7 +891,79 @@ describe("router.dispatch", function()
 
       local printed = _G.ngx._get_printed()
       output = table.concat(printed, "")
-      assert.truthy(output:find("luagate_policy_loaded 0"), "stream version이 없으면 값이 0이어야 한다")
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="http"} 1'),
+        "HTTP-only 배포에서 http subsystem은 1이어야 한다"
+      )
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="stream"} 0'),
+        "HTTP-only 배포에서 stream subsystem은 0이어야 한다"
+      )
+    end)
+
+    it("policy loaded gauge: 둘 다 미로드 시 각각 0 (DON-213)", function()
+      _G.ngx = make_ngx({
+        var = { uri = "/metrics" },
+        shared = {
+          luagate_policy = make_shared_dict({}),
+          luagate_state = make_shared_dict(),
+          luagate_metrics = make_shared_dict(),
+          luagate_stream_metrics = make_shared_dict(),
+          luagate_connections = make_shared_dict(),
+          luagate_admin_ratelimit = make_shared_dict(),
+        },
+      })
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+      router = load_router(make_auth_pass())
+
+      router.dispatch()
+
+      local printed = _G.ngx._get_printed()
+      output = table.concat(printed, "")
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="http"} 0'),
+        "미로드 시 http subsystem은 0이어야 한다"
+      )
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="stream"} 0'),
+        "미로드 시 stream subsystem은 0이어야 한다"
+      )
+    end)
+
+    it("policy loaded gauge: version='none'이면 0 (DON-213)", function()
+      _G.ngx = make_ngx({
+        var = { uri = "/metrics" },
+        shared = {
+          luagate_policy = make_shared_dict({
+            ["http:active_version"] = "none",
+            ["stream:active_version"] = "none",
+          }),
+          luagate_state = make_shared_dict(),
+          luagate_metrics = make_shared_dict(),
+          luagate_stream_metrics = make_shared_dict(),
+          luagate_connections = make_shared_dict(),
+          luagate_admin_ratelimit = make_shared_dict(),
+        },
+      })
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+      router = load_router(make_auth_pass())
+
+      router.dispatch()
+
+      local printed = _G.ngx._get_printed()
+      output = table.concat(printed, "")
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="http"} 0'),
+        "version=none이면 http는 0이어야 한다"
+      )
+      assert.truthy(
+        output:find('luagate_policy_loaded{subsystem="stream"} 0'),
+        "version=none이면 stream은 0이어야 한다"
+      )
     end)
 
     it("upstream error counter 포함", function()
