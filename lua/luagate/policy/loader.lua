@@ -635,11 +635,15 @@ function _M.load_policy(filepath, opts)
 
     -- DON-218: Record stream:configured flag so metrics handler can distinguish
     -- "stream not configured" from "stream configured but first load failed".
+    -- Clear the flag when stream_rules is absent/empty to handle stream→HTTP-only
+    -- policy transitions correctly.
     if policy.stream_rules and #policy.stream_rules > 0 then
       local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
       if not cfg_ok then
         log_warn("safe_set stream:configured failed: " .. tostring(cfg_err))
       end
+    else
+      dict:delete("stream:configured")
     end
   else
     -- No shared dict (init context without dict, or unit tests without dict stub).

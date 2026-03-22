@@ -639,6 +639,34 @@ describe("loader.load_policy — commit (pointer swap) [7단계]", function()
     assert.is_nil(_shared_dict_instance._store["stream:configured"])
   end)
 
+  it("stream:configured 플래그가 stream→HTTP-only 전환 시 삭제된다 (DON-218)", function()
+    -- First load: stream_rules 있음 → flag set
+    register_valid_policy()
+    local result1 = loader.load_policy(VALID_PATH)
+    assert.is_true(result1.ok)
+    assert.is_true(_shared_dict_instance._store["stream:configured"])
+
+    -- Second load: stream_rules 없음 → flag deleted
+    local http_only_content = "http_only_transition_content"
+    _file_registry[VALID_PATH] = http_only_content
+    _lyaml_registry[http_only_content] = {
+      version = "1",
+      global = { default_action = "deny" },
+      rules = {
+        {
+          id = "http-only",
+          priority = 10,
+          action = "allow",
+          scope = { path = "/" },
+        },
+      },
+      stream_rules = {},
+    }
+    local result2 = loader.load_policy(VALID_PATH)
+    assert.is_true(result2.ok)
+    assert.is_nil(_shared_dict_instance._store["stream:configured"])
+  end)
+
   it("http pointer swap 실패 시 http_ok=false, stream_ok은 독립 판정", function()
     register_valid_policy()
     -- http set만 실패하도록

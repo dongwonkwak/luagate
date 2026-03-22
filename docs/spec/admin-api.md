@@ -495,8 +495,14 @@ luagate_policy_loaded{subsystem="stream"} 1  # stream 미설정 시 이 라인 �
 ```
 
 `luagate_policy_loaded`는 `subsystem` 라벨로 HTTP/Stream을 구분한다.
-stream이 설정되지 않은 배포에서는 `{subsystem="stream"}` 시계열이 생략된다.
-이로 인해 HTTP-only 배포에서 stream 관련 alert가 발화되지 않는다.
+
+- **stream 미설정** (정책에 `stream_rules` 없음): `{subsystem="stream"}` 시계열 생략.
+  HTTP-only 배포에서 stream 관련 alert가 발화되지 않는다.
+- **stream 설정됨 + 로드 성공**: `{subsystem="stream"} 1`
+- **stream 설정됨 + 첫 로드 실패**: `{subsystem="stream"} 0` — alert 발화 가능.
+  `stream:configured` 플래그(shared dict)로 미설정과 로드 실패를 구분한다.
+- **stream→HTTP-only 전환**: 새 정책에 `stream_rules`가 없으면 플래그를 삭제하여
+  stream 시계열이 다시 생략된다.
 
 **Migration note**: v0.x 이전의 `luagate_policy_loaded` (라벨 없음)에서 `{subsystem="http"|"stream"}` 라벨이 추가됨. 기존 Grafana 대시보드/alert rule 업데이트 필요.
 
