@@ -10,7 +10,7 @@
 
 Admin API는 LuaGate의 관리 인터페이스로, 정책 관리, 상태 조회, 메트릭 노출을 담당한다.
 
-- **바인딩**: `127.0.0.1:9090` (ADR-004 §6.1) — server block identity로 data plane과 분리
+- **바인딩**: `127.0.0.1:9090` (ADR-004 §6.1) — server block identity로 data plane과 분리. `LUAGATE_ADMIN_BIND` 환경변수로 바인드 주소 override 가능 (Docker/K8s 환경용)
 - **인증**: Static Bearer Token (ADR-004 §6.2)
 - **프로토콜**: HTTP/1.1
 - **구현**: `lua/luagate/admin/`

@@ -205,7 +205,7 @@ Prometheus 형식으로 `/metrics` 엔드포인트(관리면)에서 노출.
 
 #### 6.1 네트워크 바인딩
 
-- Admin API 서버: `127.0.0.1:9090` (localhost만 바인딩)
+- Admin API 서버: `127.0.0.1:9090` (localhost만 바인딩). Docker/K8s 환경에서는 `LUAGATE_ADMIN_BIND` 환경변수로 바인드 주소 override 가능 (`docker-entrypoint.sh`에서 `sed` 치환)
 - 외부 네트워크 노출 금지 (방화벽/Nginx listen 설정으로 강제)
 - 외부 대시보드 접근: 역방향 프록시 또는 SSH 터널링을 통해야 함
 

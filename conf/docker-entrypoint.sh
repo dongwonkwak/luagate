@@ -9,4 +9,9 @@ if [ -n "${LUAGATE_ADMIN_BIND:-}" ]; then
         /usr/local/openresty/nginx/conf/nginx.conf
 fi
 
-exec openresty -g 'daemon off;'
+# If CMD/command args are provided, execute them; otherwise start openresty.
+if [ $# -gt 0 ]; then
+    exec "$@"
+else
+    exec openresty -g 'daemon off;'
+fi

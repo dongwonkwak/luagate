@@ -12,7 +12,7 @@ services:
       # Mount only our app subdir — keeps OpenResty's bundled resty/* intact
       - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
       # Mount specific config file, not the whole conf/ dir
-      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf
       - ./policies:/etc/luagate/policies:ro
       - ./policies/luagate.yaml:/conf/policies.yaml:ro
       - ./conf/scanner-patterns:/conf/scanner-patterns:ro
