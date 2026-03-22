@@ -7,7 +7,6 @@
 --   - fail-closed: any error -> deny (connection close).
 --   - worker_id via ngx.worker.id() only.
 --   - All nginx variable names use luagate_ prefix.
---   - FFI free obligation: radix_free() must be called.
 --
 -- Pipeline order (stream-pipeline.md §2):
 --   preread_by_lua  -> protocol detection + SNI extraction + policy evaluation
@@ -18,11 +17,6 @@
 -- Tests: tests/unit/stream/handler_spec.lua
 
 local _M = {}
-
--- Module-level radix tree cache (worker-local upvalue).
--- Rebuilt when policy active_version changes.
-local _radix_tree = nil -- CIDR radix tree (FFI opaque pointer)
-local _radix_version = nil -- active_version at which _radix_tree was built
 
 -- Bytes to read on each peek attempt
 local PEEK_BYTES = 1024
@@ -283,81 +277,7 @@ function _M.preread()
     return ngx.exit(ngx.ERROR)
   end
 
-  -- Radix tree rebuild on version change (rust-ffi-modules.md §6.4)
-  -- Each worker independently rebuilds when active_version changes.
-  -- ADR-009: on failure/timeout, preserve old tree (LKG) and do NOT
-  -- update _radix_version so the next request retries the rebuild.
   local stream_rules = policy._compiled_stream or {}
-  if stream_ver ~= _radix_version then
-    -- Build CIDR list from stream_rules that have src_ip_cidr scope
-    local cidr_lines = {}
-    for i, rule in ipairs(policy.stream_rules or {}) do
-      if rule.scope and rule.scope.src_ip_cidr then
-        cidr_lines[#cidr_lines + 1] = rule.scope.src_ip_cidr .. "," .. i
-      end
-    end
-
-    if #cidr_lines > 0 then
-      local cidr_str = table.concat(cidr_lines, "\n") .. "\n"
-      local new_tree, build_err = stream_ffi.radix_build(cidr_str)
-      if new_tree then
-        -- Success: swap to new tree, free old, update version
-        local old_tree = _radix_tree
-        _radix_tree = new_tree
-        if old_tree then
-          stream_ffi.radix_free(old_tree)
-        end
-        _radix_version = stream_ver
-      else
-        -- Failure/timeout: keep old tree (LKG), do NOT update version
-        -- so next request retries rebuild (ADR-009 §radix_build hot reload)
-        -- Use ERR level when no LKG tree exists (cold start) for visibility;
-        -- WARN when LKG tree is available (degraded but functional).
-        local log_level = _radix_tree and ngx.WARN or ngx.ERR
-        ngx.log(
-          log_level,
-          "[luagate-stream] radix_build failed: ",
-          tostring(build_err),
-          _radix_tree and ", keeping LKG radix tree" or ", no LKG tree available (cold start)"
-        )
-        -- Increment per-worker leak counter on timeout (ADR-009 Layer 2)
-        if build_err and tostring(build_err):find("%-5") then
-          local metrics_dict = ngx.shared.luagate_metrics
-          if metrics_dict then
-            local wid = ngx.worker.id() or 0
-            metrics_dict:incr("ffi:timeout:leak:" .. wid, 1, 0)
-          end
-        end
-      end
-    else
-      -- No CIDR rules: clear tree and update version
-      local old_tree = _radix_tree
-      _radix_tree = nil
-      if old_tree then
-        stream_ffi.radix_free(old_tree)
-      end
-      _radix_version = stream_ver
-    end
-  end
-
-  -- Radix lookup: pre-filter by src_ip if tree is available
-  -- fail-closed: radix_lookup error/timeout -> deny (AGENTS.md, rust-ffi-modules.md §2)
-  local radix_match_index = nil
-  if _radix_tree then
-    local idx, lookup_err = stream_ffi.radix_lookup(_radix_tree, ctx.src_ip)
-    if lookup_err then
-      ngx.log(ngx.ERR, "[luagate-stream] radix_lookup failed: ", lookup_err, ", fail-closed")
-      ctx.deny_reason = "radix_lookup_error"
-      ctx.decision_source = "policy_engine"
-      ctx.request_state = "denied"
-      ngx.var.luagate_stream_action = "deny"
-      ngx.var.luagate_decision_source = "policy_engine"
-      ngx.var.luagate_request_state = "denied"
-      return ngx.exit(ngx.ERROR)
-    else
-      radix_match_index = idx -- nil if no match, number if matched
-    end
-  end
 
   -- Build stream request context for evaluator
   local request_ctx = {
@@ -365,7 +285,6 @@ function _M.preread()
     dst_port = ctx.dst_port,
     detected_protocol = ctx.detected_protocol,
     sni = ctx.sni,
-    radix_match_index = radix_match_index,
   }
 
   -- Evaluate against compiled stream rules (ADR-002 first-match-wins)
