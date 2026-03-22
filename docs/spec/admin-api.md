@@ -160,7 +160,7 @@ GET /health
 | `ffi_watchdog_leak_count` | array\<integer\> | Per-worker detached thread leak 카운터 배열 (인덱스 = worker id). [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
 | `ffi_watchdog_timeouts` | integer | 전체 worker의 leak count 합산. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
 
-> 멀티 인스턴스 환경에서 외부 모니터링은 각 인스턴스의 `source_version`, `active_http_version`, `active_stream_version`이 CI/CD가 계산한 `target_version`과 모두 일치하는지 확인해야 한다 ([ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.3).
+> 멀티 인스턴스 환경에서 외부 모니터링은 각 인스턴스의 `source_version`, `active_http_version`, `active_stream_version`이 CI/CD가 계산한 `target_version`과 모두 일치하는지 확인해야 한다 ([ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.3). 단, HTTP-only 배포(`active_stream_version`이 null)인 경우 stream version 비교를 건너뛴다.
 
 **응답 503** (unhealthy):
 

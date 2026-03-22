@@ -79,6 +79,17 @@ groups:
           description: "Policy reload has failed in the last 5 minutes."
           runbook_url: "docs/runbook/alert-response.md#LuagatePolicyReloadFailed"
 
+      # ── Stream Policy ─────────────────────────────────────────────────
+      - alert: LuagateStreamPolicyNotLoaded
+        expr: luagate_policy_loaded{subsystem="stream"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stream policy not loaded on {{ $labels.instance }}"
+          description: "luagate_policy_loaded{subsystem=\"stream\"} has been 0 for 5 minutes. If this is an HTTP-only deployment, this is expected."
+          runbook_url: "docs/runbook/alert-response.md#LuagateStreamPolicyNotLoaded"
+
       # ── Service Health ───────────────────────────────────────────────
       - alert: LuagateWorkerDown
         expr: |
