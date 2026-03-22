@@ -160,12 +160,11 @@ verify_instance() {
     fail "$name: source/http mismatch (source=$sv, http=$hv)"
   fi
 
-  # active_stream_version: may be "none" if no stream rules defined,
-  # but if present must match source_version
-  if [ "$stv" = "none" ] || [ "$stv" = "$sv" ]; then
-    pass "$name: active_stream_version consistent ($stv)"
+  # ADR-008 §8.3 step 5: active_stream_version == target_version
+  if [ "$stv" = "$target" ]; then
+    pass "$name: active_stream_version == target_version"
   else
-    fail "$name: stream version mismatch (source=$sv, stream=$stv)"
+    fail "$name: active_stream_version ($stv) != target_version ($target)"
   fi
 
   # source_version should match target_version (SHA256 of deployed file)
