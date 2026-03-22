@@ -374,12 +374,13 @@ local function handle_metrics()
     local stream_ver = policy_dict:get("stream:active_version")
     local http_loaded = (http_ver and http_ver ~= "none") and 1 or 0
     prom_line(buf, "luagate_policy_loaded", '{subsystem="http"}', http_loaded)
-    -- DON-213: Only emit stream subsystem metric when stream is configured.
-    -- If stream:active_version was never set (nil) or is "none", stream is
-    -- not configured — omit the time series entirely so HTTP-only deployments
-    -- do not produce a perpetual 0 that confuses alerting.
-    if stream_ver and stream_ver ~= "none" then
-      prom_line(buf, "luagate_policy_loaded", '{subsystem="stream"}', 1)
+    -- DON-218: Use stream:configured flag to distinguish "stream not configured"
+    -- from "stream configured but first load failed". When stream is configured,
+    -- always emit the time series (0 or 1) so alerts can fire on load failure.
+    local stream_configured = policy_dict:get("stream:configured")
+    if stream_configured then
+      local stream_loaded = (stream_ver and stream_ver ~= "none") and 1 or 0
+      prom_line(buf, "luagate_policy_loaded", '{subsystem="stream"}', stream_loaded)
     end
   else
     prom_line(buf, "luagate_policy_loaded", '{subsystem="http"}', 0)

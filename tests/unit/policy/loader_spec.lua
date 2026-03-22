@@ -611,6 +611,34 @@ describe("loader.load_policy — commit (pointer swap) [7단계]", function()
     assert.is_true(warn_found)
   end)
 
+  it("stream:configured 플래그가 stream_rules 존재 시 기록된다 (DON-218)", function()
+    register_valid_policy()
+    local result = loader.load_policy(VALID_PATH)
+    assert.is_true(result.ok)
+    assert.is_true(_shared_dict_instance._store["stream:configured"])
+  end)
+
+  it("stream:configured 플래그가 stream_rules 미존재 시 기록되지 않는다 (DON-218)", function()
+    local http_only_content = "http_only_policy_content"
+    _file_registry[VALID_PATH] = http_only_content
+    _lyaml_registry[http_only_content] = {
+      version = "1",
+      global = { default_action = "deny" },
+      rules = {
+        {
+          id = "http-only",
+          priority = 10,
+          action = "allow",
+          scope = { path = "/" },
+        },
+      },
+      stream_rules = {},
+    }
+    local result = loader.load_policy(VALID_PATH)
+    assert.is_true(result.ok)
+    assert.is_nil(_shared_dict_instance._store["stream:configured"])
+  end)
+
   it("http pointer swap 실패 시 http_ok=false, stream_ok은 독립 판정", function()
     register_valid_policy()
     -- http set만 실패하도록
