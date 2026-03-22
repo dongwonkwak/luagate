@@ -263,8 +263,16 @@ function _M.inject_outbound(trace_ctx, proxy_span)
     -- Malformed/invalid tracestate → drop (ADR-010 §7)
     local ts = ngx.req.get_headers()["tracestate"]
     if ts and type(ts) == "string" and #ts > 0 then
-      -- Basic validation: at least one key=value pair
-      if not ts:match("^[%w_%-*/]+=[%w_%-+/.]+") then
+      -- Validate ALL comma-separated entries are well-formed key=value pairs
+      local valid = true
+      for entry in ts:gmatch("[^,]+") do
+        local trimmed = entry:match("^%s*(.-)%s*$")
+        if not trimmed or not trimmed:match("^[%w_%-*/]+=[%w_%-+/.%%:@]+$") then
+          valid = false
+          break
+        end
+      end
+      if not valid then
         ngx.req.clear_header("tracestate")
       end
       -- Valid: pass-through (no modification)

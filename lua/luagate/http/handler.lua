@@ -511,9 +511,24 @@ function _M.access()
   local default_action = (policy.global and policy.global.default_action) or "deny"
 
   -- 5. Evaluate against compiled HTTP rules (ADR-002 §3.1 first-match-wins)
+  --    pcall wrapping: catch Lua-level exceptions (fail-closed invariant)
   local policy_eval_start_ns = ngx.now() * 1e9
-  local result = evaluator.evaluate(policy._compiled_http or {}, request_ctx, default_action)
+  local ok_eval, result = pcall(evaluator.evaluate, policy._compiled_http or {}, request_ctx, default_action)
   local policy_eval_end_ns = ngx.now() * 1e9
+
+  if not ok_eval then
+    ngx.log(ngx.ERR, "[luagate] evaluator.evaluate() raised: ", tostring(result))
+    ctx.action = "deny"
+    ctx.request_state = "policy_denied"
+    ctx.decision_source = "policy_engine"
+    ctx.deny_reason = "policy_eval_error"
+    ngx.var.luagate_action = "deny"
+    ngx.var.luagate_decision_source = "policy_engine"
+    ngx.var.luagate_request_state = "policy_denied"
+    ngx.var.luagate_deny_reason = "policy_eval_error"
+    do_deny("policy_eval_error", ctx.request_id or "")
+    return
+  end
 
   -- ADR-010 §2: create policy_eval child span
   local trace_ctx_pe = ctx.trace
