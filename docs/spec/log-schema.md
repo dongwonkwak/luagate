@@ -429,11 +429,12 @@ MCP 서버를 통한 Admin API 호출 시, 모든 감사 로그 이벤트에 아
 | 우선순위 | 소스 | 조건 |
 |---------|------|------|
 | 1 | PROXY Protocol (`$proxy_protocol_addr`) | nginx `proxy_protocol on` 설정 시 |
-| 2 | X-Forwarded-For (최좌측 non-trusted IP) | trusted proxy CIDR 범위 내 $remote_addr 시 |
+| 2 | X-Forwarded-For (최우측 non-trusted valid IPv4) | trusted proxy 범위 내 $remote_addr 시. 오른쪽→왼쪽 순회, 스푸핑 방어. |
 | 3 | `$remote_addr` | fallback (직접 연결) |
 
-> **Trusted proxy CIDR**: nginx.conf의 `set_real_ip_from` 범위.
-> 설정 미적용 시 XFF 무시, `$remote_addr` 사용.
+> **Trusted proxy**: `conf/luagate.yaml`의 `trusted_proxies` 배열 (개별 IP + CIDR 범위).
+> 빈 배열(기본값) 시 XFF 무시, `$remote_addr` 사용.
+> 구현: `lua/luagate/http/client_ip.lua`.
 
 ## 7. 메트릭 목록
 

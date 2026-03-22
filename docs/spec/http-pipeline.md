@@ -202,12 +202,13 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 우선순위 (높은 순):
 
 1. **PROXY Protocol** — nginx `proxy_protocol on` 설정 시 `$proxy_protocol_addr`
-2. **X-Forwarded-For** (최좌측 non-trusted IP) — `$remote_addr`이 trusted proxy CIDR 범위 내일 때만 신뢰. XFF 헤더에서 최좌측 non-trusted IP를 추출한다
+2. **X-Forwarded-For** (최우측 non-trusted IP) — `$remote_addr`이 trusted proxy CIDR 범위 내일 때만 신뢰. XFF 헤더를 오른쪽부터 왼쪽으로 순회하며 첫 번째 non-trusted valid IPv4를 추출한다. 이 방식은 클라이언트가 XFF 왼쪽에 스푸핑 IP를 주입하는 공격을 방어한다.
 3. **`$remote_addr`** — fallback (직접 연결 IP)
 
-> **Trusted proxy**: nginx.conf에서 `set_real_ip_from` CIDR로 설정한 범위.
-> 범위 미설정 시 XFF 헤더 무시, `$remote_addr` 사용.
-> "최좌측 non-trusted IP" 기준은 log-schema.md §6과 동일하다.
+> **Trusted proxy**: `conf/luagate.yaml`의 `trusted_proxies` 배열로 설정 (개별 IP + CIDR 범위).
+> 빈 배열(기본값) 시 XFF 헤더 무시, `$remote_addr` 사용.
+> 구현: `lua/luagate/http/client_ip.lua`.
+> "최우측 non-trusted IP" 기준은 log-schema.md §6과 동일하다.
 
 ## 8. 멀티레이어 디코딩 (§5)
 

@@ -203,9 +203,14 @@ function _M.rewrite()
   ngx.var.luagate_path_normalized = path_normalized
   local normalize_end_ns = ngx.now() * 1e9
 
-  -- 5. src_ip: MVP uses remote_addr directly.
-  --    Full PROXY Protocol / XFF trusted-proxy logic is a future issue.
-  ngx.var.luagate_src_ip = ngx.var.remote_addr
+  -- 5. src_ip: resolve real client IP (PROXY protocol → XFF → remote_addr)
+  local ok_cip, client_ip = pcall(require, "luagate.http.client_ip")
+  if ok_cip then
+    ngx.var.luagate_src_ip = client_ip.resolve()
+  else
+    ngx.log(ngx.WARN, "[luagate] client_ip module load failed, using remote_addr: ", tostring(client_ip))
+    ngx.var.luagate_src_ip = ngx.var.remote_addr
+  end
 
   -- 6. active_version snapshot at request start (http-pipeline.md §2.5)
   --    log_by_lua MUST use this snapshot, not re-read from shared dict.
