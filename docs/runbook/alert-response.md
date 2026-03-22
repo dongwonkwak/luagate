@@ -187,10 +187,10 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ---
 
-## LuagateStreamPolicyNotLoaded
+## Optional: LuagateStreamPolicyNotLoaded
 
 **심각도**: warning
-**조건**: `luagate_policy_loaded{subsystem="stream"} == 0` (5분 지속)
+**조건**: stream-enabled 배포에서만 커스텀 alert rule로 `luagate_policy_loaded{subsystem="stream"} == 0` (5분 지속)
 
 ### 즉시 조치
 
@@ -200,8 +200,9 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   http://localhost:9090/metrics | grep luagate_policy_loaded
 
 # 2. HTTP-only 배포인지 확인
-# HTTP-only 배포에서는 stream=0이 정상 — alert 무시 가능
+# HTTP-only 배포에서는 stream=0이 정상
 curl -s http://localhost:9090/health | jq .active_stream_version
 ```
 
-> **참고**: HTTP-only 배포에서는 이 alert가 정상적으로 발생한다. 배포 유형에 따라 alert rule을 비활성화할 수 있다.
+> **참고**: 이 alert는 기본 `conf/alerts.yml`에는 포함되지 않는다.
+> stream-enabled 배포에서만 별도 alert rule로 추가한다.

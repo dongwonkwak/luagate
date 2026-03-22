@@ -91,13 +91,3 @@ groups:
           summary: "LuaGate target down or HTTP policy not loaded"
           description: "Prometheus cannot reach LuaGate scrape target, or HTTP policy is not loaded for 1 minute."
           runbook_url: "docs/runbook/alert-response.md#LuagateWorkerDown"
-
-      - alert: LuagateStreamPolicyNotLoaded
-        expr: luagate_policy_loaded{subsystem="stream"} == 0
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Stream policy not loaded"
-          description: "Stream subsystem policy is not loaded for 5 minutes. This is expected in HTTP-only deployments."
-          runbook_url: "docs/runbook/alert-response.md#LuagateStreamPolicyNotLoaded"
