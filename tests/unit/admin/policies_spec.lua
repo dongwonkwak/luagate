@@ -565,6 +565,55 @@ describe("PUT /api/v1/policies", function()
     assert.are.equal("reload", body.stage)
   end)
 
+  it("passes If-Match when source_version is nil and file SHA256 matches", function()
+    _loader_versions.source_version = nil
+    -- stub sha256: to_hex(final()) returns raw content, so If-Match must equal file content
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"' .. yaml_body .. '"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+  end)
+
+  it("returns 409 when source_version is nil and If-Match does not match file SHA256", function()
+    _loader_versions.source_version = nil
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"wrong_version"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(409, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("version_mismatch", body.error)
+  end)
+
+  it("returns 500 when source_version is nil and policy file is unreadable (fail-closed)", function()
+    _loader_versions.source_version = nil
+    _file_registry["conf/policies.yaml"] = nil -- simulate unreadable file
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(500, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("internal_error", body.error)
+  end)
+
   it("returns 409 when source_version changes after the initial If-Match check", function()
     _loader_before_lock_hook = function()
       _loader_versions.source_version = "def456"
@@ -580,6 +629,25 @@ describe("PUT /api/v1/policies", function()
     assert.are.equal("version_mismatch", body.error)
     assert.are.equal("reload", body.stage)
     assert.truthy(body.details[1]:find("expected def456"))
+  end)
+
+  it("returns 500 when source_version becomes nil after lock and file is unreadable (fail-closed)", function()
+    -- Initial check passes with source_version set
+    -- After lock acquired, source_version becomes nil and file is removed
+    _loader_before_lock_hook = function()
+      _loader_versions.source_version = nil
+      _file_registry["conf/policies.yaml"] = nil
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(500, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("internal_error", body.error)
+    assert.are.equal("reload", body.stage)
   end)
 
   it("returns 413 when body is missing", function()
