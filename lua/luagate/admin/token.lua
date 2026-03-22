@@ -149,6 +149,13 @@ function _M.handle_post_rotate()
     current_token = os.getenv("LUAGATE_ADMIN_TOKEN")
   end
 
+  -- Snapshot previous old_token for rollback (best-effort TTL restoration).
+  -- Note: on rollback we reset TTL to GRACE_PERIOD_TTL rather than the
+  -- exact remaining TTL because shared dict does not expose remaining TTL.
+  -- This is acceptable as a best-effort restoration — the grace window may
+  -- be slightly extended but never shortened to zero.
+  local prev_old_token = state_dict:get(KEY_OLD_TOKEN)
+
   -- Store old token with grace period TTL — fail-closed on write error
   if current_token then
     local ok, set_err = state_dict:safe_set(KEY_OLD_TOKEN, current_token, GRACE_PERIOD_TTL)
@@ -176,7 +183,12 @@ function _M.handle_post_rotate()
     else
       state_dict:delete(KEY_ACTIVE_TOKEN)
     end
-    state_dict:delete(KEY_OLD_TOKEN)
+    -- Rollback: restore previous old_token (grace token from prior rotation)
+    if prev_old_token then
+      state_dict:set(KEY_OLD_TOKEN, prev_old_token, GRACE_PERIOD_TTL)
+    else
+      state_dict:delete(KEY_OLD_TOKEN)
+    end
     send_error(500, "audit_write_failed", "Audit log failed — mutation rolled back", "audit")
     return
   end

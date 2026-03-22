@@ -364,16 +364,40 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-**정책 변경 (`policy_update`):**
+**정책 변경 시도 (`policy_update_attempt`):**
 ```json
 {
   "timestamp": "2026-03-14T07:00:02Z",
-  "event": "policy_update",
+  "event": "policy_update_attempt",
   "actor_ip": "127.0.0.1",
-  "staged_version": "b4e3f2a1...",
-  "active_http_version": "a3f2c1d4...",
-  "active_stream_version": "a3f2c1d4...",
-  "warnings_count": 0
+  "trigger": "api",
+  "new_version": "b4e3f2a1...",
+  "previous_version": "a3f2c1d4..."
+}
+```
+
+**정책 변경 성공 (`policy_update_success`):**
+```json
+{
+  "timestamp": "2026-03-14T07:00:02Z",
+  "event": "policy_update_success",
+  "actor_ip": "127.0.0.1",
+  "trigger": "api",
+  "previous_version": "a3f2c1d4...",
+  "new_version": "b4e3f2a1..."
+}
+```
+
+**정책 변경 실패 (`policy_update_failure`):**
+```json
+{
+  "timestamp": "2026-03-14T07:00:02Z",
+  "event": "policy_update_failure",
+  "actor_ip": "127.0.0.1",
+  "trigger": "api",
+  "stage": "commit",
+  "reason": "http subsystem swap failed",
+  "current_version": "a3f2c1d4..."
 }
 ```
 

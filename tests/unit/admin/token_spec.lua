@@ -378,5 +378,46 @@ describe("token rotation handler", function()
       cjson_mod.encode = original_encode
       os.getenv = original_getenv -- luacheck: ignore 122
     end)
+
+    it("audit 실패 rollback 시 이전 rotation의 grace token을 보존한다", function()
+      local dict = ctx.get_dict()
+      -- Simulate a prior rotation: active=tokenA, old=tokenB (grace period)
+      local prev_active = string.rep("A", 32)
+      local prev_grace = string.rep("B", 32)
+      dict:set("luagate_admin_token", prev_active)
+      dict:set("luagate_admin_token_old", prev_grace, 30)
+
+      -- Make audit encode fail
+      local cjson_mod = package.loaded["cjson.safe"]
+      local original_encode = cjson_mod.encode
+      cjson_mod.encode = function(tbl)
+        if type(tbl) == "table" and tbl.event then
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      local new_token = string.rep("C", 32)
+      ctx.set_body('{"new_token": "' .. new_token .. '"}')
+
+      token_mod.handle_post_rotate()
+
+      -- Verify rollback: active token restored to prev_active
+      assert.are.equal(
+        prev_active,
+        dict:get("luagate_admin_token"),
+        "active token should be rolled back to previous value"
+      )
+
+      -- Verify rollback: grace token restored to prev_grace (not deleted)
+      assert.are.equal(
+        prev_grace,
+        dict:get("luagate_admin_token_old"),
+        "grace token from prior rotation should be preserved on rollback"
+      )
+
+      -- Restore
+      cjson_mod.encode = original_encode
+    end)
   end)
 end)

@@ -2054,4 +2054,80 @@ describe("감사 로그 보장 범위", function()
       assert.is_true(has_audit, "audit log should be written on reload success")
     end)
   end)
+
+  describe("post-commit audit 실패 시 성공 응답 유지", function()
+    it("PUT post-commit audit encode 실패 시에도 200을 반환한다", function()
+      -- Allow pre-commit audit to succeed, fail only on post-commit audit
+      local audit_call_count = 0
+      package.loaded["cjson.safe"].encode = function(tbl)
+        if type(tbl) == "table" and tbl.event then
+          audit_call_count = audit_call_count + 1
+          if audit_call_count == 1 then
+            -- Pre-commit audit (policy_update_attempt) succeeds
+            return original_encode(tbl)
+          end
+          -- Post-commit audit (policy_update_success) fails
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      policies.handle_put_policies()
+
+      -- Mutation is already applied — response should be 200, not 500
+      assert.are.equal(200, _G.ngx.status)
+
+      -- Warning log should be emitted
+      local logged = _G.ngx._get_logged()
+      local has_warning = false
+      for _, entry in ipairs(logged) do
+        if entry:find("post%-commit audit encode failed") then
+          has_warning = true
+          break
+        end
+      end
+      assert.is_true(has_warning, "should log a warning for post-commit audit encode failure")
+    end)
+
+    it("POST reload post-commit audit encode 실패 시에도 200을 반환한다", function()
+      _G.ngx.req.get_headers = function()
+        return {}
+      end
+      _G.ngx.req.get_method = function()
+        return "POST"
+      end
+      policies = load_policies()
+
+      -- Allow pre-commit audit to succeed, fail only on post-commit audit
+      local audit_call_count = 0
+      package.loaded["cjson.safe"].encode = function(tbl)
+        if type(tbl) == "table" and tbl.event then
+          audit_call_count = audit_call_count + 1
+          if audit_call_count == 1 then
+            -- Pre-commit audit (policy_reload_attempt) succeeds
+            return original_encode(tbl)
+          end
+          -- Post-commit audit (policy_reload_success) fails
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      policies.handle_post_reload()
+
+      -- Reload is already applied — response should be 200, not 500
+      assert.are.equal(200, _G.ngx.status)
+
+      -- Warning log should be emitted
+      local logged = _G.ngx._get_logged()
+      local has_warning = false
+      for _, entry in ipairs(logged) do
+        if entry:find("post%-commit audit encode failed") then
+          has_warning = true
+          break
+        end
+      end
+      assert.is_true(has_warning, "should log a warning for post-commit audit encode failure")
+    end)
+  end)
 end)

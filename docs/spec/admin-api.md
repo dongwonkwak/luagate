@@ -95,7 +95,14 @@ Retry-After: 42
 | `payload_too_large` | `request` | 413 |
 | `internal_error` | `internal` | 500 |
 
-> **감사 기록 실패 시**: audit 레코드 직렬화(`cjson.encode`) 실패 시 mutation/reload를 **거부**한다 (`audit_write_failed` 에러 반환).
+> **감사 기록 실패 시 (pre-commit vs post-commit 구분)**:
+>
+> - **Pre-commit audit** (`policy_update_attempt`, `policy_reload_attempt`, `token_rotated`):
+>   직렬화(`cjson.encode`) 실패 시 mutation/reload를 **거부**한다 (`audit_write_failed` 에러 반환).
+> - **Post-commit audit** (`policy_update_success`, `policy_update_partial`, `policy_reload_success`, `policy_reload_partial`):
+>   직렬화 실패 시 경고 로그만 남긴다. mutation/reload는 이미 적용되었으므로 거짓으로 실패 처리하면
+>   클라이언트가 적용된 변경을 인지하지 못하는 misleading 동작이 발생한다.
+>
 > 디스크 I/O 계층(Nginx `error_log`)의 기록 보장은 운영 모니터링(디스크 공간/I/O 에러 알림)에 위임한다.
 > ADR-004 §6.3 참조.
 
