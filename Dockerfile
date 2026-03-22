@@ -60,6 +60,9 @@ COPY --from=ui-builder /build/ui/dist/ /etc/luagate/ui/dist/
 # Copy policies
 COPY policies/ /etc/luagate/policies/
 
+COPY conf/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 8080 8443 9090
 
-CMD ["openresty", "-g", "daemon off;"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

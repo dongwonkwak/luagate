@@ -44,6 +44,7 @@ services:
     environment:
       - LUAGATE_ENV=test
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token-32bytes}
+      - LUAGATE_ADMIN_BIND=0.0.0.0
     networks:
       luagate-multi-net:
     depends_on:
@@ -72,6 +73,7 @@ services:
     environment:
       - LUAGATE_ENV=test
       - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token-32bytes}
+      - LUAGATE_ADMIN_BIND=0.0.0.0
     networks:
       luagate-multi-net:
     depends_on:
