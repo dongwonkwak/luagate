@@ -191,12 +191,16 @@ Authorization: Bearer <token>
 
 상세 정보: worker 수, 버전, uptime, policy version.
 
+- `uptime_seconds`: worker 프로세스 가동 시간 (모듈 로드 이후 경과 초)
+- `policy_age_seconds`: 마지막 정책 로드 이후 경과 초 (로드 전이면 0)
+
 **응답 200:**
 
 ```json
 {
   "luagate_version": "0.1.0",
   "uptime_seconds": 3600,
+  "policy_age_seconds": 1200,
   "worker_count": 4,
   "active_http_version": "a3f2c1d4...",
   "active_stream_version": "b4e3f2a1...",

@@ -310,7 +310,32 @@ describe("router.dispatch", function()
       assert.are.equal("def456", body.active_stream_version)
       assert.are.equal("success", body.last_reload_status)
       assert.is_number(body.uptime_seconds)
+      assert.is_number(body.policy_age_seconds)
       assert.is_string(body.last_reload_at)
+    end)
+
+    it("GET /api/v1/status -> uptime_seconds independent of policy_loaded_at", function()
+      _G.ngx.var.uri = "/api/v1/status"
+      _G.ngx.shared.luagate_policy = make_shared_dict({
+        ["http:active_version"] = "abc123",
+        ["stream:active_version"] = "def456",
+      })
+      _G.ngx.worker.count = function()
+        return 1
+      end
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.is_number(body.uptime_seconds)
+      assert.truthy(body.uptime_seconds >= 0)
+      assert.are.equal(0, body.policy_age_seconds)
     end)
 
     it("GET /health -> 200 with per-worker ffi_watchdog_leak_count array", function()

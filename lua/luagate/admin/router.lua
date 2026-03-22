@@ -23,6 +23,7 @@ local token = require("luagate.admin.token")
 local _M = {}
 local EMPTY_JSON_ARRAY = cjson.empty_array or setmetatable({}, { __jsontype = "array" })
 local LUAGATE_VERSION = "0.1.0"
+local _worker_start_time = ngx.now()
 
 -- ---------------------------------------------------------------------------
 -- Constants
@@ -228,8 +229,8 @@ end
 
 --- GET /api/v1/status — detailed server status.
 -- Exposes a minimal status snapshot derived from shared dict state.
--- Uptime is approximated from the last successful policy load timestamp when
--- available, which is the earliest startup-time signal currently persisted.
+-- DON-222: uptime_seconds is worker process uptime (since module load),
+-- policy_age_seconds is time since last successful policy load.
 local function handle_status()
   local policy_dict = ngx.shared.luagate_policy
   local http_version = policy_dict and policy_dict:get("http:active_version")
@@ -241,14 +242,17 @@ local function handle_status()
     worker_count = 1
   end
 
-  local uptime_seconds = 0
+  local uptime_seconds = math.max(0, math.floor(ngx.now() - _worker_start_time))
+
+  local policy_age_seconds = 0
   if loaded_at_epoch and loaded_at_epoch > 0 then
-    uptime_seconds = math.max(0, math.floor(ngx.now() - loaded_at_epoch))
+    policy_age_seconds = math.max(0, math.floor(ngx.now() - loaded_at_epoch))
   end
 
   send_json(200, {
     luagate_version = LUAGATE_VERSION,
     uptime_seconds = uptime_seconds,
+    policy_age_seconds = policy_age_seconds,
     worker_count = worker_count,
     active_http_version = http_version or "none",
     active_stream_version = stream_version or "none",
