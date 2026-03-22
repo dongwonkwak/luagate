@@ -1014,6 +1014,244 @@ describe("PUT /api/v1/policies", function()
     local body = dkjson.decode(said[1])
     assert.are.equal("validation_failed", body.error)
   end)
+
+  it("rejects body with UTF-8 BOM", function()
+    local bom_body = string.char(0xEF, 0xBB, 0xBF) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("BOM"))
+  end)
+
+  it("rejects body with UTF-16 LE BOM", function()
+    local bom_body = string.char(0xFF, 0xFE) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-16 LE"))
+  end)
+
+  it("rejects body with UTF-16 BE BOM", function()
+    local bom_body = string.char(0xFE, 0xFF) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-16 BE"))
+  end)
+
+  it("rejects body with UTF-32 LE BOM", function()
+    local bom_body = string.char(0xFF, 0xFE, 0x00, 0x00) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-32 LE"))
+  end)
+
+  it("rejects body with UTF-32 BE BOM", function()
+    local bom_body = string.char(0x00, 0x00, 0xFE, 0xFF) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-32 BE"))
+  end)
+
+  it("rejects non-UTF-8 charset in Content-Type", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml; charset=iso-8859-1",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it("rejects repeated Content-Type headers with non-UTF-8 charset without 500", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = {
+          "application/x-yaml; charset=iso-8859-1",
+          "application/x-yaml; charset=utf-8",
+        },
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it("accepts charset=UTF-8 (case insensitive) in Content-Type", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml; charset=UTF-8",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    -- Should pass charset check and proceed to later stages (200 success)
+    assert.are.equal(200, _G.ngx.status)
+  end)
+
+  it("accepts charset=utf-8 (lowercase) in Content-Type", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml; charset=utf-8",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    -- lowercase utf-8 should also pass charset check
+    assert.are.equal(200, _G.ngx.status)
+  end)
+
+  it("rejects non-UTF-8 charset with uppercase key (Charset=)", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml; Charset=iso-8859-1",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it("rejects non-UTF-8 charset with spaces around '='", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml; charset = iso-8859-1",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it('accepts quoted charset="utf-8"', function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = 'application/x-yaml; charset="utf-8"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+  end)
+
+  it("accepts Content-Type without charset (assumes UTF-8)", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    -- Should pass charset check and proceed to later stages (200 success)
+    assert.are.equal(200, _G.ngx.status)
+  end)
 end)
 
 -- ===========================================================================
@@ -1170,6 +1408,67 @@ describe("PUT /api/v1/policies?dry_run=true", function()
     for _, entry in ipairs(logged) do
       assert.falsy(entry:find("%[luagate:audit%]"), "dry_run should not produce audit log entries")
     end
+  end)
+
+  it("rejects body with UTF-8 BOM even in dry_run mode", function()
+    local bom_body = string.char(0xEF, 0xBB, 0xBF) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("BOM"))
+  end)
+
+  it("rejects non-UTF-8 charset even in dry_run mode", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["Content-Type"] = "application/x-yaml; charset=iso-8859-1",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it("rejects repeated Content-Type headers in dry_run mode without 500", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["Content-Type"] = {
+          "application/x-yaml; charset=iso-8859-1",
+          "application/x-yaml; charset=utf-8",
+        },
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.are.equal("request", body.stage)
+    assert.truthy(body.details[1]:find("UTF%-8"))
   end)
 
   it("does not call loader.load_policy", function()
