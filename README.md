@@ -200,6 +200,64 @@ luagate/
 | [ADR-010](docs/design/adr/ADR-010-opentelemetry-tracing.md) | OpenTelemetry 트레이싱 |
 | [ADR-011](docs/design/adr/ADR-011-mcp-server.md) | MCP 서버 설계 |
 
+### MCP 연동 (AI 어시스턴트)
+
+LuaGate는 [MCP(Model Context Protocol)](https://modelcontextprotocol.io/) 서버를 제공하여 AI 어시스턴트에서 자연어로 정책을 관리할 수 있습니다.
+
+```bash
+# .env 파일에 Admin API 토큰 설정 (make up에 필수)
+echo 'LUAGATE_ADMIN_TOKEN=your-token-here-at-least-32-bytes-long' > .env
+
+cd mcp && npm install && npm run build
+```
+
+**Claude Desktop** (`~/.config/claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "luagate": {
+      "command": "node",
+      "args": ["<path-to-luagate>/mcp/dist/index.js"],
+      "env": {
+        "LUAGATE_ADMIN_URL": "http://127.0.0.1:9090",
+        "LUAGATE_ADMIN_TOKEN": "your-token-here",
+        "MCP_CLIENT_NAME": "claude-desktop"
+      }
+    }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "luagate": {
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp/dist/index.js"],
+      "env": {
+        "LUAGATE_ADMIN_URL": "http://127.0.0.1:9090",
+        "LUAGATE_ADMIN_TOKEN": "${env:LUAGATE_ADMIN_TOKEN}",
+        "MCP_CLIENT_NAME": "vscode"
+      }
+    }
+  }
+}
+```
+
+**연동 테스트 시나리오:**
+
+| 시나리오 | 프롬프트 예시 | 기대 동작 |
+|---------|-------------|----------|
+| 정책 조회 | "현재 LuaGate 정책 보여줘" | YAML + ETag 출력 |
+| IP 차단 | "203.0.113.0/24 차단해줘" | validate → update → 버전 변경 확인 |
+| Self-healing | "version 필드 삭제하고 업데이트해줘" | 검증 실패 422 → 기존 정책 유지 |
+| 409 Conflict | 오래된 ETag로 업데이트 시도 | 409 에러 + 재조회 안내 |
+
+상세 가이드 및 감사 로그 검증 절차: [mcp/README.md](mcp/README.md)
+
 ### 운영
 
 - [Runbook 인덱스](docs/runbook/README.md) — 운영 시나리오별 대응 절차

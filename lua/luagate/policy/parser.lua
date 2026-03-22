@@ -161,6 +161,16 @@ function _M.parse_string(yaml_str)
     return nil, err
   end
 
+  -- Reject legacy nested structure (http.rules / stream.rules).
+  -- Only flat top-level keys (rules / stream_rules) are allowed per
+  -- policy-engine.md §2.0.
+  if type(raw.http) == "table" then
+    return nil, "legacy 'http' key not supported; use top-level 'rules' (policy-engine.md §2.0)"
+  end
+  if type(raw.stream) == "table" then
+    return nil, "legacy 'stream' key not supported; use 'stream_rules' (policy-engine.md §2.0)"
+  end
+
   -- Build the canonical policy table.
   local http_rules, http_err = _M.parse_http_rules(raw.rules)
   if not http_rules then

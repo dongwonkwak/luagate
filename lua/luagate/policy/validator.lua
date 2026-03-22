@@ -19,6 +19,36 @@ local _M = {}
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
+-- Known legacy rule fields that indicate the old nested policy format.
+-- These fields were used in the pre-spec format (http.rules with match/path_prefix/etc.)
+-- and must be rejected to prevent silent catch-all fallback.
+local LEGACY_RULE_FIELDS = {
+  match = true,
+  path_prefix = true,
+  source_cidrs = true,
+  port = true,
+  status = true,
+  rate = true,
+}
+
+--- Check for legacy rule fields and return error if found.
+-- @param rule table  Rule table
+-- @param rule_type string  "http" or "stream"
+-- @return string|nil  Error message, or nil if no legacy fields
+local function check_legacy_fields(rule, rule_type)
+  for field in pairs(LEGACY_RULE_FIELDS) do
+    if rule[field] ~= nil then
+      return rule_type
+        .. " rule '"
+        .. tostring(rule.id or "?")
+        .. "': legacy field '"
+        .. field
+        .. "' is not supported; use 'scope' with canonical field names instead (see policy-engine.md §2.0)"
+    end
+  end
+  return nil
+end
+
 --- Check that `value` is a non-empty string.
 local function is_nonempty_string(value)
   return type(value) == "string" and #value > 0
@@ -224,6 +254,12 @@ end
 --- Validate a single HTTP rule table.
 -- Returns nil on success, error string on failure.
 local function validate_http_rule(rule)
+  -- legacy field check (must precede id check for better error messages)
+  local legacy_err = check_legacy_fields(rule, "http")
+  if legacy_err then
+    return legacy_err
+  end
+
   -- id: required, non-empty string
   if not is_nonempty_string(rule.id) then
     return "http rule is missing required field 'id' (must be a non-empty string)"
@@ -273,6 +309,12 @@ end
 --- Validate a single Stream rule table.
 -- Returns nil on success, error string on failure.
 local function validate_stream_rule(rule)
+  -- legacy field check
+  local legacy_err = check_legacy_fields(rule, "stream")
+  if legacy_err then
+    return legacy_err
+  end
+
   -- id: required, non-empty string
   if not is_nonempty_string(rule.id) then
     return "stream rule is missing required field 'id' (must be a non-empty string)"
@@ -350,6 +392,13 @@ end
 function _M.validate(policy)
   if type(policy) ~= "table" then
     return nil, "policy must be a table"
+  end
+
+  -- ---------------------------------------------------------------------------
+  -- 0. version field (required, must be a non-empty string)
+  -- ---------------------------------------------------------------------------
+  if not is_nonempty_string(policy.version) then
+    return nil, "policy is missing required 'version' field (must be a non-empty string)"
   end
 
   -- ---------------------------------------------------------------------------

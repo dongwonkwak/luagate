@@ -86,14 +86,18 @@ describe("MCP E2E Integration", () => {
     expect(result.http_result).toBeDefined();
   });
 
-  it("validatePoliciesLocally checks YAML structure", () => {
-    const validResult = client.validatePoliciesLocally(
-      'version: "1.0"\nglobal:\n  default_action: deny\n',
+  it("validatePolicies performs server-side dry-run", async () => {
+    const validResult = await client.validatePolicies(
+      'version: "1.0"\nglobal:\n  default_action: deny\nrules: []\nstream_rules: []\n',
     );
     expect(validResult.valid).toBe(true);
+    expect(validResult.version_hash).toBeDefined();
 
-    const invalidResult = client.validatePoliciesLocally("bad yaml without version");
+    const invalidResult = await client.validatePolicies(
+      "global:\n  default_action: deny\n",
+    );
     expect(invalidResult.valid).toBe(false);
+    expect(invalidResult.error).toContain("version");
   });
 });
 

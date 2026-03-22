@@ -71,7 +71,7 @@ services:
 
   # ── Tracing (dev only, ADR-010) ────────────────────────────────────────
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: jaegertracing/all-in-one:1.68.0
     container_name: luagate-jaeger
     ports:
       - "16686:16686"   # Jaeger UI

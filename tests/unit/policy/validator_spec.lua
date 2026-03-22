@@ -11,6 +11,7 @@ local validator = require("luagate.policy.validator")
 --- Build a minimal valid policy table.
 local function minimal_policy()
   return {
+    version = "1",
     global = { default_action = "deny" },
     rules = {},
     stream_rules = {},
@@ -69,6 +70,92 @@ local function stream_rule(overrides)
 end
 
 -- ---------------------------------------------------------------------------
+-- Tests: version field
+-- ---------------------------------------------------------------------------
+
+describe("validator.validate — version field", function()
+  it("accepts policy with version = '1'", function()
+    local p = minimal_policy()
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects policy missing version field", function()
+    local p = minimal_policy()
+    p.version = nil
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("version", err)
+  end)
+
+  it("rejects policy with empty string version", function()
+    local p = minimal_policy()
+    p.version = ""
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("version", err)
+  end)
+
+  it("rejects policy with non-string version", function()
+    local p = minimal_policy()
+    p.version = 1
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("version", err)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: legacy rule field rejection
+-- ---------------------------------------------------------------------------
+
+describe("validator.validate — legacy rule field rejection", function()
+  it("rejects HTTP rule with legacy 'match' field", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ match = { path_prefix = "/admin" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("legacy field", err)
+    assert.matches("match", err)
+  end)
+
+  it("rejects HTTP rule with legacy 'path_prefix' field", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ path_prefix = "/api" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.matches("legacy field", err)
+  end)
+
+  it("rejects HTTP rule with legacy 'source_cidrs' field", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ source_cidrs = { "10.0.0.0/8" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.matches("legacy field", err)
+  end)
+
+  it("rejects stream rule with legacy 'port' field", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ port = 22 }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.matches("legacy field", err)
+  end)
+
+  it("accepts rule with canonical 'scope' field (no legacy)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ scope = { path = "/health" } }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Tests: global section
 -- ---------------------------------------------------------------------------
 
@@ -89,7 +176,7 @@ describe("validator.validate — global section", function()
   end)
 
   it("rejects policy missing 'global' section", function()
-    local p = { rules = {}, stream_rules = {} }
+    local p = { version = "1", rules = {}, stream_rules = {} }
     local _, err = validator.validate(p)
     assert.is_nil(_)
     assert.is_string(err)
@@ -898,7 +985,7 @@ describe("validator.validate — pass-through", function()
   end)
 
   it("accepts policy with no rules or stream_rules keys", function()
-    local p = { global = { default_action = "deny" } }
+    local p = { version = "1", global = { default_action = "deny" } }
     local _, err = validator.validate(p)
     assert.is_nil(err)
     assert.is_table(_)

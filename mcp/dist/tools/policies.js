@@ -37,36 +37,62 @@ export function registerPolicyTools(server, client) {
     });
     // luagate_validate_policies — Dry-run 검증
     server.tool("luagate_validate_policies", "정책 YAML을 검증합니다 (dry-run). 실제 적용하지 않고 문법/충돌 검사만 수행합니다.", {
-        policy_yaml: z
-            .string()
-            .describe("검증할 정책 YAML 문자열"),
+        policy_yaml: z.string().describe("검증할 정책 YAML 문자열"),
     }, async ({ policy_yaml }) => {
-        const result = client.validatePoliciesLocally(policy_yaml);
-        if (result.valid) {
+        try {
+            const result = await client.validatePolicies(policy_yaml);
+            if (result.valid) {
+                const parts = [
+                    "검증 성공: 서버 dry-run 파이프라인 (parse → validate → conflict_detect → hash) 통과",
+                    `  version_hash: ${result.version_hash}`,
+                    `  http_rules: ${result.http_rules_count}개`,
+                    `  stream_rules: ${result.stream_rules_count}개`,
+                ];
+                const warnings = result.warnings ?? [];
+                if (warnings.length > 0) {
+                    parts.push(`\n⚠️ 충돌 경고 ${warnings.length}건:`);
+                    for (const w of warnings) {
+                        parts.push(`  - [${w.rule_ids.join(", ")}] ${w.message}`);
+                    }
+                }
+                const shadowed = result.shadowed ?? [];
+                if (shadowed.length > 0) {
+                    parts.push(`\n🔇 Shadowed 규칙 ${shadowed.length}건 (다른 규칙에 의해 도달 불가):`);
+                    for (const ruleId of shadowed) {
+                        parts.push(`  - ${ruleId}`);
+                    }
+                }
+                return {
+                    content: [{ type: "text", text: parts.join("\n") }],
+                };
+            }
+            // Distinguish validation errors (422) from infra errors (401, 409, 500, etc.)
+            const status = result.errorStatus;
+            if (status && status !== 422) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Admin API 에러 (${status}): ${result.error}\n\n이것은 정책 검증 실패가 아니라 서버/인증 문제입니다. 환경 설정을 확인하세요.`,
+                        },
+                    ],
+                    isError: true,
+                };
+            }
             return {
                 content: [
-                    {
-                        type: "text",
-                        text: "검증 성공: YAML 구조가 유효합니다.\n\n참고: 현재 로컬 구문 검증만 수행합니다. 서버 측 충돌 감지/컴파일 검증은 luagate_update_policies 호출 시 수행됩니다.",
-                    },
+                    { type: "text", text: `검증 실패: ${result.error}` },
                 ],
+                isError: true,
             };
         }
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: `검증 실패: ${result.error}`,
-                },
-            ],
-            isError: true,
-        };
+        catch (e) {
+            return errorResult(e);
+        }
     });
     // luagate_update_policies — 정책 업데이트
     server.tool("luagate_update_policies", "정책을 업데이트합니다. 반드시 luagate_get_policies로 현재 ETag를 먼저 확인하세요. confirm=true일 때만 실행됩니다.", {
-        policy_yaml: z
-            .string()
-            .describe("새 정책 YAML 문자열"),
+        policy_yaml: z.string().describe("새 정책 YAML 문자열"),
         expected_source_version: z
             .string()
             .describe("luagate_get_policies에서 받은 ETag 값 (낙관적 동시성 제어)"),
@@ -114,9 +140,7 @@ export function registerPolicyTools(server, client) {
     });
     // luagate_rollback_policies — 롤백
     server.tool("luagate_rollback_policies", "이전 정책 YAML로 롤백합니다. 롤백할 YAML과 현재 source_version이 필요합니다. confirm=true일 때만 실행됩니다.", {
-        policy_yaml: z
-            .string()
-            .describe("롤백할 이전 정책 YAML"),
+        policy_yaml: z.string().describe("롤백할 이전 정책 YAML"),
         expected_source_version: z
             .string()
             .describe("현재 source_version (낙관적 동시성 제어)"),
