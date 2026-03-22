@@ -553,6 +553,34 @@ describe("evaluator.evaluate_stream — Stream 독립 평가", function()
     assert.are.equal("sni-rule", result.matched_rule)
   end)
 
+  it("src_ip_cidr 매칭: 10.0.1.5는 10.0.0.0/8 스트림 규칙에 매칭된다", function()
+    local rules = compile({
+      stream_rule({
+        id = "internal-proxy",
+        action = "proxy",
+        upstream = "backend:3306",
+        scope = { src_ip_cidr = "10.0.0.0/8" },
+      }),
+    })
+    local result = evaluator.evaluate_stream(rules, { src_ip = "10.0.1.5" })
+    assert.are.equal("proxy", result.action)
+    assert.are.equal("internal-proxy", result.matched_rule)
+  end)
+
+  it("src_ip_cidr 불일치: 192.168.1.1은 10.0.0.0/8에 매칭되지 않아 default deny", function()
+    local rules = compile({
+      stream_rule({
+        id = "internal-proxy",
+        action = "proxy",
+        upstream = "backend:3306",
+        scope = { src_ip_cidr = "10.0.0.0/8" },
+      }),
+    })
+    local result = evaluator.evaluate_stream(rules, { src_ip = "192.168.1.1" })
+    assert.are.equal("deny", result.action)
+    assert.are.equal("default", result.decision_source)
+  end)
+
   it("fail-closed: rules가 nil이면 deny를 반환한다", function()
     local result = evaluator.evaluate_stream(nil, {})
     assert.are.equal("deny", result.action)

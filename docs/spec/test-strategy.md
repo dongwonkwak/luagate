@@ -372,7 +372,7 @@ make bench
 대상 모듈:
 - TLS parser (stream preread)
 - decoder (멀티레이어 인코딩)
-- radix tree (경로 매칭)
+- radix tree (CIDR 매칭 — FFI 바인딩 유지, handler에서는 미사용)
 
 도구: Rust `cargo fuzz` (libFuzzer), Lua `busted` property-based (추후 도입).
 

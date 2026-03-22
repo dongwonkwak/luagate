@@ -73,18 +73,14 @@ end
 │     L1 캐시 active_version 비교          │
 │     └─ 변경됨 → L2에서 새 정책 로드     │
 │                                          │
-│  2. CIDR radix tree 조회                 │
-│     active_version 변경 시 worker-local  │
-│     rebuild (rust-ffi-modules.md 참조)      │
-│                                          │
-│  3. 스트림 정책 매칭 (ADR-002)            │
+│  2. 스트림 정책 매칭 (ADR-002)            │
 │     scope 기준:                          │
-│       - src_ip_cidr (radix tree)         │
+│       - src_ip_cidr (Lua CIDR 매칭)      │
 │       - dst_port (exact/range)           │
 │       - detected_protocol (exact)        │
 │       - sni (exact/wildcard, TLS인 경우) │
 │                                          │
-│  4. 판정:                                │
+│  3. 판정:                                │
 │     ├─ proxy → 연결 계속                 │
 │     └─ deny → 연결 종료                 │
 │              + luagate_connections 감소  │
@@ -271,4 +267,4 @@ LuaGate Stream 파이프라인은 기본적으로 **TLS 패스스루** 모드다
 - [spec/policy-engine.md](./policy-engine.md) — 스트림 정책 평가
 - [spec/log-schema.md](./log-schema.md) — TCP 세션 로그 스키마 (18필드)
 - [spec/architecture.md](./architecture.md) — 전체 프로세스 모델, zone 목록
-- [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — detect_protocol, radix tree lifecycle
+- [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — detect_protocol, SNI 추출 (radix FFI 바인딩 유지, handler에서는 미사용)
