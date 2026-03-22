@@ -566,6 +566,15 @@ function _M.load_policy(filepath, opts)
       result.skipped = true
       result.http_ok = true
       result.stream_ok = true
+
+      -- DON-218: Backfill stream:configured on same-hash skip.
+      -- Handles upgrade path where flag didn't exist before DON-218.
+      if policy.stream_rules and #policy.stream_rules > 0 then
+        dict:safe_set("stream:configured", true)
+      else
+        dict:delete("stream:configured")
+      end
+
       release_reload_lock(owner_id)
       return result
     end
@@ -633,17 +642,17 @@ function _M.load_policy(filepath, opts)
       end
     end
 
-    -- DON-218: Record stream:configured flag so metrics handler can distinguish
-    -- "stream not configured" from "stream configured but first load failed".
-    -- Clear the flag when stream_rules is absent/empty to handle stream→HTTP-only
-    -- policy transitions correctly.
-    if policy.stream_rules and #policy.stream_rules > 0 then
-      local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
-      if not cfg_ok then
-        log_warn("safe_set stream:configured failed: " .. tostring(cfg_err))
+    -- DON-218: Update stream:configured flag ONLY after successful commit.
+    -- This prevents flag/active-version mismatch when pointer swap fails.
+    if commit_result.http_ok and commit_result.stream_ok then
+      if policy.stream_rules and #policy.stream_rules > 0 then
+        local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
+        if not cfg_ok then
+          log_warn("safe_set stream:configured failed: " .. tostring(cfg_err))
+        end
+      else
+        dict:delete("stream:configured")
       end
-    else
-      dict:delete("stream:configured")
     end
   else
     -- No shared dict (init context without dict, or unit tests without dict stub).
