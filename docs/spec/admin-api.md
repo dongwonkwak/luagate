@@ -599,10 +599,14 @@ Content-Type: application/json
 
 감사 로그 상세 스키마: [log-schema.md §5](./log-schema.md#5-감사-로그-auditlog-adr-004-63)
 
-역방향 참조: [policy-engine.md §6 Reload Audit Log](./policy-engine.md#6-reload-audit-log) ↔ 이 섹션은 감사 로그 필드 및 직렬화 실패 시 거부 원칙을 공유한다.
+역방향 참조: [policy-engine.md §6 Reload Audit Log](./policy-engine.md#6-reload-audit-log) ↔ 이 섹션은 감사 로그 필드 및 직렬화 실패 시 동작 원칙을 공유한다.
 
-> **감사 로그 직렬화 실패 시 거부**: audit 레코드의 JSON 직렬화(`cjson.encode`) 실패 = mutation/reload 거부.
-> 이 규칙은 코드 불변식이며 설정으로 우회 불가.
+> **감사 로그 직렬화 실패 시 동작 (pre-commit vs post-commit)**:
+>
+> - **Pre-commit audit**: 직렬화(`cjson.encode`) 실패 = mutation/reload 거부. 코드 불변식이며 설정으로 우회 불가.
+> - **Post-mutation audit with rollback** (`token_rotated`): 실패 시 mutation rollback 후 거부.
+> - **Post-commit audit** (`*_success`, `*_partial`): 실패 시 경고 로그만 남김. mutation은 이미 적용됨.
+>
 > 디스크 I/O 계층(`ngx.log` → Nginx `error_log`)은 fire-and-forget이며, 기록 보장은 Nginx 인프라 및 운영 모니터링에 위임한다.
 
 ### Reload 이벤트 Audit Log Shape

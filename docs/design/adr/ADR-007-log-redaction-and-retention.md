@@ -192,7 +192,7 @@ rewrite_by_lua → query_string redaction → $luagate_query_string 저장
 
 #### §4.3 audit.log 보장 범위 재확인
 
-ADR-004 §6.3의 원칙을 이 ADR에서도 재확인한다: **audit 레코드의 JSON 직렬화(`cjson.encode`) 실패 시 해당 mutation/reload를 거부한다.** 디스크 I/O 계층(`ngx.log` → Nginx `error_log`)의 기록 보장은 Nginx 인프라 및 운영 모니터링(디스크 공간/I/O 에러 알림)에 위임한다. 보존 기간 내 audit.log 레코드의 무결성(tamper-evidence)을 위해 파기 전 삭제는 logrotate 자동화를 통해서만 허용한다.
+ADR-004 §6.3의 원칙을 이 ADR에서도 재확인한다: **audit 레코드의 JSON 직렬화(`cjson.encode`) 실패 시, pre-commit audit은 해당 mutation/reload를 거부하고, post-commit audit은 경고 로그만 남긴다(mutation은 이미 적용됨). token rotation은 post-mutation rollback으로 거부한다.** 디스크 I/O 계층(`ngx.log` → Nginx `error_log`)의 기록 보장은 Nginx 인프라 및 운영 모니터링(디스크 공간/I/O 에러 알림)에 위임한다. 보존 기간 내 audit.log 레코드의 무결성(tamper-evidence)을 위해 파기 전 삭제는 logrotate 자동화를 통해서만 허용한다.
 
 #### §4.4 GDPR Right to Erasure — 임시 운영 절차
 

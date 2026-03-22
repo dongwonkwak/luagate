@@ -269,7 +269,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 | policy deny | — | 403 | 정책 매칭 deny |
 | upstream fail | — | 502 | proxy_pass 연결 실패 |
 | rate limit counter eviction | fail-open | — | shared_dict 용량 초과 (MVP 비범위) |
-| logging 실패 (감사 로그 직렬화) | fail-closed | — | ADR-004: audit 직렬화 실패 → 거부. 디스크 I/O는 Nginx에 위임 |
+| logging 실패 (감사 로그 직렬화) | pre-commit: fail-closed, post-commit: warn-only | — | ADR-004: pre-commit audit 실패 → 거부. post-commit → 경고. 디스크 I/O는 Nginx에 위임 |
 | native crash (worker) | process failure | — | nginx master가 재기동 |
 
 > **Hook 순서**: `access_by_lua*` → `proxy_pass(upstream)` → `log_by_lua*`

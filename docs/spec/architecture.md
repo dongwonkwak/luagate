@@ -199,7 +199,7 @@ Client TCP Connect
 | upstream 연결 실패 | 502 반환 | |
 | rate limit counter eviction | fail-open | shared_dict 용량 초과 시 카운터 소실 |
 | Admin API rate limit error | **fail-closed** | dict 접근 에러 시 503 반환 |
-| logging 실패 (직렬화) | fail-closed (감사 로그) | ADR-004: audit 직렬화 실패 → 거부. 디스크 I/O는 Nginx에 위임 |
+| logging 실패 (직렬화) | pre-commit: fail-closed, post-commit: warn-only | ADR-004: pre-commit audit 실패 → 거부. post-commit audit 실패 → 경고. 디스크 I/O는 Nginx에 위임 |
 | FFI .so 로드 실패 | fail-closed | 기동 거부 |
 | FFI Layer 1 budget 초과 | **fail-closed** | `LUAGATE_BUDGET_EXCEEDED(-3)` → deny (ADR-009) |
 | FFI Layer 2 watchdog timeout | **fail-closed** | `LUAGATE_TIMEOUT(-5)` → deny + per-worker leak 카운터 (ADR-009) |
