@@ -489,11 +489,12 @@ luagate_shared_dict_free_bytes{zone="luagate_policy"} 8388608
 # HELP luagate_policy_loaded Whether policy is loaded per subsystem (1=loaded, 0=not loaded).
 # TYPE luagate_policy_loaded gauge
 luagate_policy_loaded{subsystem="http"} 1
-luagate_policy_loaded{subsystem="stream"} 0
+luagate_policy_loaded{subsystem="stream"} 1  # stream 미설정 시 이 라인 생략
 ```
 
 `luagate_policy_loaded`는 `subsystem` 라벨로 HTTP/Stream을 구분한다.
-HTTP-only 배포에서 `{subsystem="stream"} 0`은 정상이다.
+stream이 설정되지 않은 배포에서는 `{subsystem="stream"}` 시계열이 생략된다.
+이로 인해 HTTP-only 배포에서 stream 관련 alert가 발화되지 않는다.
 
 **Migration note**: v0.x 이전의 `luagate_policy_loaded` (라벨 없음)에서 `{subsystem="http"|"stream"}` 라벨이 추가됨. 기존 Grafana 대시보드/alert rule 업데이트 필요.
 

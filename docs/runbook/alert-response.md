@@ -181,16 +181,17 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ```
 
 > **참고**: `luagate_policy_loaded`는 `subsystem` 라벨로 HTTP/Stream을 구분한다.
-> HTTP-only 배포에서 `{subsystem="stream"} 0`은 정상이다.
+> HTTP-only 배포에서는 `{subsystem="stream"}` 시계열 자체가 출력되지 않는다.
 
 → 상세 복구: [disaster-recovery.md](./disaster-recovery.md)
 
 ---
 
-## LuagateStreamPolicyNotLoaded (Optional)
+## LuagateStreamPolicyNotLoaded
 
-> **이 alert는 stream-enabled 배포에서만 해당된다.**
-> 기본 `conf/alerts.yml`에는 포함되지 않으며, stream을 사용하는 배포에서만 별도 alert rule로 추가한다.
+> **이 alert는 stream-enabled 배포에서만 발화된다.**
+> `{subsystem="stream"}` 시계열은 stream이 설정된 배포에서만 출력되므로,
+> HTTP-only 배포에서는 해당 시계열 자체가 존재하지 않아 alert가 발화되지 않는다.
 
 **심각도**: warning
 **조건**: `luagate_policy_loaded{subsystem="stream"} == 0` (5분 지속)
@@ -233,4 +234,4 @@ tail -50 /var/log/luagate/error.log | grep -i stream
 > **주의**: `LuagateStreamPolicyNotLoaded` alert가 발생했는데 `active_stream_version`만 보고
 > "HTTP-only 배포이므로 정상"으로 오인하지 않도록, 반드시 `nginx.conf`의 stream 블록 존재 여부를 함께 확인할 것.
 >
-> **참고**: alert rule 예시는 `conf/alerts.yml`의 주석을 참조한다.
+> **참고**: alert rule은 `conf/alerts.yml`의 `LuagateStreamPolicyNotLoaded` 항목을 참조한다.
