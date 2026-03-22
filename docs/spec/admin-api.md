@@ -495,6 +495,8 @@ luagate_policy_loaded{subsystem="stream"} 0
 `luagate_policy_loaded`는 `subsystem` 라벨로 HTTP/Stream을 구분한다.
 HTTP-only 배포에서 `{subsystem="stream"} 0`은 정상이다.
 
+**Migration note**: v0.x 이전의 `luagate_policy_loaded` (라벨 없음)에서 `{subsystem="http"|"stream"}` 라벨이 추가됨. 기존 Grafana 대시보드/alert rule 업데이트 필요.
+
 log-schema.md §7 메트릭 전체 목록 참조.
 
 ---
