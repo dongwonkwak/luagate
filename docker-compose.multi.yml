@@ -39,7 +39,7 @@ services:
       - "9090:9090"
     volumes:
       - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
-      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - shared-conf:/conf
     environment:
       - LUAGATE_ENV=test
@@ -68,7 +68,7 @@ services:
       - "9091:9090"
     volumes:
       - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
-      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - shared-conf:/conf
     environment:
       - LUAGATE_ENV=test
