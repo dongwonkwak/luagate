@@ -789,6 +789,7 @@ describe("PUT /api/v1/policies", function()
       http_version = "old_sha",
       stream_version = "old_sha",
       source_version = "abc123",
+      stream_configured = false,
     }, _loader_rollback_calls[1])
     assert.are.equal("old_sha", _loader_versions.http_version)
     assert.are.equal("old_sha", _loader_versions.stream_version)
@@ -815,6 +816,7 @@ describe("PUT /api/v1/policies", function()
       http_version = "old_sha256_hash",
       stream_version = "old_sha256_hash",
       source_version = "abc123",
+      stream_configured = false,
     }, _loader_rollback_calls[1])
     local said = _G.ngx._get_said()
     local dkjson = require("dkjson")

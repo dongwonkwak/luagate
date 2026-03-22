@@ -253,12 +253,19 @@ end
 -- @param previous_http_version string|nil
 -- @param previous_stream_version string|nil
 -- @param previous_source_version string|nil
+-- @param previous_stream_configured boolean|nil  DON-218: restore stream:configured flag
 -- @return table rollback result
-local function rollback_put_commit(previous_http_version, previous_stream_version, previous_source_version)
+local function rollback_put_commit(
+  previous_http_version,
+  previous_stream_version,
+  previous_source_version,
+  previous_stream_configured
+)
   return loader.rollback_active_versions({
     http_version = previous_http_version,
     stream_version = previous_stream_version,
     source_version = previous_source_version,
+    stream_configured = previous_stream_configured,
   })
 end
 
@@ -509,6 +516,13 @@ function _M.handle_put_policies()
     return
   end
 
+  -- DON-218: Capture stream:configured before reload for rollback
+  local prev_stream_configured
+  local policy_dict = ngx.shared.luagate_policy
+  if policy_dict then
+    prev_stream_configured = policy_dict:get("stream:configured") and true or false
+  end
+
   -- Load from temp file (stages [1]-[7] of loader pipeline)
   local result = loader.load_policy(tmp_path, {
     on_lock_acquired = function()
@@ -645,8 +659,12 @@ function _M.handle_put_policies()
       details[#details + 1] = result.stream_err
     end
 
-    local rollback_result =
-      rollback_put_commit(result.previous_http_version, result.previous_stream_version, current_source)
+    local rollback_result = rollback_put_commit(
+      result.previous_http_version,
+      result.previous_stream_version,
+      current_source,
+      prev_stream_configured
+    )
     if not rollback_result.ok then
       details[#details + 1] = "rollback failed: " .. table.concat(rollback_result.errors, "; ")
       ngx.log(ngx.CRIT, "[luagate:admin] PUT commit rollback failed: ", table.concat(rollback_result.errors, "; "))
@@ -685,8 +703,12 @@ function _M.handle_put_policies()
     -- Rollback: best-effort (pointers already swapped, but canonical file unchanged)
     os.remove(tmp_path)
 
-    local rollback_result =
-      rollback_put_commit(result.previous_http_version, result.previous_stream_version, current_source)
+    local rollback_result = rollback_put_commit(
+      result.previous_http_version,
+      result.previous_stream_version,
+      current_source,
+      prev_stream_configured
+    )
     local failure_reason = "canonical file write failed: " .. tostring(rename_err)
     if not rollback_result.ok then
       failure_reason = failure_reason .. "; rollback failed: " .. table.concat(rollback_result.errors, "; ")
