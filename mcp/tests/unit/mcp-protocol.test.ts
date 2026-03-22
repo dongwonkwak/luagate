@@ -22,7 +22,14 @@ function createMockClient() {
       active_stream_version: "abc",
       etag: "abc",
     }),
-    validatePoliciesLocally: vi.fn().mockReturnValue({ valid: true }),
+    validatePolicies: vi.fn().mockResolvedValue({
+      valid: true,
+      version_hash: "abc123",
+      http_rules_count: 2,
+      stream_rules_count: 1,
+      warnings: [],
+      shadowed: [],
+    }),
     updatePolicies: vi.fn().mockResolvedValue({
       previous_http_version: "v1",
       new_http_version: "v2",

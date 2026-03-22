@@ -332,10 +332,25 @@ describe("loader.load_policy — Schema 검증 [3단계]", function()
     teardown_io_open_stub()
   end)
 
+  it("version 누락 시 validation 실패 → ok=false", function()
+    local bad_content = "bad_version_content"
+    _file_registry[VALID_PATH] = bad_content
+    _lyaml_registry[bad_content] = {
+      -- version 필드 없음
+      global = { default_action = "deny" },
+      rules = {},
+      stream_rules = {},
+    }
+    local result = loader.load_policy(VALID_PATH)
+    assert.is_false(result.ok)
+    assert.is_truthy(result.err:find("validation"))
+  end)
+
   it("global.default_action 누락 시 validation 실패 → ok=false", function()
     local bad_content = "bad_global_content"
     _file_registry[VALID_PATH] = bad_content
     _lyaml_registry[bad_content] = {
+      version = "1",
       -- global 섹션 없음
       rules = {},
       stream_rules = {},
@@ -349,6 +364,7 @@ describe("loader.load_policy — Schema 검증 [3단계]", function()
     local bad_content = "missing_rule_id_content"
     _file_registry[VALID_PATH] = bad_content
     _lyaml_registry[bad_content] = {
+      version = "1",
       global = { default_action = "deny" },
       rules = {
         { priority = 10, action = "allow" }, -- id 없음
@@ -381,6 +397,7 @@ describe("loader.load_policy — conflict 감지 [4단계]", function()
     local content = "conflict_rules_content"
     _file_registry[VALID_PATH] = content
     _lyaml_registry[content] = {
+      version = "1",
       global = { default_action = "deny" },
       rules = {
         {

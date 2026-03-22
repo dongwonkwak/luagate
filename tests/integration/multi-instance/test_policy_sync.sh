@@ -97,8 +97,11 @@ info "Deploying updated policy to shared volume..."
 # Write policy to shared volume via container exec (simulates CI/CD file deploy)
 # Use printf to avoid trailing newline from heredoc/herestring
 docker exec -i luagate-multi-1 sh -c "cat > /conf/policies.yaml" <<'POLICY_EOF'
+version: "1"
+
 global:
   default_action: deny
+
 rules:
   - id: multi-instance-sync-test
     priority: 10
@@ -106,6 +109,8 @@ rules:
       path: "/sync-verified"
     action: allow
     enabled: true
+
+stream_rules: []
 POLICY_EOF
 
 # Compute target_version from actual deployed file bytes (ADR-008 §8.3 step 1)
@@ -120,10 +125,10 @@ reload_instance() {
   local url="$1"
   local name="$2"
   local code
-  code=$(curl -sf -o /dev/null -w "%{http_code}" \
+  code=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    "$url/api/v1/policies/reload" 2>/dev/null || echo "000")
+    "$url/api/v1/policies/reload" 2>/dev/null || true)
   if [ "$code" = "200" ] || [ "$code" = "204" ]; then
     pass "$name reload succeeded (HTTP $code)"
   else

@@ -1,8 +1,9 @@
 # LuaGate example policy — minimal working configuration
 # Used for cold-start testing and Quick Start demos.
 #
-# Evaluation order: rules are evaluated top-to-bottom within each section.
+# Evaluation order: rules are evaluated by priority (lower = higher precedence).
 # First matching rule wins. If no rule matches, global.default_action applies.
+# Schema: flat top-level keys (rules / stream_rules) per policy-engine.md §2.0.
 
 version: "1"
 
@@ -10,67 +11,85 @@ global:
   default_action: allow   # allow | deny
   log_level: info
 
-http:
-  rules:
-    - id: allow-admin-internal
-      description: "Allow /admin only from internal RFC1918 and local IPv6 ranges"
-      match:
-        path_prefix: /admin
-        source_cidrs:
-          - "10.0.0.0/8"
-          - "172.16.0.0/12"
-          - "192.168.0.0/16"
-          - "::1/128"
-          - "fc00::/7"
-      action: allow
+rules:
+  - id: allow-admin-internal-10
+    description: "Allow /admin from 10.0.0.0/8 (RFC1918 Class A)"
+    priority: 10
+    scope:
+      path: /admin/*
+      src_ip_cidr: "10.0.0.0/8"
+    action: allow
+    tags: [admin]
 
-    - id: block-admin-external
-      description: "Block /admin from all other source networks"
-      match:
-        path_prefix: /admin
-      action: deny
-      status: 403
+  - id: allow-admin-internal-172
+    description: "Allow /admin from 172.16.0.0/12 (RFC1918 Class B, includes Docker 172.29.x)"
+    priority: 11
+    scope:
+      path: /admin/*
+      src_ip_cidr: "172.16.0.0/12"
+    action: allow
+    tags: [admin]
 
-    - id: rate-limit-api
-      description: "Rate-limit /api to 100 req/s per IP"
-      match:
-        path_prefix: /api
-      action: rate_limit
-      rate:
-        requests: 100
-        window: 1s
-        by: remote_addr
+  - id: allow-admin-internal-192
+    description: "Allow /admin from 192.168.0.0/16 (RFC1918 Class C)"
+    priority: 12
+    scope:
+      path: /admin/*
+      src_ip_cidr: "192.168.0.0/16"
+    action: allow
+    tags: [admin]
 
-    - id: allow-health
-      description: "Always allow health-check endpoint (no auth, no rate-limit)"
-      match:
-        path: /health
-      action: allow
+  - id: block-admin-external
+    description: "Block /admin from all other sources (IPv4 and IPv6)"
+    priority: 20
+    scope:
+      path: /admin/*
+    action: deny
+    tags: [admin, security]
 
-stream:
-  rules:
-    - id: block-ssh-brute
-      description: "Rate-limit SSH connections per IP to prevent brute-force"
-      match:
-        port: 22
-      action: rate_limit
-      rate:
-        connections: 5
-        window: 60s
-        by: remote_addr
+  - id: allow-health
+    description: "Always allow health-check endpoint (no auth, no rate-limit)"
+    priority: 100
+    scope:
+      path: /health
+    action: allow
+    tags: [ops]
 
-    - id: allow-internal-db
-      description: "Allow DB connections from internal RFC1918 networks only"
-      match:
-        port: 5432
-        source_cidrs:
-          - "10.0.0.0/8"
-          - "172.16.0.0/12"
-          - "192.168.0.0/16"
-      action: allow
+stream_rules:
+  - id: allow-internal-db-10
+    description: "Allow DB from 10.0.0.0/8 (RFC1918 Class A)"
+    priority: 10
+    scope:
+      dst_port: 5432
+      src_ip_cidr: "10.0.0.0/8"
+    action: proxy
+    upstream: "postgres:5432"
+    tags: [database]
 
-    - id: deny-external-db
-      description: "Deny DB connections from all other source networks"
-      match:
-        port: 5432
-      action: deny
+  - id: allow-internal-db-172
+    description: "Allow DB from 172.16.0.0/12 (RFC1918 Class B, includes Docker 172.29.x)"
+    priority: 11
+    scope:
+      dst_port: 5432
+      src_ip_cidr: "172.16.0.0/12"
+    action: proxy
+    upstream: "postgres:5432"
+    tags: [database]
+
+  - id: allow-internal-db-192
+    description: "Allow DB from 192.168.0.0/16 (RFC1918 Class C)"
+    priority: 12
+    scope:
+      dst_port: 5432
+      src_ip_cidr: "192.168.0.0/16"
+    action: proxy
+    upstream: "postgres:5432"
+    tags: [database]
+
+  - id: deny-external-db
+    description: "Deny DB connections from all other source networks"
+    priority: 20
+    scope:
+      dst_port: 5432
+    action: deny
+    tags: [security]

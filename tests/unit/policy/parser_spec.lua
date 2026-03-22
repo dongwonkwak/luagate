@@ -153,6 +153,40 @@ describe("parser.parse_string — successful parse", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Tests: legacy nested structure rejection
+-- ---------------------------------------------------------------------------
+
+describe("parser.parse_string — legacy nested structure rejection", function()
+  it("rejects YAML with 'http' top-level key (legacy nested structure)", function()
+    local yaml = "legacy_http_nested"
+    register(yaml, {
+      version = "1",
+      global = { default_action = "deny" },
+      http = { rules = { { id = "r1", priority = 1, action = "allow" } } },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(result)
+    assert.is_string(err)
+    assert.matches("legacy", err)
+    assert.matches("http", err)
+  end)
+
+  it("rejects YAML with 'stream' top-level key (legacy nested structure)", function()
+    local yaml = "legacy_stream_nested"
+    register(yaml, {
+      version = "1",
+      global = { default_action = "deny" },
+      stream = { rules = { { id = "s1", priority = 1, action = "deny" } } },
+    })
+    local result, err = parser.parse_string(yaml)
+    assert.is_nil(result)
+    assert.is_string(err)
+    assert.matches("legacy", err)
+    assert.matches("stream", err)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Tests: parse_http_rules
 -- ---------------------------------------------------------------------------
 

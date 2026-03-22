@@ -60,7 +60,7 @@ describe("Audit Log Headers", () => {
     expect(headers["X-MCP-Session-Id"]).toBe("session-abc");
   });
 
-  it("sends X-Request-Id as UUID", async () => {
+  it("sends X-Request-ID as UUID", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ luagate_version: "0.1.0", uptime_seconds: 100, worker_count: 4 }),
     );
@@ -68,7 +68,7 @@ describe("Audit Log Headers", () => {
     await client.getStatus();
 
     const headers = mockFetch.mock.calls[0][1].headers;
-    expect(headers["X-Request-Id"]).toMatch(
+    expect(headers["X-Request-ID"]).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
   });

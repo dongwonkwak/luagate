@@ -4,7 +4,11 @@ import { AdminClient, AdminApiRequestError } from "../admin-client.js";
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-function jsonResponse(data: unknown, status = 200, headers?: Record<string, string>) {
+function jsonResponse(
+  data: unknown,
+  status = 200,
+  headers?: Record<string, string>,
+) {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -14,7 +18,11 @@ function jsonResponse(data: unknown, status = 200, headers?: Record<string, stri
   };
 }
 
-function textResponse(text: string, status = 200, headers?: Record<string, string>) {
+function textResponse(
+  text: string,
+  status = 200,
+  headers?: Record<string, string>,
+) {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -81,7 +89,7 @@ describe("AdminClient", () => {
       expect(headers["X-MCP-Client"]).toBe("test-client");
       expect(headers["X-MCP-Tool"]).toBe("luagate_get_status");
       expect(headers["X-MCP-Session-Id"]).toBe("test-session");
-      expect(headers["X-Request-Id"]).toBeDefined();
+      expect(headers["X-Request-ID"]).toBeDefined();
     });
   });
 
@@ -130,44 +138,55 @@ describe("AdminClient", () => {
         text: () => Promise.resolve(JSON.stringify(errorData)),
       });
 
-      await expect(client.updatePolicies("yaml", "wrong-version")).rejects.toThrow(
-        AdminApiRequestError,
-      );
+      await expect(
+        client.updatePolicies("yaml", "wrong-version"),
+      ).rejects.toThrow(AdminApiRequestError);
     });
   });
 
-  describe("validatePoliciesLocally", () => {
-    it("accepts valid YAML with version and global keys", () => {
-      const yaml = 'version: "1.0"\nglobal:\n  default_action: deny\nrules: []\n';
-      const result = client.validatePoliciesLocally(yaml);
+  describe("validatePolicies", () => {
+    it("returns valid result on dry-run success", async () => {
+      const dryRunResponse = {
+        dry_run: true,
+        valid: true,
+        version_hash: "abc123",
+        warnings: {},
+        shadowed: [],
+        http_rules_count: 2,
+        stream_rules_count: 1,
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(dryRunResponse),
+        headers: new Headers(),
+        status: 200,
+      } as Response);
+
+      const yaml =
+        'version: "1.0"\nglobal:\n  default_action: deny\nrules: []\n';
+      const result = await client.validatePolicies(yaml);
       expect(result.valid).toBe(true);
+      expect(result.version_hash).toBe("abc123");
+      expect(result.http_rules_count).toBe(2);
     });
 
-    it("rejects empty YAML", () => {
-      const result = client.validatePoliciesLocally("");
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain("Empty");
-    });
+    it("returns error on validation failure (422)", async () => {
+      const errorBody = {
+        error: "validation_failed",
+        stage: "validate",
+        details: ["policy is missing required 'version' field"],
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        text: () => Promise.resolve(JSON.stringify(errorBody)),
+        headers: new Headers(),
+      } as Response);
 
-    it("rejects YAML missing version key", () => {
       const yaml = "global:\n  default_action: deny\n";
-      const result = client.validatePoliciesLocally(yaml);
+      const result = await client.validatePolicies(yaml);
       expect(result.valid).toBe(false);
       expect(result.error).toContain("version");
-    });
-
-    it("rejects YAML missing global key", () => {
-      const yaml = 'version: "1.0"\nrules: []\n';
-      const result = client.validatePoliciesLocally(yaml);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain("global");
-    });
-
-    it("rejects YAML with tab characters", () => {
-      const yaml = 'version: "1.0"\nglobal:\n\tdefault_action: deny\n';
-      const result = client.validatePoliciesLocally(yaml);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain("Tab");
     });
   });
 

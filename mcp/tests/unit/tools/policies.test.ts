@@ -28,7 +28,7 @@ function createMockClient() {
   return {
     getPolicies: vi.fn(),
     getPolicyVersions: vi.fn(),
-    validatePoliciesLocally: vi.fn(),
+    validatePolicies: vi.fn(),
     updatePolicies: vi.fn(),
     getHealth: vi.fn(),
     reload: vi.fn(),
@@ -112,7 +112,14 @@ describe("Policy Tools", () => {
 
   describe("luagate_validate_policies", () => {
     it("accepts valid YAML", async () => {
-      client.validatePoliciesLocally.mockReturnValue({ valid: true });
+      client.validatePolicies.mockResolvedValue({
+        valid: true,
+        version_hash: "abc123",
+        http_rules_count: 2,
+        stream_rules_count: 1,
+        warnings: [],
+        shadowed: [],
+      });
 
       const handler = tools.get("luagate_validate_policies")!.handler;
       const schema = tools.get("luagate_validate_policies")!.schema;
@@ -122,12 +129,13 @@ describe("Policy Tools", () => {
 
       const result = (await handler(args)) as { content: Array<{ text: string }> };
       expect(result.content[0].text).toContain("검증 성공");
+      expect(result.content[0].text).toContain("abc123");
     });
 
     it("rejects invalid YAML with error message", async () => {
-      client.validatePoliciesLocally.mockReturnValue({
+      client.validatePolicies.mockResolvedValue({
         valid: false,
-        error: "Missing required 'version' key",
+        error: "validation_failed: policy is missing required 'version' field",
       });
 
       const handler = tools.get("luagate_validate_policies")!.handler;

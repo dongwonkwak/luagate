@@ -15,7 +15,7 @@ export class AdminClient {
             "X-MCP-Client": this.mcpClientName,
             "X-MCP-Tool": toolName,
             "X-MCP-Session-Id": this.mcpSessionId,
-            "X-Request-Id": crypto.randomUUID(),
+            "X-Request-ID": crypto.randomUUID(),
             ...extra,
         };
     }
@@ -79,34 +79,39 @@ export class AdminClient {
         return data;
     }
     /**
-     * Validate policy YAML locally (parse check).
-     * Note: Admin API does not yet support dry_run parameter.
-     * When backend dry_run is implemented, this should call
-     * PUT /api/v1/policies?dry_run=true instead.
+     * Validate policy YAML via server-side dry-run.
+     * Calls PUT /api/v1/policies?dry_run=true which executes the full
+     * parse → validate → conflict_detect → hash pipeline without committing.
      */
-    validatePoliciesLocally(yaml) {
-        // Basic YAML structure validation
-        if (!yaml || !yaml.trim()) {
-            return { valid: false, error: "Empty YAML" };
+    async validatePolicies(yaml) {
+        try {
+            const { data } = await this.request("PUT", "/api/v1/policies?dry_run=true", "luagate_validate_policies", {
+                body: yaml,
+                contentType: "application/x-yaml",
+            });
+            return {
+                valid: data.valid,
+                warnings: data.warnings ? Object.values(data.warnings) : [],
+                shadowed: Array.isArray(data.shadowed) ? data.shadowed : [],
+                version_hash: data.version_hash,
+                http_rules_count: data.http_rules_count,
+                stream_rules_count: data.stream_rules_count,
+            };
         }
-        // Check for required top-level keys
-        const hasVersion = /^version\s*:/m.test(yaml);
-        const hasGlobal = /^global\s*:/m.test(yaml);
-        if (!hasVersion) {
-            return { valid: false, error: "Missing required 'version' key" };
-        }
-        if (!hasGlobal) {
-            return { valid: false, error: "Missing required 'global' key" };
-        }
-        // Check for basic YAML syntax errors (unclosed quotes, bad indentation)
-        const lines = yaml.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.includes("\t")) {
-                return { valid: false, error: `Tab character found at line ${i + 1} (use spaces)` };
+        catch (e) {
+            if (e instanceof AdminApiRequestError) {
+                const details = e.apiError.details?.join("; ") ??
+                    e.apiError.message ??
+                    "unknown error";
+                return {
+                    valid: false,
+                    error: `${e.apiError.error}: ${details}`,
+                    errorStatus: e.status,
+                };
             }
+            const message = e instanceof Error ? e.message : String(e);
+            return { valid: false, error: message };
         }
-        return { valid: true };
     }
     /** POST /api/v1/policies/reload */
     async reload(expectedActiveVersion) {
