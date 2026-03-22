@@ -323,7 +323,11 @@ function _M.rollback_active_versions(versions)
   -- DON-218: Restore stream:configured flag to pre-rollback state.
   -- versions.stream_configured can be true, false/nil.
   if versions.stream_configured then
-    dict:safe_set("stream:configured", true)
+    local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
+    if not cfg_ok then
+      result.ok = false
+      result.errors[#result.errors + 1] = "safe_set stream:configured rollback failed: " .. tostring(cfg_err)
+    end
   else
     dict:delete("stream:configured")
   end
@@ -578,7 +582,10 @@ function _M.load_policy(filepath, opts)
       -- DON-218: Backfill stream:configured on same-hash skip.
       -- Handles upgrade path where flag didn't exist before DON-218.
       if policy.stream_rules and #policy.stream_rules > 0 then
-        dict:safe_set("stream:configured", true)
+        local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
+        if not cfg_ok then
+          log_warn("safe_set stream:configured backfill failed: " .. tostring(cfg_err))
+        end
       else
         dict:delete("stream:configured")
       end
@@ -651,18 +658,16 @@ function _M.load_policy(filepath, opts)
     end
 
     -- DON-218: Update stream:configured flag based on policy declaration.
-    -- This flag reflects whether the policy YAML contains stream_rules,
-    -- independent of whether the pointer swap succeeded. This ensures
-    -- "stream configured + first load failed" emits {subsystem="stream"} 0.
-    -- On full commit failure (neither subsystem ok), skip to avoid
-    -- changing flags when the policy was entirely rejected.
+    -- Setting true: allowed on partial commit (stream is declared in policy).
+    -- Clearing: only on full commit (both subsystems ok), because partial
+    -- commit means stream LKG may still be active and needs monitoring.
     if commit_result.http_ok or commit_result.stream_ok then
       if policy.stream_rules and #policy.stream_rules > 0 then
         local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
         if not cfg_ok then
           log_warn("safe_set stream:configured failed: " .. tostring(cfg_err))
         end
-      else
+      elseif commit_result.http_ok and commit_result.stream_ok then
         dict:delete("stream:configured")
       end
     end
