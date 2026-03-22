@@ -5,8 +5,11 @@ on:
     paths:
       - "mcp/**"
       - "conf/nginx.conf"
+      - "conf/scanner-patterns/**"
       - "lua/luagate/admin/**"
       - "lua/luagate/policy/**"
+      - "lua/luagate/scanner/**"
+      - "policies/luagate.yaml"
       - "Dockerfile"
       - ".github/workflows/test-mcp.yml"
 
@@ -28,8 +31,11 @@ jobs:
             mcp:
               - 'mcp/**'
               - 'conf/nginx.conf'
+              - 'conf/scanner-patterns/**'
               - 'lua/luagate/admin/**'
               - 'lua/luagate/policy/**'
+              - 'lua/luagate/scanner/**'
+              - 'policies/luagate.yaml'
               - 'Dockerfile'
               - '.github/workflows/test-mcp.yml'
 
