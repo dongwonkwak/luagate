@@ -291,7 +291,7 @@ describe("router.dispatch", function()
         ["http:active_version"] = "abc123",
         ["stream:active_version"] = "def456",
         ["policy_loaded_at"] = now - 600,
-        ["server_start_time"] = now - 3600,
+        ["worker_start_time:0"] = now - 3600,
       })
       _G.ngx.worker.count = function()
         return 4
@@ -312,19 +312,19 @@ describe("router.dispatch", function()
       assert.are.equal("def456", body.active_stream_version)
       assert.are.equal("success", body.last_reload_status)
       assert.is_number(body.uptime_seconds)
-      assert.truthy(body.uptime_seconds >= 3599, "uptime should reflect server_start_time")
+      assert.truthy(body.uptime_seconds >= 3599, "uptime should reflect per-worker start time")
       assert.is_number(body.policy_age_seconds)
       assert.truthy(body.policy_age_seconds >= 599, "policy_age should reflect policy_loaded_at")
       assert.is_string(body.last_reload_at)
     end)
 
-    it("GET /api/v1/status -> uptime_seconds from server_start_time, not policy_loaded_at", function()
+    it("GET /api/v1/status -> uptime_seconds from worker_start_time, not policy_loaded_at", function()
       _G.ngx.var.uri = "/api/v1/status"
       local now = _G.ngx.now()
       _G.ngx.shared.luagate_policy = make_shared_dict({
         ["http:active_version"] = "abc123",
         ["stream:active_version"] = "def456",
-        ["server_start_time"] = now - 7200,
+        ["worker_start_time:0"] = now - 7200,
         ["policy_loaded_at"] = now - 60,
       })
       _G.ngx.worker.count = function()
@@ -340,12 +340,12 @@ describe("router.dispatch", function()
       local said = _G.ngx._get_said()
       local dkjson = require("dkjson")
       local body = dkjson.decode(said[1])
-      assert.truthy(body.uptime_seconds >= 7199, "uptime must use server_start_time")
+      assert.truthy(body.uptime_seconds >= 7199, "uptime must use worker_start_time")
       assert.truthy(body.policy_age_seconds >= 59, "policy_age must use policy_loaded_at")
       assert.truthy(body.uptime_seconds > body.policy_age_seconds, "uptime > policy_age when reload happened later")
     end)
 
-    it("GET /api/v1/status -> uptime_seconds=0 when server_start_time missing", function()
+    it("GET /api/v1/status -> uptime_seconds=0 when worker_start_time missing", function()
       _G.ngx.var.uri = "/api/v1/status"
       _G.ngx.shared.luagate_policy = make_shared_dict({
         ["http:active_version"] = "abc123",

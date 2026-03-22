@@ -228,7 +228,7 @@ end
 
 --- GET /api/v1/status — detailed server status.
 -- Exposes a minimal status snapshot derived from shared dict state.
--- DON-222: uptime_seconds is server uptime (since init_by_lua),
+-- DON-222: uptime_seconds is per-worker process uptime (since init_worker),
 -- policy_age_seconds is time since last successful policy load.
 local function handle_status()
   local policy_dict = ngx.shared.luagate_policy
@@ -241,8 +241,9 @@ local function handle_status()
     worker_count = 1
   end
 
-  -- DON-222: Read server_start_time recorded at init_by_lua by loader.init_load()
-  local start_time = policy_dict and policy_dict:get("server_start_time")
+  -- DON-222: Read per-worker start time recorded at init_worker_by_lua
+  local wid = ngx.worker.id()
+  local start_time = policy_dict and policy_dict:get("worker_start_time:" .. wid)
   local uptime_seconds = 0
   if start_time and start_time > 0 then
     uptime_seconds = math.max(0, math.floor(ngx.now() - start_time))
