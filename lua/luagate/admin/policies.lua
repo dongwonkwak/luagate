@@ -219,12 +219,30 @@ local function read_request_body()
 end
 
 --- Validate PUT If-Match against the current source_version.
+-- When source_version is nil (e.g. before first hot-reload commit),
+-- fall back to SHA256 of the canonical policy file — mirroring the
+-- ETag logic in handle_get_policies().  Fail-closed on read/hash errors.
 -- @param if_match string
 -- @return string|nil current_source
 -- @return string|nil mismatch message
 local function validate_source_if_match(if_match)
   local current_source = loader.get_active_versions().source_version
-  if current_source and if_match ~= current_source then
+
+  -- Fallback: compute SHA256 from canonical file when source_version is nil
+  if not current_source then
+    local content, read_err = read_policy_file()
+    if not content then
+      -- fail-closed: cannot verify => reject
+      return nil, "cannot verify If-Match: " .. tostring(read_err)
+    end
+    local hex, hash_err = sha256_hex(content)
+    if not hex then
+      return nil, "cannot verify If-Match: SHA256 failed: " .. tostring(hash_err)
+    end
+    current_source = hex
+  end
+
+  if if_match ~= current_source then
     return current_source, "If-Match version mismatch: expected " .. current_source .. ", got " .. if_match
   end
   return current_source, nil
