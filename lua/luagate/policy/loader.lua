@@ -727,15 +727,17 @@ function _M.set_source_version(version)
   if not dict then
     return false, "no shared dict"
   end
-  -- Guard: only write when source_version is currently nil.
-  -- Prevents a skipped-backfill caller from overwriting a newer value
-  -- that a concurrent request committed after the reload lock was released.
-  local current = dict:get("source_version")
-  if current ~= nil then
-    return true, nil
-  end
-  local ok, err = dict:safe_set("source_version", version)
+  -- Atomic backfill: dict:add() writes only when key does not exist.
+  -- This eliminates the TOCTOU race between get() and safe_set() —
+  -- if a concurrent PUT committed a newer source_version between our
+  -- reload lock release and this call, add() returns false/"exists"
+  -- and the stale hash is never written.
+  local ok, err = dict:add("source_version", version)
   if not ok then
+    if err == "exists" then
+      -- Key already present — another request committed first; no-op.
+      return true, nil
+    end
     return false, err
   end
   return true, nil
