@@ -79,16 +79,20 @@ groups:
           description: "Policy reload has failed in the last 5 minutes."
           runbook_url: "docs/runbook/alert-response.md#LuagatePolicyReloadFailed"
 
-      # ── Stream Policy ─────────────────────────────────────────────────
-      - alert: LuagateStreamPolicyNotLoaded
-        expr: luagate_policy_loaded{subsystem="stream"} == 0
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Stream policy not loaded on {{ $labels.instance }}"
-          description: "luagate_policy_loaded{subsystem=\"stream\"} has been 0 for 5 minutes. If this is an HTTP-only deployment, this is expected."
-          runbook_url: "docs/runbook/alert-response.md#LuagateStreamPolicyNotLoaded"
+      # ── Stream Policy (Optional) ─────────────────────────────────────
+      # Enable only for stream-enabled deployments.
+      # HTTP-only deployments will always have subsystem="stream" == 0.
+      # See: docs/runbook/alert-response.md#luagatestreampolicynotloaded-optional
+      #
+      # - alert: LuagateStreamPolicyNotLoaded
+      #   expr: luagate_policy_loaded{subsystem="stream"} == 0
+      #   for: 5m
+      #   labels:
+      #     severity: warning
+      #   annotations:
+      #     summary: "Stream policy not loaded on {{ $labels.instance }}"
+      #     description: "luagate_policy_loaded{subsystem=\"stream\"} has been 0 for 5 minutes."
+      #     runbook_url: "docs/runbook/alert-response.md#luagatestreampolicynotloaded-optional"
 
       # ── Service Health ───────────────────────────────────────────────
       - alert: LuagateWorkerDown

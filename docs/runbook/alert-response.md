@@ -187,10 +187,13 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ---
 
-## Optional: LuagateStreamPolicyNotLoaded
+## LuagateStreamPolicyNotLoaded (Optional)
+
+> **이 alert는 stream-enabled 배포에서만 해당된다.**
+> 기본 `conf/alerts.yml`에는 포함되지 않으며, stream을 사용하는 배포에서만 별도 alert rule로 추가한다.
 
 **심각도**: warning
-**조건**: stream-enabled 배포에서만 커스텀 alert rule로 `luagate_policy_loaded{subsystem="stream"} == 0` (5분 지속)
+**조건**: `luagate_policy_loaded{subsystem="stream"} == 0` (5분 지속)
 
 ### 즉시 조치
 
@@ -230,5 +233,4 @@ tail -50 /var/log/luagate/error.log | grep -i stream
 > **주의**: `LuagateStreamPolicyNotLoaded` alert가 발생했는데 `active_stream_version`만 보고
 > "HTTP-only 배포이므로 정상"으로 오인하지 않도록, 반드시 `nginx.conf`의 stream 블록 존재 여부를 함께 확인할 것.
 >
-> **참고**: 이 alert는 기본 `conf/alerts.yml`에는 포함되지 않는다.
-> stream-enabled 배포에서만 별도 alert rule로 추가한다.
+> **참고**: alert rule 예시는 `conf/alerts.yml`의 주석을 참조한다.
