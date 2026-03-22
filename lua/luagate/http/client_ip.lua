@@ -55,7 +55,7 @@ local function match_cidr(cidr, ip)
   end
 
   local mask = tonumber(mask_str)
-  if not mask then
+  if not mask or mask < 0 or mask > 32 then
     return false
   end
 

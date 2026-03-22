@@ -100,6 +100,10 @@ describe("luagate.http.client_ip", function()
     it("returns false for out-of-range octets", function()
       assert.is_false(client_ip._match_cidr("10.0.0.0/8", "256.0.0.1"))
     end)
+
+    it("returns false for out-of-range CIDR prefix", function()
+      assert.is_false(client_ip._match_cidr("10.0.0.0/33", "10.0.0.1"))
+    end)
   end)
 
   -- =======================================================================
