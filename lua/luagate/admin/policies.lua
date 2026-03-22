@@ -340,10 +340,12 @@ function _M.handle_put_policies()
   end
 
   -- [0] Content-Type charset check (admin-api.md §6.5: UTF-8 only)
+  -- Handles RFC variations: case-insensitive key, optional whitespace
+  -- around '=', and optional quoting of the value.
   local content_type = ngx.req.get_headers()["Content-Type"]
   if content_type then
-    local charset = content_type:match("charset=([^;%s]+)")
-    if charset and charset:lower() ~= "utf-8" then
+    local charset = content_type:lower():match('charset%s*=%s*"?([^;%s"]+)')
+    if charset and charset ~= "utf-8" then
       send_error(422, "validation_failed", "request", "only UTF-8 charset is accepted")
       return
     end

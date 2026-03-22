@@ -1086,6 +1086,61 @@ describe("PUT /api/v1/policies", function()
     assert.are.equal(200, _G.ngx.status)
   end)
 
+  it("rejects non-UTF-8 charset with uppercase key (Charset=)", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml; Charset=iso-8859-1",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it("rejects non-UTF-8 charset with spaces around '='", function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = "application/x-yaml; charset = iso-8859-1",
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("UTF%-8"))
+  end)
+
+  it('accepts quoted charset="utf-8"', function()
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        ["Content-Type"] = 'application/x-yaml; charset="utf-8"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(200, _G.ngx.status)
+  end)
+
   it("accepts Content-Type without charset (assumes UTF-8)", function()
     _G.ngx.req.get_headers = function()
       return {
