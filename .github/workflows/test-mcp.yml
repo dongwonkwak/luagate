@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "mcp/**"
+      - "conf/nginx.conf"
+      - "lua/luagate/admin/**"
+      - "lua/luagate/policy/**"
+      - "Dockerfile"
       - ".github/workflows/test-mcp.yml"
 
 permissions:
@@ -23,6 +27,10 @@ jobs:
           filters: |
             mcp:
               - 'mcp/**'
+              - 'conf/nginx.conf'
+              - 'lua/luagate/admin/**'
+              - 'lua/luagate/policy/**'
+              - 'Dockerfile'
               - '.github/workflows/test-mcp.yml'
 
   unit-test:
