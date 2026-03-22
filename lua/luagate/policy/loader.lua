@@ -668,6 +668,13 @@ end
 --
 -- @param  filepath  string  Absolute path to the YAML policy file.
 function _M.init_load(filepath)
+  -- DON-222: Record server start time at init_by_lua phase for accurate uptime.
+  -- This runs once at server start, before any worker/request processing.
+  local dict = get_dict()
+  if dict then
+    dict:set("server_start_time", ngx.now())
+  end
+
   local result = _M.load_policy(filepath)
 
   -- Cold start requires both subsystems to commit successfully.
