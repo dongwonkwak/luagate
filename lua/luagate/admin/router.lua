@@ -197,11 +197,13 @@ local function handle_health()
   -- ADR-009 Phase 3: per-worker FFI watchdog leak counts
   local leak_counts, ffi_timeouts, max_leak = collect_ffi_leak_counts()
 
+  local NULL = cjson.null
+
   local body = {
-    source_version = source_version,
-    active_http_version = http_version,
-    active_stream_version = stream_version,
-    policy_loaded_at = format_iso8601(loaded_at_epoch),
+    source_version = source_version or NULL,
+    active_http_version = http_version or NULL,
+    active_stream_version = stream_version or NULL,
+    policy_loaded_at = format_iso8601(loaded_at_epoch) or NULL,
     ffi_watchdog_leak_count = leak_counts,
     ffi_watchdog_timeouts = ffi_timeouts,
   }

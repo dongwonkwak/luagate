@@ -13,7 +13,7 @@ package.preload["cjson.safe"] = function()
   return {
     encode = dkjson.encode,
     decode = dkjson.decode,
-    null = {},
+    null = dkjson.null,
     empty_array = setmetatable({}, { __jsontype = "array" }),
   }
 end
@@ -519,6 +519,31 @@ describe("router.dispatch", function()
       router.dispatch()
 
       assert.are.equal(503, _G.ngx.status)
+    end)
+
+    it("GET /health -> HTTP-only: nil stream/source fields serialize as JSON null", function()
+      _G.ngx.var.uri = "/health"
+      -- HTTP-only: only http:active_version is set, no stream or source_version
+      _G.ngx.shared.luagate_policy = make_shared_dict({
+        ["http:active_version"] = "http-only-v1",
+      })
+      _G.ngx.req.get_method = function()
+        return "GET"
+      end
+
+      router.dispatch()
+
+      assert.are.equal(200, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local dkjson = require("dkjson")
+      local body = dkjson.decode(said[1])
+      assert.are.equal("ok", body.status)
+      assert.are.equal("http-only-v1", body.active_http_version)
+      -- nil fields must be present as JSON null, not missing from the output
+      local raw_json = said[1]
+      assert.is_truthy(raw_json:find('"active_stream_version":null'), "active_stream_version must be null in JSON")
+      assert.is_truthy(raw_json:find('"source_version":null'), "source_version must be null in JSON")
+      assert.is_truthy(raw_json:find('"policy_loaded_at":null'), "policy_loaded_at must be null in JSON")
     end)
 
     it("GET /metrics -> 200 + Content-Type: text/plain Prometheus 형식", function()
