@@ -351,31 +351,27 @@ function _M.evaluate(rules, request_ctx, default_action)
     return { action = "deny", matched_rule = nil, decision_source = "error" }
   end
 
-  local ok, result = pcall(function()
-    for _, rule in ipairs(rules) do
-      -- rules list is already enabled-only (compile() filtered it)
-      if scope_matches(rule.scope, request_ctx) then
-        return {
-          action = rule.action,
-          matched_rule = rule.id,
-          decision_source = "rule",
-        }
-      end
+  for _, rule in ipairs(rules) do
+    -- rules list is already enabled-only (compile() filtered it)
+    local ok, matched = pcall(scope_matches, rule.scope, request_ctx)
+    if not ok then
+      -- Unexpected error in matching logic → fail-closed
+      return { action = "deny", matched_rule = nil, decision_source = "error" }
     end
-    -- No rule matched → apply default action
-    return {
-      action = default_action,
-      matched_rule = nil,
-      decision_source = "default",
-    }
-  end)
-
-  if not ok then
-    -- Unexpected error in matching logic → fail-closed
-    return { action = "deny", matched_rule = nil, decision_source = "error" }
+    if matched then
+      return {
+        action = rule.action,
+        matched_rule = rule.id,
+        decision_source = "rule",
+      }
+    end
   end
-
-  return result
+  -- No rule matched → apply default action
+  return {
+    action = default_action,
+    matched_rule = nil,
+    decision_source = "default",
+  }
 end
 
 --- Evaluate a pre-sorted (compiled) list of Stream rules against a connection context.
@@ -398,31 +394,27 @@ function _M.evaluate_stream(rules, request_ctx)
     return { action = "deny", matched_rule = nil, decision_source = "error", upstream = nil }
   end
 
-  local ok, result = pcall(function()
-    for _, rule in ipairs(rules) do
-      if scope_matches(rule.scope, request_ctx) then
-        return {
-          action = rule.action,
-          matched_rule = rule.id,
-          decision_source = "rule",
-          upstream = rule.upstream,
-        }
-      end
+  for _, rule in ipairs(rules) do
+    local ok, matched = pcall(scope_matches, rule.scope, request_ctx)
+    if not ok then
+      return { action = "deny", matched_rule = nil, decision_source = "error", upstream = nil }
     end
-    -- No match → Stream always fail-closed (deny)
-    return {
-      action = "deny",
-      matched_rule = nil,
-      decision_source = "default",
-      upstream = nil,
-    }
-  end)
-
-  if not ok then
-    return { action = "deny", matched_rule = nil, decision_source = "error", upstream = nil }
+    if matched then
+      return {
+        action = rule.action,
+        matched_rule = rule.id,
+        decision_source = "rule",
+        upstream = rule.upstream,
+      }
+    end
   end
-
-  return result
+  -- No match → Stream always fail-closed (deny)
+  return {
+    action = "deny",
+    matched_rule = nil,
+    decision_source = "default",
+    upstream = nil,
+  }
 end
 
 --- Load (or return cached) the active policy from the shared dict.

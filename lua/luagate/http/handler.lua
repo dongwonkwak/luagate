@@ -47,26 +47,30 @@ local function is_internal_ip(ip)
     -- Pure IPv6 (not ::1, not ::ffff:...) → treat as external
     return false
   end
-  -- IPv4 checks (RFC 1918 + loopback)
-  -- 127.x.x.x (loopback)
-  if ip:match("^127%.") then
+  -- IPv4 checks (RFC 1918 + loopback) using string.byte for fast prefix match
+  local b1, b2, b3, b4 = ip:byte(1, 4)
+  -- 49='1', 50='2', 55='7', 48='0', 57='9', 46='.'
+  -- 127.x.x.x (loopback): starts with "1","2","7","."
+  if b1 == 49 and b2 == 50 and b3 == 55 and b4 == 46 then -- "127."
     return true
   end
-  -- 10.x.x.x
-  if ip:match("^10%.") then
+  -- 10.x.x.x: starts with "1","0","."
+  if b1 == 49 and b2 == 48 and b3 == 46 then -- "10."
+    return true
+  end
+  -- 192.168.x.x
+  if ip:sub(1, 8) == "192.168." then
     return true
   end
   -- 172.16.x.x – 172.31.x.x
-  local b = ip:match("^172%.(%d+)%.")
-  if b then
-    local n = tonumber(b)
-    if n and n >= 16 and n <= 31 then
-      return true
+  if b1 == 49 and b2 == 55 and b3 == 50 and b4 == 46 then -- "172."
+    local second = ip:match("^172%.(%d+)%.")
+    if second then
+      local n = tonumber(second)
+      if n and n >= 16 and n <= 31 then
+        return true
+      end
     end
-  end
-  -- 192.168.x.x
-  if ip:match("^192%.168%.") then
-    return true
   end
   return false
 end
@@ -86,7 +90,8 @@ local function do_deny(deny_reason, request_id)
   local client_ip = ngx.var.luagate_src_ip or ngx.var.remote_addr or ""
 
   -- H-1: external clients receive a generic reason token only (OWASP A05)
-  local external_reason = is_internal_ip(client_ip) and reason or "policy_deny"
+  local internal = is_internal_ip(client_ip)
+  local external_reason = internal and reason or "policy_deny"
 
   -- JSON 인젝션 방지: cjson.encode로 안전하게 직렬화 (http-pipeline.md §6)
   local ok, body = pcall(cjson.encode, {
@@ -102,7 +107,7 @@ local function do_deny(deny_reason, request_id)
   ngx.header["Content-Type"] = "application/json"
   ngx.header["X-Request-ID"] = rid
   -- X-LuaGate-Block-Reason: 내부망 클라이언트에만 전송 (외부 노출 금지)
-  if is_internal_ip(client_ip) then
+  if internal then
     ngx.header["X-LuaGate-Block-Reason"] = reason
   end
   ngx.header["Cache-Control"] = "no-store"
