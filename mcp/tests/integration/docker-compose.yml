@@ -14,6 +14,7 @@ services:
       - ../../../conf/scanner-patterns:/conf/scanner-patterns:ro
     environment:
       - LUAGATE_ADMIN_TOKEN=integration-test-token-minimum-32bytes!
+      - LUAGATE_ADMIN_BIND=0.0.0.0
     command:
       - sh
       - -c
@@ -22,6 +23,10 @@ services:
         cp /fixtures/luagate.yaml /conf/policies.yaml
         chmod 0777 /conf
         chmod 0666 /conf/policies.yaml
+        if [ -n "${LUAGATE_ADMIN_BIND:-}" ]; then
+          sed -i "s/listen 127.0.0.1:9090/listen ${LUAGATE_ADMIN_BIND}:9090/" \
+              /usr/local/openresty/nginx/conf/nginx.conf
+        fi
         exec openresty -g 'daemon off;'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
