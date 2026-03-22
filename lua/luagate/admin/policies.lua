@@ -322,6 +322,19 @@ function _M.handle_put_policies()
     return
   end
 
+  -- [0] Content-Type charset check (admin-api.md §6.5: UTF-8 only)
+  -- Before body read to avoid loading non-UTF-8 payloads into memory.
+  -- Handles RFC variations: case-insensitive key, optional whitespace
+  -- around '=', and optional quoting of the value.
+  local content_type = ngx.req.get_headers()["Content-Type"]
+  if content_type then
+    local charset = content_type:lower():match('charset%s*=%s*"?([^;%s"]+)')
+    if charset and charset ~= "utf-8" then
+      send_error(422, "validation_failed", "request", "only UTF-8 charset is accepted")
+      return
+    end
+  end
+
   -- [0] Read request body
   local body, body_status, body_code, body_stage, body_message = read_request_body()
   if not body then
@@ -333,22 +346,27 @@ function _M.handle_put_policies()
     return
   end
 
-  -- [0] UTF-8 BOM check (admin-api.md §6.5: BOM not allowed)
-  if #body >= 3 and body:byte(1) == 0xEF and body:byte(2) == 0xBB and body:byte(3) == 0xBF then
-    send_error(422, "validation_failed", "request", "UTF-8 BOM is not allowed")
+  -- [0] BOM check (admin-api.md §6.5: BOM not allowed)
+  -- Rejects UTF-8, UTF-16 LE/BE, and UTF-32 LE/BE BOMs.
+  if #body >= 4 and body:byte(1) == 0xFF and body:byte(2) == 0xFE and body:byte(3) == 0x00 and body:byte(4) == 0x00 then
+    send_error(422, "validation_failed", "request", "BOM is not allowed (detected UTF-32 LE)")
     return
   end
-
-  -- [0] Content-Type charset check (admin-api.md §6.5: UTF-8 only)
-  -- Handles RFC variations: case-insensitive key, optional whitespace
-  -- around '=', and optional quoting of the value.
-  local content_type = ngx.req.get_headers()["Content-Type"]
-  if content_type then
-    local charset = content_type:lower():match('charset%s*=%s*"?([^;%s"]+)')
-    if charset and charset ~= "utf-8" then
-      send_error(422, "validation_failed", "request", "only UTF-8 charset is accepted")
-      return
-    end
+  if #body >= 4 and body:byte(1) == 0x00 and body:byte(2) == 0x00 and body:byte(3) == 0xFE and body:byte(4) == 0xFF then
+    send_error(422, "validation_failed", "request", "BOM is not allowed (detected UTF-32 BE)")
+    return
+  end
+  if #body >= 3 and body:byte(1) == 0xEF and body:byte(2) == 0xBB and body:byte(3) == 0xBF then
+    send_error(422, "validation_failed", "request", "BOM is not allowed (detected UTF-8 BOM)")
+    return
+  end
+  if #body >= 2 and body:byte(1) == 0xFF and body:byte(2) == 0xFE then
+    send_error(422, "validation_failed", "request", "BOM is not allowed (detected UTF-16 LE)")
+    return
+  end
+  if #body >= 2 and body:byte(1) == 0xFE and body:byte(2) == 0xFF then
+    send_error(422, "validation_failed", "request", "BOM is not allowed (detected UTF-16 BE)")
+    return
   end
 
   -- [1] If-Match check (ADR-005: optimistic lock on source_version)

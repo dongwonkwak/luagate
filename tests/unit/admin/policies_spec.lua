@@ -1033,6 +1033,78 @@ describe("PUT /api/v1/policies", function()
     assert.truthy(body.details[1]:find("BOM"))
   end)
 
+  it("rejects body with UTF-16 LE BOM", function()
+    local bom_body = string.char(0xFF, 0xFE) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-16 LE"))
+  end)
+
+  it("rejects body with UTF-16 BE BOM", function()
+    local bom_body = string.char(0xFE, 0xFF) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-16 BE"))
+  end)
+
+  it("rejects body with UTF-32 LE BOM", function()
+    local bom_body = string.char(0xFF, 0xFE, 0x00, 0x00) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-32 LE"))
+  end)
+
+  it("rejects body with UTF-32 BE BOM", function()
+    local bom_body = string.char(0x00, 0x00, 0xFE, 0xFF) .. "version: '1.0'\nrules: []\n"
+    _G.ngx.req.get_body_data = function()
+      return bom_body
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(422, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("validation_failed", body.error)
+    assert.truthy(body.details[1]:find("BOM"))
+    assert.truthy(body.details[1]:find("UTF%-32 BE"))
+  end)
+
   it("rejects non-UTF-8 charset in Content-Type", function()
     _G.ngx.req.get_headers = function()
       return {
