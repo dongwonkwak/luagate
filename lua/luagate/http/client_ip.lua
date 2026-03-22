@@ -12,8 +12,38 @@ local _M = {}
 local _trusted_proxies = {}
 local _trusted_cidrs = {}
 
---- Check if an IP matches a CIDR range (simple prefix match for /8, /16, /24, /32).
--- For production use with complex CIDR, this should be extended or use FFI.
+--- Validate that a string is a well-formed IPv4 address.
+-- @param addr string candidate IP address
+-- @return boolean
+local function is_valid_ipv4(addr)
+  if type(addr) ~= "string" then
+    return false
+  end
+  local a, b, c, d = addr:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+  if not a then
+    return false
+  end
+  a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+  return a <= 255 and b <= 255 and c <= 255 and d <= 255
+end
+
+--- Convert IPv4 address string to a 32-bit numeric value.
+-- @param addr string IPv4 address
+-- @return number|nil numeric value, or nil if invalid
+local function ip_to_num(addr)
+  local a, b, c, d = addr:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+  if not a then
+    return nil
+  end
+  a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+  if a > 255 or b > 255 or c > 255 or d > 255 then
+    return nil
+  end
+  -- Use multiplication to avoid potential overflow with bit shifts in plain Lua
+  return a * 16777216 + b * 65536 + c * 256 + d
+end
+
+--- Check if an IP matches a CIDR range.
 -- @param cidr string CIDR notation (e.g. "10.0.0.0/8")
 -- @param ip string IP address to check
 -- @return boolean
@@ -27,20 +57,6 @@ local function match_cidr(cidr, ip)
   local mask = tonumber(mask_str)
   if not mask then
     return false
-  end
-
-  -- Convert IP to numeric for comparison
-  local function ip_to_num(addr)
-    local a, b, c, d = addr:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
-    if not a then
-      return nil
-    end
-    a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
-    if a > 255 or b > 255 or c > 255 or d > 255 then
-      return nil
-    end
-    -- Use multiplication to avoid potential overflow with bit shifts in plain Lua
-    return a * 16777216 + b * 65536 + c * 256 + d
   end
 
   local net_num = ip_to_num(network)
@@ -103,10 +119,12 @@ end
 --- Parse X-Forwarded-For header and return the rightmost non-trusted IP.
 -- XFF format: "client, proxy1, proxy2"
 -- Walk from right to left, skip trusted proxies, return first non-trusted.
+-- This is the secure approach: entries added by trusted proxies (on the right)
+-- are skipped, and the first untrusted entry is the real client boundary.
+-- Walking left-to-right would be vulnerable to client-injected spoofed IPs.
 -- @param xff_header string X-Forwarded-For header value
--- @param remote_addr string The direct connection IP (rightmost implicit entry)
--- @return string|nil resolved IP, or nil if all are trusted
-function _M.parse_xff(xff_header, _remote_addr)
+-- @return string|nil resolved IP, or nil if no valid non-trusted IP found
+function _M.parse_xff(xff_header)
   if not xff_header or xff_header == "" then
     return nil
   end
@@ -124,40 +142,46 @@ function _M.parse_xff(xff_header, _remote_addr)
     return nil
   end
 
-  -- Walk from right to left (closest to server first)
-  -- remote_addr is the implicit rightmost entry (already the direct connection)
-  -- If remote_addr is not trusted, it's the real client IP — but caller already
-  -- checked that before calling parse_xff.
+  -- Walk from right to left (closest to server first).
+  -- Skip trusted proxies; return first non-trusted valid IPv4.
+  -- Invalid tokens (e.g. "unknown", malformed) are skipped to prevent
+  -- src_ip_cidr policy rules from silently missing all matches.
   for i = #ips, 1, -1 do
-    if not is_trusted(ips[i]) then
-      return ips[i]
+    local ip = ips[i]
+    if is_valid_ipv4(ip) and not is_trusted(ip) then
+      return ip
     end
   end
 
-  -- All XFF entries are trusted — return leftmost as fallback
-  return ips[1]
+  -- All XFF entries are trusted or invalid — return nil (caller falls back to remote_addr)
+  return nil
 end
 
 --- Resolve real client IP for the current request.
 -- Priority:
---   1. PROXY protocol (ngx.var.proxy_protocol_addr if available)
---   2. XFF header (rightmost non-trusted IP, only if remote_addr is trusted)
+--   1. PROXY protocol (ngx.var.proxy_protocol_addr if available and valid IPv4)
+--   2. XFF header (rightmost non-trusted valid IP, only if remote_addr is trusted)
 --   3. remote_addr (direct connection fallback)
 -- @return string resolved client IP
 function _M.resolve()
   local remote_addr = ngx.var.remote_addr or "0.0.0.0"
 
-  -- 1. PROXY protocol: if proxy_protocol_addr is set and non-empty, use it
+  -- 1. PROXY protocol: if proxy_protocol_addr is set, non-empty, and valid IPv4
+  -- Requires nginx `listen ... proxy_protocol;` to be enabled.
   local pp_addr = ngx.var.proxy_protocol_addr
   if pp_addr and pp_addr ~= "" then
-    return pp_addr
+    if is_valid_ipv4(pp_addr) then
+      return pp_addr
+    end
+    -- Invalid PROXY protocol address — log and fall through
+    ngx.log(ngx.WARN, "[luagate] invalid PROXY protocol addr, ignoring: ", pp_addr)
   end
 
   -- 2. XFF: only parse if direct connection is from a trusted proxy
   if is_trusted(remote_addr) then
     local xff = ngx.var.http_x_forwarded_for
     if xff then
-      local resolved = _M.parse_xff(xff, remote_addr)
+      local resolved = _M.parse_xff(xff)
       if resolved then
         return resolved
       end
@@ -171,5 +195,6 @@ end
 -- Expose for testing
 _M._match_cidr = match_cidr
 _M._is_trusted = is_trusted
+_M._is_valid_ipv4 = is_valid_ipv4
 
 return _M
