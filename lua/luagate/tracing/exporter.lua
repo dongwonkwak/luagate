@@ -130,12 +130,14 @@ local function export_otlp_http(spans)
   local ok_http, http = pcall(require, "resty.http")
   if not ok_http then
     ngx.log(ngx.ERR, "[luagate:tracing] lua-resty-http not available: ", tostring(http))
+    incr_dropped(#spans)
     return
   end
 
   local httpc = http.new()
   if not httpc then
     ngx.log(ngx.ERR, "[luagate:tracing] failed to create HTTP client")
+    incr_dropped(#spans)
     return
   end
 
@@ -158,6 +160,7 @@ local function export_otlp_http(spans)
 
   if res.status >= 400 then
     ngx.log(ngx.ERR, "[luagate:tracing] OTLP export HTTP ", res.status, ": ", tostring(res.body))
+    incr_dropped(#spans)
   end
 end
 

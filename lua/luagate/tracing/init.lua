@@ -273,10 +273,13 @@ function _M.inject_outbound(trace_ctx, proxy_span)
     local ts = ngx.req.get_headers()["tracestate"]
     if ts and type(ts) == "string" and #ts > 0 then
       -- Validate ALL comma-separated entries are well-formed key=value pairs
+      -- W3C tracestate allows: simple-key = lcalpha (alphanum|_|-|*|/)
+      --   multi-tenant-key = simple-key "@" lcalpha (alphanum|_|-|*|/)
+      --   value = (printable ASCII except , and =)
       local valid = true
       for entry in ts:gmatch("[^,]+") do
         local trimmed = entry:match("^%s*(.-)%s*$")
-        if not trimmed or not trimmed:match("^[%w_%-*/]+=[%w_%-+/.%%:@]+$") then
+        if not trimmed or not trimmed:match("^[%w_%-*/@]+=[^,=]+$") then
           valid = false
           break
         end
