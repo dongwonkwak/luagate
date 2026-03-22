@@ -74,4 +74,17 @@ describe("tracing.buffer", function()
     -- Last item should be "overflow"
     assert.are.equal("overflow", batch[#batch].trace_id)
   end)
+
+  it("preserves FIFO order across repeated overflows", function()
+    for i = 1, 4100 do
+      buffer.add({ trace_id = tostring(i), span_id = tostring(i) })
+    end
+
+    assert.are.equal(4096, buffer.size())
+    assert.are.equal(4, buffer.dropped_total())
+
+    local batch = buffer.swap()
+    assert.are.equal("5", batch[1].trace_id)
+    assert.are.equal("4100", batch[#batch].trace_id)
+  end)
 end)

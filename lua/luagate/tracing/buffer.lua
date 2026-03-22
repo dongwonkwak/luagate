@@ -14,7 +14,16 @@ local _M = {}
 local MAX_QUEUE_SIZE = 4096
 
 local _buffer = {}
+local _head = 1
+local _size = 0
 local _dropped_total = 0
+
+local function incr_dropped_metric()
+  local dict = ngx.shared.luagate_metrics
+  if dict then
+    dict:incr("luagate_tracing_spans_dropped_total", 1, 0)
+  end
+end
 
 --- Add a completed span to the buffer.
 -- ADR-010 §4: cap at MAX_QUEUE_SIZE, oldest drop on overflow.
@@ -24,17 +33,18 @@ function _M.add(span)
   if not span then
     return
   end
-  if #_buffer >= MAX_QUEUE_SIZE then
-    -- Drop oldest span (index 1)
-    table.remove(_buffer, 1)
+  if _size >= MAX_QUEUE_SIZE then
+    -- Overwrite the oldest span in-place and advance head for O(1) overflow handling.
+    _buffer[_head] = span
+    _head = (_head % MAX_QUEUE_SIZE) + 1
     _dropped_total = _dropped_total + 1
-    -- Update shared dict metric if available
-    local dict = ngx.shared.luagate_metrics
-    if dict then
-      dict:incr("luagate_tracing_spans_dropped_total", 1, 0)
-    end
+    incr_dropped_metric()
+    return
   end
-  _buffer[#_buffer + 1] = span
+
+  local tail = ((_head + _size - 1) % MAX_QUEUE_SIZE) + 1
+  _buffer[tail] = span
+  _size = _size + 1
 end
 
 --- Get total number of dropped spans (for testing/metrics).
@@ -44,19 +54,25 @@ function _M.dropped_total()
 end
 
 --- Atomically swap and return the current buffer.
--- ADR-010 §4: "local batch = buffer; buffer = {}" atomic swap.
--- After swap, new appends go to the fresh buffer.
+-- Returns spans in FIFO order, then resets the buffer state.
 -- @return table  The batch of spans to flush
 function _M.swap()
-  local batch = _buffer
+  local batch = {}
+  for i = 1, _size do
+    local index = ((_head + i - 2) % MAX_QUEUE_SIZE) + 1
+    batch[i] = _buffer[index]
+  end
+
   _buffer = {}
+  _head = 1
+  _size = 0
   return batch
 end
 
 --- Get current buffer size (for metrics/monitoring).
 -- @return number
 function _M.size()
-  return #_buffer
+  return _size
 end
 
 return _M
