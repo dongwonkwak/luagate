@@ -4,6 +4,14 @@ on:
   pull_request:
     paths:
       - "mcp/**"
+      - "conf/nginx.conf"
+      - "conf/scanner-patterns/**"
+      - "lua/luagate/admin/**"
+      - "lua/luagate/policy/**"
+      - "lua/luagate/scanner/**"
+      - "policies/luagate.yaml"
+      - "Dockerfile"
+      - ".dockerignore"
       - ".github/workflows/test-mcp.yml"
 
 permissions:
@@ -23,6 +31,14 @@ jobs:
           filters: |
             mcp:
               - 'mcp/**'
+              - 'conf/nginx.conf'
+              - 'conf/scanner-patterns/**'
+              - 'lua/luagate/admin/**'
+              - 'lua/luagate/policy/**'
+              - 'lua/luagate/scanner/**'
+              - 'policies/luagate.yaml'
+              - 'Dockerfile'
+              - '.dockerignore'
               - '.github/workflows/test-mcp.yml'
 
   unit-test:
