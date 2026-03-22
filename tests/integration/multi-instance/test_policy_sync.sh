@@ -94,7 +94,10 @@ info "Instance 2 source_version before: $SV2_BEFORE"
 # ── Step 5: Deploy new policy to shared volume (ADR-008 §8.3 step 2) ─────
 info "Deploying updated policy to shared volume..."
 
-TEST_POLICY='global:
+# Write policy to shared volume via container exec (simulates CI/CD file deploy)
+# Use printf to avoid trailing newline from heredoc/herestring
+docker exec -i luagate-multi-1 sh -c "cat > /usr/local/openresty/nginx/conf/policies.yaml" <<'POLICY_EOF'
+global:
   default_action: deny
 rules:
   - id: multi-instance-sync-test
@@ -102,14 +105,12 @@ rules:
     scope:
       path: "/sync-verified"
     action: allow
-    enabled: true'
+    enabled: true
+POLICY_EOF
 
-# Compute target_version (SHA256 of the policy file content) — ADR-008 §8.3 step 1
-TARGET_VERSION=$(printf '%s' "$TEST_POLICY" | sha256sum | awk '{print $1}')
-info "Target version (SHA256): $TARGET_VERSION"
-
-# Write policy to shared volume via container exec (simulates CI/CD file deploy)
-docker exec luagate-multi-1 sh -c "cat > /usr/local/openresty/nginx/conf/policies.yaml" <<< "$TEST_POLICY"
+# Compute target_version from actual deployed file bytes (ADR-008 §8.3 step 1)
+TARGET_VERSION=$(docker exec luagate-multi-1 sha256sum /usr/local/openresty/nginx/conf/policies.yaml | awk '{print $1}')
+info "Target version (SHA256 of deployed file): $TARGET_VERSION"
 pass "Policy file written to shared volume"
 
 # ── Step 6: Trigger reload on both instances (ADR-008 §8.3 step 3) ───────
@@ -168,12 +169,11 @@ verify_instance() {
   fi
 
   # source_version should match target_version (SHA256 of deployed file)
+  # ADR-008 §8.3 step 5: source_version == target_version
   if [ "$sv" = "$target" ]; then
     pass "$name: source_version == target_version"
   else
-    # source_version may use a different hash computation internally;
-    # log as info rather than fail if internal consistency holds
-    info "$name: source_version ($sv) != target SHA256 ($target) — internal hash may differ"
+    fail "$name: source_version ($sv) != target_version ($target)"
   fi
 }
 
