@@ -103,7 +103,15 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---- Build the 27-field log record and set ngx.var.luagate_log_json.
+--- Redact sensitive query parameters (exported for tracing span attributes).
+-- ADR-010 Span Attribute Redaction: url.full must apply same PII rules as access.log.
+-- @param qs string  Raw query string
+-- @return string  Redacted query string
+function _M.redact_query_string(qs)
+  return redact_query_string(qs)
+end
+
+--- Build the 29-field log record and set ngx.var.luagate_log_json.
 -- Called from log_by_lua (via handler.log_phase).
 -- Errors are silently caught by the caller (pcall in handler.log_phase).
 function _M.finalize()
@@ -173,7 +181,13 @@ function _M.finalize()
   local raw_qs = ctx.query_raw or ngx.var.luagate_query_string or ""
   local query_string = redact_query_string(raw_qs)
 
-  -- Build 27-field record (log-schema.md §3.1 + ADR-004 §4.1)
+  -- trace_id, span_id: NULLABLE (ADR-010 §6)
+  -- Always logged when tracing enabled (regardless of sampling)
+  -- null when tracing disabled or pre-Lua rejection
+  local trace_id = nullable_string(ngx.var.luagate_trace_id)
+  local span_id = nullable_string(ngx.var.luagate_span_id)
+
+  -- Build 29-field record (log-schema.md §3.1 + ADR-004 §4.1 + ADR-010)
   local record = {
     -- Fields 1-13: request metadata (produced in rewrite phase)
     timestamp = ngx.var.time_iso8601,
@@ -197,7 +211,7 @@ function _M.finalize()
     threat_type = threat_type,
     threat_score = threat_score,
     rule_name = rule_name,
-    -- Fields 21-27: log phase fields
+    -- Fields 21-29: log phase fields
     request_state = ngx.var.luagate_request_state or "short_circuited",
     latency_ms = latency_ms,
     upstream_latency_ms = upstream_latency_ms,
@@ -207,6 +221,9 @@ function _M.finalize()
     worker_id = tonumber(ngx.var.luagate_worker_id) or ngx.worker.id(),
     -- ADR-009: ffi_timeout flag for operational timeout observability
     ffi_timeout = ctx.ffi_timeout or false,
+    -- ADR-010: tracing fields (NULLABLE)
+    trace_id = trace_id,
+    span_id = span_id,
   }
 
   local json, err = cjson.encode(record)

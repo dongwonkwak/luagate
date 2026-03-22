@@ -1,0 +1,13 @@
+# LuaGate Application Configuration
+# ADR-010: Tracing/observability settings (separate from nginx.conf and policies.yaml)
+# Changes require Nginx reload (nginx -s reload) — NOT part of policy Hot Reload.
+
+tracing:
+  enabled: true
+  sample_rate: 1.0              # 100% for development (production: 0.01)
+  exporter: otlp_http           # otlp_http | stdout
+  endpoint: "http://jaeger:4318/v1/traces"
+  batch_size: 1024              # max spans per flush
+  flush_interval_ms: 5000       # flush period (ms)
+  export_timeout_ms: 10000      # OTLP HTTP timeout (ms)
+  service_name: luagate
