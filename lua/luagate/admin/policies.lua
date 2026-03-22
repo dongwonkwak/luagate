@@ -516,12 +516,8 @@ function _M.handle_put_policies()
     return
   end
 
-  -- DON-218: Capture stream:configured before reload for rollback
   local prev_stream_configured
   local policy_dict = ngx.shared.luagate_policy
-  if policy_dict then
-    prev_stream_configured = policy_dict:get("stream:configured") and true or false
-  end
 
   -- Load from temp file (stages [1]-[7] of loader pipeline)
   local result = loader.load_policy(tmp_path, {
@@ -534,6 +530,9 @@ function _M.handle_put_policies()
         return false, "version_mismatch", locked_mismatch_msg
       end
       current_source = locked_source
+      if policy_dict then
+        prev_stream_configured = policy_dict:get("stream:configured") and true or false
+      end
       return true
     end,
   })
