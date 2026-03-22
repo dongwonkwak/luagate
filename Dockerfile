@@ -66,4 +66,3 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8080 8443 9090
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["openresty", "-g", "daemon off;"]
