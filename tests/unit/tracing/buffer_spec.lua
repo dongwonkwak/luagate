@@ -5,6 +5,13 @@
 _G.ngx = {
   log = function() end,
   ERR = 3,
+  shared = {
+    luagate_metrics = {
+      incr = function(_, _key, _val, _init)
+        return true
+      end,
+    },
+  },
 }
 
 -- Force reload each test

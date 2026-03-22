@@ -110,10 +110,20 @@ end
 --- Export spans via OTLP/HTTP POST.
 -- ADR-010 §4: lua-resty-http with keepalive.
 -- @param spans table  Array of span objects
+--- Increment spans_dropped_total metric on export failure.
+-- @param count number  Number of spans dropped
+local function incr_dropped(count)
+  local dict = ngx.shared.luagate_metrics
+  if dict then
+    dict:incr("luagate_tracing_spans_dropped_total", count, 0)
+  end
+end
+
 local function export_otlp_http(spans)
   local json = spans_to_otlp_json(spans)
   if not json then
     ngx.log(ngx.ERR, "[luagate:tracing] failed to encode spans to OTLP JSON")
+    incr_dropped(#spans)
     return
   end
 
@@ -142,6 +152,7 @@ local function export_otlp_http(spans)
 
   if not res then
     ngx.log(ngx.ERR, "[luagate:tracing] OTLP export failed: ", tostring(err))
+    incr_dropped(#spans)
     return
   end
 

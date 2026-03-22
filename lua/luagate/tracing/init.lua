@@ -79,11 +79,20 @@ function _M.init(config_path)
   local sample_rate = tracing.sample_rate or 0.01
   if env_rate then
     local rate_num = tonumber(env_rate)
-    if rate_num then
+    if rate_num and rate_num >= 0 and rate_num <= 1 then
       sample_rate = rate_num
     else
-      ngx.log(ngx.ERR, "[luagate:tracing] invalid LUAGATE_TRACE_SAMPLE_RATE: ", env_rate)
+      ngx.log(ngx.ERR, "[luagate:tracing] invalid LUAGATE_TRACE_SAMPLE_RATE: ", env_rate, ", tracing disabled")
+      _enabled = false
+      return
     end
+  end
+
+  -- Validate sample_rate from config
+  if type(sample_rate) ~= "number" or sample_rate < 0 or sample_rate > 1 then
+    ngx.log(ngx.ERR, "[luagate:tracing] invalid sample_rate: ", tostring(sample_rate), ", tracing disabled")
+    _enabled = false
+    return
   end
 
   -- Validate config fields (ADR-010: fail-open on invalid config)

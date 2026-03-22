@@ -14,9 +14,11 @@ local _M = {}
 local MAX_QUEUE_SIZE = 4096
 
 local _buffer = {}
+local _dropped_total = 0
 
 --- Add a completed span to the buffer.
 -- ADR-010 §4: cap at MAX_QUEUE_SIZE, oldest drop on overflow.
+-- Increments dropped counter for observability (ADR-010 Consequences).
 -- @param span table  Completed span object
 function _M.add(span)
   if not span then
@@ -25,8 +27,20 @@ function _M.add(span)
   if #_buffer >= MAX_QUEUE_SIZE then
     -- Drop oldest span (index 1)
     table.remove(_buffer, 1)
+    _dropped_total = _dropped_total + 1
+    -- Update shared dict metric if available
+    local dict = ngx.shared.luagate_metrics
+    if dict then
+      dict:incr("luagate_tracing_spans_dropped_total", 1, 0)
+    end
   end
   _buffer[#_buffer + 1] = span
+end
+
+--- Get total number of dropped spans (for testing/metrics).
+-- @return number
+function _M.dropped_total()
+  return _dropped_total
 end
 
 --- Atomically swap and return the current buffer.
