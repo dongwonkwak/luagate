@@ -224,7 +224,8 @@ end
 -- ETag logic in handle_get_policies().  Fail-closed on read/hash errors.
 -- @param if_match string
 -- @return string|nil current_source
--- @return string|nil mismatch message
+-- @return string|nil error message (nil on success)
+-- @return boolean|nil internal_error flag (true = 500, nil/false = 409)
 local function validate_source_if_match(if_match)
   local current_source = loader.get_active_versions().source_version
 
@@ -232,12 +233,12 @@ local function validate_source_if_match(if_match)
   if not current_source then
     local content, read_err = read_policy_file()
     if not content then
-      -- fail-closed: cannot verify => reject
-      return nil, "cannot verify If-Match: " .. tostring(read_err)
+      -- fail-closed: cannot verify => 500 internal error
+      return nil, "cannot verify If-Match: " .. tostring(read_err), true
     end
     local hex, hash_err = sha256_hex(content)
     if not hex then
-      return nil, "cannot verify If-Match: SHA256 failed: " .. tostring(hash_err)
+      return nil, "cannot verify If-Match: SHA256 failed: " .. tostring(hash_err), true
     end
     current_source = hex
   end
@@ -345,10 +346,14 @@ function _M.handle_put_policies()
     -- Strip surrounding quotes if present
     if_match = if_match:gsub('^"', ""):gsub('"$', "")
 
-    local mismatch_msg
-    current_source, mismatch_msg = validate_source_if_match(if_match)
+    local mismatch_msg, is_internal
+    current_source, mismatch_msg, is_internal = validate_source_if_match(if_match)
     if mismatch_msg then
-      send_error(409, "version_mismatch", "reload", mismatch_msg)
+      if is_internal then
+        send_error(500, "internal_error", "reload", mismatch_msg)
+      else
+        send_error(409, "version_mismatch", "reload", mismatch_msg)
+      end
       return
     end
   end

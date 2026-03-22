@@ -600,18 +600,18 @@ describe("PUT /api/v1/policies", function()
     assert.are.equal("version_mismatch", body.error)
   end)
 
-  it("returns 409 when source_version is nil and policy file is unreadable (fail-closed)", function()
+  it("returns 500 when source_version is nil and policy file is unreadable (fail-closed)", function()
     _loader_versions.source_version = nil
     _file_registry["conf/policies.yaml"] = nil -- simulate unreadable file
     policies = load_policies()
 
     policies.handle_put_policies()
 
-    assert.are.equal(409, _G.ngx.status)
+    assert.are.equal(500, _G.ngx.status)
     local said = _G.ngx._get_said()
     local dkjson = require("dkjson")
     local body = dkjson.decode(said[1])
-    assert.are.equal("version_mismatch", body.error)
+    assert.are.equal("internal_error", body.error)
   end)
 
   it("returns 409 when source_version changes after the initial If-Match check", function()
