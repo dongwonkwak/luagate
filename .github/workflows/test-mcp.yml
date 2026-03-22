@@ -11,6 +11,7 @@ on:
       - "lua/luagate/scanner/**"
       - "policies/luagate.yaml"
       - "Dockerfile"
+      - ".dockerignore"
       - ".github/workflows/test-mcp.yml"
 
 permissions:
@@ -37,6 +38,7 @@ jobs:
               - 'lua/luagate/scanner/**'
               - 'policies/luagate.yaml'
               - 'Dockerfile'
+              - '.dockerignore'
               - '.github/workflows/test-mcp.yml'
 
   unit-test:
