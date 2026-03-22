@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-CONF_SRC="/usr/local/openresty/nginx/conf/nginx.conf"
-CONF_RUN="/tmp/nginx-runtime.conf"
+CONF_DIR="/usr/local/openresty/nginx/conf"
+CONF_SRC="$CONF_DIR/nginx.conf"
+CONF_RUN="$CONF_DIR/nginx-runtime.conf"
 
 # Always copy from pristine source — idempotent across restarts.
 cp "$CONF_SRC" "$CONF_RUN"
