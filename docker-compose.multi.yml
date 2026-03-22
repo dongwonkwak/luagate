@@ -1,0 +1,75 @@
+# docker-compose.multi.yml — 2-instance LuaGate for policy sync integration test
+# Usage: docker compose -f docker-compose.multi.yml up -d
+#
+# Architecture:
+#   luagate-1 (8080, 9090 admin) ← policy deploy target
+#   luagate-2 (8081, 9091 admin) ← sync verification target
+#   Both share /etc/luagate/policies via a named volume
+#
+# Related: ADR-008 (멀티 인스턴스 정책 동기화)
+
+services:
+  luagate-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luagate-multi-1
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - shared-policies:/etc/luagate/policies
+      - ./policies/luagate.yaml:/conf/policies.yaml:ro
+      - ./conf/scanner-patterns:/conf/scanner-patterns:ro
+    environment:
+      - LUAGATE_ENV=test
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token}
+    networks:
+      - luagate-multi-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  luagate-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luagate-multi-2
+    ports:
+      - "8081:8080"
+      - "9091:9090"
+    volumes:
+      - ./lua/luagate:/usr/local/openresty/lualib/luagate:ro
+      - ./conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - shared-policies:/etc/luagate/policies
+      - ./policies/luagate.yaml:/conf/policies.yaml:ro
+      - ./conf/scanner-patterns:/conf/scanner-patterns:ro
+    environment:
+      - LUAGATE_ENV=test
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token}
+    networks:
+      - luagate-multi-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  upstream-mock:
+    image: nginx:1.25-alpine
+    container_name: upstream-mock-multi
+    volumes:
+      - ./tests/fixtures:/usr/share/nginx/html:ro
+    networks:
+      - luagate-multi-net
+
+volumes:
+  shared-policies:
+
+networks:
+  luagate-multi-net:
+    driver: bridge
