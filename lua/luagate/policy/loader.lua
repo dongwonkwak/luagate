@@ -715,4 +715,23 @@ function _M.get_active_versions()
   }
 end
 
+--- Backfill source_version in shared dict when it is nil.
+-- Used by the admin PUT handler to fix the source_version gap when
+-- result.skipped is true but source_version was never committed
+-- (e.g. before the first hot-reload cycle).
+-- @param version string  SHA256 hex digest to store
+-- @return boolean ok
+-- @return string|nil err
+function _M.set_source_version(version)
+  local dict = get_dict()
+  if not dict then
+    return false, "no shared dict"
+  end
+  local ok, err = dict:safe_set("source_version", version)
+  if not ok then
+    return false, err
+  end
+  return true, nil
+end
+
 return _M

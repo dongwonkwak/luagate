@@ -811,6 +811,28 @@ describe("loader.get_active_versions", function()
   end)
 end)
 
+describe("loader.set_source_version", function()
+  before_each(function()
+    reset_shared_dict()
+  end)
+
+  it("source_version이 nil일 때 backfill 성공", function()
+    assert.is_nil(loader.get_active_versions().source_version)
+    local ok, err = loader.set_source_version("abc123")
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.are.equal("abc123", loader.get_active_versions().source_version)
+  end)
+
+  it("이미 존재하는 source_version도 덮어쓰기 가능", function()
+    _shared_dict_instance._store["source_version"] = "old_hash"
+    local ok, err = loader.set_source_version("new_hash")
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.are.equal("new_hash", loader.get_active_versions().source_version)
+  end)
+end)
+
 describe("loader.is_reload_in_progress", function()
   before_each(function()
     reset_shared_dict()
