@@ -225,7 +225,7 @@ Stream 파이프라인 에러 분류 통일 표:
 | malformed TLS | fail-closed | parser error와 구분. raw fallback 아님 |
 | upstream fail | 연결 종료 | upstream 502에 해당 |
 | rate limit counter eviction | fail-open | shared_dict 용량 초과 (MVP 비범위) |
-| logging 실패 (감사 로그) | fail-closed | ADR-004: 감사 로그 드롭 금지 |
+| logging 실패 (감사 로그 직렬화) | fail-closed | ADR-004: audit 직렬화 실패 → 거부. 디스크 I/O는 Nginx에 위임 |
 | native crash (worker) | process failure | nginx master가 재기동 |
 
 > **Hook 순서**: `preread_by_lua*` → `proxy_pass(upstream)` → `log_by_lua*`

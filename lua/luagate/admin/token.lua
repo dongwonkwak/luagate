@@ -53,6 +53,10 @@ end
 --- Write audit log for token rotation event.
 -- Token values are NEVER logged (ADR-004 ss6.2).
 -- Returns true on success, false on failure (audit-first: failure = reject mutation).
+--
+-- Guarantee layers:
+--   Layer 1 (serialization): cjson.encode failure is detectable → returns false (fail-closed).
+--   Layer 2 (disk I/O via ngx.log → Nginx error_log): fire-and-forget, not detectable from Lua.
 local function audit_log(event, actor_ip)
   -- MCP metadata (ADR-011 §8): include actor_type in all audit events
   local headers = ngx.req.get_headers()

@@ -26,6 +26,10 @@ local function make_shared_dict()
     safe_set = function(self, key, val, ttl)
       return self:set(key, val, ttl)
     end,
+    delete = function(_, key)
+      store[key] = nil
+      ttls[key] = nil
+    end,
     _store = store,
     _ttls = ttls,
   }
@@ -275,5 +279,104 @@ describe("token rotation handler", function()
     local body = ctx.get_body()
     assert.truthy(body)
     assert.truthy(body:find("internal_error"))
+  end)
+
+  -- -----------------------------------------------------------------------
+  -- Audit log guarantee boundary (DON-223)
+  -- -----------------------------------------------------------------------
+  describe("감사 로그 보장 범위", function()
+    it("audit_log는 cjson.encode 실패 시 false를 반환하고 mutation을 롤백한다", function()
+      local dict = ctx.get_dict()
+      local old_token = string.rep("f", 32)
+      dict:set("luagate_admin_token", old_token)
+
+      -- Make cjson.encode return nil (simulate serialization failure)
+      local cjson_mod = package.loaded["cjson.safe"]
+      local original_encode = cjson_mod.encode
+      cjson_mod.encode = function(tbl)
+        -- Fail on audit log data (has "event" field)
+        if type(tbl) == "table" and tbl.event then
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      local new_token = string.rep("g", 32)
+      ctx.set_body('{"new_token": "' .. new_token .. '"}')
+
+      token_mod.handle_post_rotate()
+
+      -- Should respond with 500 audit_write_failed
+      local body = ctx.get_body()
+      assert.truthy(body, "should have a response body")
+      assert.truthy(body:find("audit_write_failed"), "should return audit_write_failed error")
+
+      -- Mutation should be rolled back: old token restored
+      assert.are.equal(old_token, dict:get("luagate_admin_token"), "active token should be rolled back to old value")
+
+      -- Restore
+      cjson_mod.encode = original_encode
+    end)
+
+    it("audit_log는 정상 encode 시 true를 반환하고 rotation이 완료된다", function()
+      local new_token = string.rep("h", 32)
+      ctx.set_body('{"new_token": "' .. new_token .. '"}')
+
+      token_mod.handle_post_rotate()
+
+      -- Rotation succeeds
+      local dict = ctx.get_dict()
+      assert.are.equal(new_token, dict:get("luagate_admin_token"))
+
+      -- Audit log is written
+      local logs = ctx.get_logs()
+      local found_audit = false
+      for _, entry in ipairs(logs) do
+        if entry.msg:find("token_rotated") then
+          found_audit = true
+          break
+        end
+      end
+      assert.is_true(found_audit, "audit log should be written on successful rotation")
+    end)
+
+    it("cjson.encode 실패 시 old token이 없으면 active token을 삭제한다", function()
+      -- No pre-existing token in shared dict, env fallback also nil
+      local original_getenv = os.getenv
+      os.getenv = function(key) -- luacheck: ignore 122
+        if key == "LUAGATE_ADMIN_TOKEN" then
+          return nil
+        end
+        return original_getenv(key)
+      end
+
+      local cjson_mod = package.loaded["cjson.safe"]
+      local original_encode = cjson_mod.encode
+      cjson_mod.encode = function(tbl)
+        if type(tbl) == "table" and tbl.event then
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      local new_token = string.rep("i", 32)
+      ctx.set_body('{"new_token": "' .. new_token .. '"}')
+
+      token_mod.handle_post_rotate()
+
+      local body = ctx.get_body()
+      assert.truthy(body:find("audit_write_failed"), "should return audit_write_failed")
+
+      -- When there was no old token, rollback deletes the active token key
+      local dict = ctx.get_dict()
+      assert.is_nil(
+        dict:get("luagate_admin_token"),
+        "active token should be deleted on rollback when no previous token existed"
+      )
+
+      -- Restore
+      cjson_mod.encode = original_encode
+      os.getenv = original_getenv -- luacheck: ignore 122
+    end)
   end)
 end)

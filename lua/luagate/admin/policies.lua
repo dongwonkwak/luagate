@@ -123,6 +123,11 @@ end
 --- Write structured audit log entry.
 -- Uses [luagate:audit] prefix for log routing (ADR-004 §6.3).
 -- Includes MCP metadata when X-MCP-Client header is present (ADR-011 §8).
+--
+-- Guarantee layers:
+--   Layer 1 (serialization): cjson.encode failure is detectable → returns false (fail-closed).
+--   Layer 2 (disk I/O via ngx.log → Nginx error_log): fire-and-forget, not detectable from Lua.
+--
 -- @param event  string  Event name (e.g. "policy_update_success")
 -- @param fields table   Additional fields to include
 -- @return boolean  true if audit write succeeded

@@ -1905,3 +1905,153 @@ describe("MCP metadata in audit logs", function()
     assert.is_true(found_mcp, "reload audit log should contain MCP metadata")
   end)
 end)
+
+-- ===========================================================================
+-- Audit log guarantee boundary (DON-223)
+-- ===========================================================================
+describe("감사 로그 보장 범위", function()
+  local yaml_body = "version: '1.0'\nrules: []\nstream_rules: []\n"
+  local original_encode
+
+  before_each(function()
+    reset_stubs()
+    setup_io_stubs()
+    _file_registry["conf/policies.yaml"] = yaml_body
+    _G.ngx = make_ngx({
+      var = { uri = "/api/v1/policies", remote_addr = "127.0.0.1" },
+    })
+    _G.ngx.req.get_headers = function()
+      return {
+        ["If-Match"] = '"abc123"',
+        Authorization = "Bearer valid-test-token",
+      }
+    end
+    _G.ngx.req.get_method = function()
+      return "PUT"
+    end
+    _G.ngx.req.get_body_data = function()
+      return yaml_body
+    end
+    policies = load_policies()
+    original_encode = package.loaded["cjson.safe"].encode
+  end)
+
+  after_each(function()
+    package.loaded["cjson.safe"].encode = original_encode
+    teardown_io_stubs()
+  end)
+
+  describe("audit_log 직렬화 실패", function()
+    it("audit_or_reject는 cjson.encode 실패 시 500 audit_write_failed를 반환한다 (PUT)", function()
+      -- Make encode fail only for audit log entries (contains "event" field)
+      local call_count = 0
+      package.loaded["cjson.safe"].encode = function(tbl)
+        call_count = call_count + 1
+        -- Fail on the audit log encode (the first encode call with event field)
+        if type(tbl) == "table" and tbl.event then
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      policies.handle_put_policies()
+
+      assert.are.equal(500, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      assert.is_true(#said >= 1, "should have a response body")
+      -- The send_error body may also fail to encode, falling back to hardcoded JSON
+      -- Either way, status must be 500
+      local found_audit_failed = false
+      for _, s in ipairs(said) do
+        if s:find("audit_write_failed") then
+          found_audit_failed = true
+          break
+        end
+      end
+      assert.is_true(found_audit_failed, "response should contain audit_write_failed error code")
+    end)
+
+    it("audit_log는 cjson.encode 실패 시 false를 반환한다 (PUT pre-commit)", function()
+      local audit_encode_called = false
+      package.loaded["cjson.safe"].encode = function(tbl)
+        if type(tbl) == "table" and tbl.event then
+          audit_encode_called = true
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      policies.handle_put_policies()
+
+      assert.is_true(audit_encode_called, "audit_log encode should have been called")
+      -- The mutation should be rejected (500), not proceed
+      assert.are.equal(500, _G.ngx.status)
+    end)
+
+    it("정상 encode 시 audit_log는 true를 반환하고 성공 경로를 탄다 (PUT)", function()
+      -- Default encode works fine — normal success path
+      policies.handle_put_policies()
+
+      assert.are.equal(200, _G.ngx.status)
+      local logged = _G.ngx._get_logged()
+      local has_audit = false
+      for _, entry in ipairs(logged) do
+        if entry:find("%[luagate:audit%]") and entry:find("policy_update") then
+          has_audit = true
+          break
+        end
+      end
+      assert.is_true(has_audit, "audit log should be written on success")
+    end)
+  end)
+
+  describe("POST reload audit_or_reject", function()
+    before_each(function()
+      _G.ngx.req.get_headers = function()
+        return {}
+      end
+      _G.ngx.req.get_method = function()
+        return "POST"
+      end
+      policies = load_policies()
+      original_encode = package.loaded["cjson.safe"].encode
+    end)
+
+    it("audit_or_reject는 cjson.encode 실패 시 500 audit_write_failed를 반환한다 (reload)", function()
+      package.loaded["cjson.safe"].encode = function(tbl)
+        if type(tbl) == "table" and tbl.event then
+          return nil
+        end
+        return original_encode(tbl)
+      end
+
+      policies.handle_post_reload()
+
+      assert.are.equal(500, _G.ngx.status)
+      local said = _G.ngx._get_said()
+      local found_audit_failed = false
+      for _, s in ipairs(said) do
+        if s:find("audit_write_failed") then
+          found_audit_failed = true
+          break
+        end
+      end
+      assert.is_true(found_audit_failed, "reload should reject with audit_write_failed on encode failure")
+    end)
+
+    it("정상 encode 시 reload 성공 경로를 탄다", function()
+      policies.handle_post_reload()
+
+      assert.are.equal(200, _G.ngx.status)
+      local logged = _G.ngx._get_logged()
+      local has_audit = false
+      for _, entry in ipairs(logged) do
+        if entry:find("%[luagate:audit%]") and entry:find("policy_reload") then
+          has_audit = true
+          break
+        end
+      end
+      assert.is_true(has_audit, "audit log should be written on reload success")
+    end)
+  end)
+end)

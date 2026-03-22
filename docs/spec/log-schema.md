@@ -318,8 +318,10 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 
 ## 5. 감사 로그 (`audit.log`) (ADR-004 §6.3)
 
-> **감사 로그 드롭 금지**: 감사 로그 기록에 실패(디스크 full, I/O error 등)하면
-> 해당 mutation/reload를 **거부**한다. 감사 로그 없이 상태 변경을 허용하지 않는다.
+> **감사 로그 보장 범위**: audit 레코드의 JSON 직렬화(`cjson.encode`) 실패 시
+> 해당 mutation/reload를 **거부**한다 (코드 불변식, 설정 우회 불가).
+> 디스크 I/O 계층(Nginx `error_log`)의 기록 보장은 운영 모니터링에 위임한다 — `ngx.log()`는
+> fire-and-forget이므로 디스크 full/I/O error는 Lua 코드에서 감지할 수 없다.
 
 ### 5.1 이벤트별 스키마
 
