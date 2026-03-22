@@ -1622,3 +1622,69 @@ describe("handler.log_phase — metrics.collector.record 호출", function()
     end)
   end)
 end)
+
+describe("handler.log_phase — tracing proxy span 상태 기록", function()
+  local ngx_mock
+  local finished_trace_ctx
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx({
+      var = {
+        status = "504",
+        upstream_response_time = "-",
+        upstream_connect_time = "0.123",
+      },
+    })
+    _G.ngx = ngx_mock
+    finished_trace_ctx = nil
+    package.preload["luagate.tracing.init"] = function()
+      return {
+        finish_request_trace = function(trace_ctx)
+          finished_trace_ctx = trace_ctx
+        end,
+      }
+    end
+    package.preload["luagate.tracing.span"] = function()
+      return {
+        set_attribute = function(span, key, value)
+          span.attributes[key] = value
+        end,
+        finish = function(span, end_time_ns)
+          span.end_time_ns = end_time_ns
+        end,
+        set_error = function(span, error_type)
+          span.attributes["error.type"] = error_type
+        end,
+      }
+    end
+    package.loaded["luagate.tracing.init"] = nil
+    package.loaded["luagate.tracing.span"] = nil
+  end)
+
+  after_each(function()
+    package.preload["luagate.tracing.init"] = nil
+    package.preload["luagate.tracing.span"] = nil
+    package.loaded["luagate.tracing.init"] = nil
+    package.loaded["luagate.tracing.span"] = nil
+  end)
+
+  it("upstream 응답이 없을 때도 실제 응답 status를 proxy span에 기록한다", function()
+    local trace_ctx = {}
+    local proxy_span = { attributes = {} }
+    ngx_mock.ctx.luagate = {
+      request_state = "completed",
+      action = "allow",
+      trace = trace_ctx,
+      proxy_span = proxy_span,
+      proxy_start_ts = 100,
+    }
+
+    handler.log_phase()
+
+    assert.are.equal(504, proxy_span.attributes["http.response.status_code"])
+    assert.are.equal("upstream_connect_failure", proxy_span.attributes["error.type"])
+    assert.are.equal((100 + 0.123) * 1e9, proxy_span.end_time_ns)
+    assert.are.equal(trace_ctx, finished_trace_ctx)
+  end)
+end)

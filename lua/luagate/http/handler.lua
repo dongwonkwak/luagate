@@ -711,7 +711,8 @@ function _M.log_phase()
               local proxy_end_ns = ctx.proxy_start_ts * 1e9
               span_mod.finish(proxy_span, proxy_end_ns)
             end
-            span_mod.set_attribute(proxy_span, "http.response.status_code", 502)
+            local proxy_status = tonumber(ngx.var.status) or 0
+            span_mod.set_attribute(proxy_span, "http.response.status_code", proxy_status)
             span_mod.set_error(proxy_span, "upstream_connect_failure")
           end
         end
