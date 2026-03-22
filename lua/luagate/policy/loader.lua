@@ -320,6 +320,18 @@ function _M.rollback_active_versions(versions)
   restore("stream:active_version", versions.stream_version, "stream_ok")
   restore("source_version", versions.source_version, "source_ok")
 
+  -- DON-218: Restore stream:configured flag to pre-rollback state.
+  -- versions.stream_configured can be true, false/nil.
+  if versions.stream_configured then
+    local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
+    if not cfg_ok then
+      result.ok = false
+      result.errors[#result.errors + 1] = "safe_set stream:configured rollback failed: " .. tostring(cfg_err)
+    end
+  else
+    dict:delete("stream:configured")
+  end
+
   if not result.ok then
     log_err("rollback failed: " .. table.concat(result.errors, "; "))
   end
@@ -566,6 +578,18 @@ function _M.load_policy(filepath, opts)
       result.skipped = true
       result.http_ok = true
       result.stream_ok = true
+
+      -- DON-218: Backfill stream:configured on same-hash skip.
+      -- Handles upgrade path where flag didn't exist before DON-218.
+      if policy.stream_rules and #policy.stream_rules > 0 then
+        local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
+        if not cfg_ok then
+          log_warn("safe_set stream:configured backfill failed: " .. tostring(cfg_err))
+        end
+      else
+        dict:delete("stream:configured")
+      end
+
       release_reload_lock(owner_id)
       return result
     end
@@ -630,6 +654,21 @@ function _M.load_policy(filepath, opts)
       local loaded_at_ok, loaded_at_err = dict:safe_set("policy_loaded_at", ngx.now())
       if not loaded_at_ok then
         log_warn("safe_set policy_loaded_at failed: " .. tostring(loaded_at_err))
+      end
+    end
+
+    -- DON-218: Update stream:configured based on the active stream policy.
+    -- Setting true is allowed whenever the new policy declares stream rules.
+    -- Clearing must follow stream pointer success, because stream-only partial
+    -- commit can activate an HTTP-only blob while HTTP still stays on LKG.
+    if commit_result.http_ok or commit_result.stream_ok then
+      if policy.stream_rules and #policy.stream_rules > 0 then
+        local cfg_ok, cfg_err = dict:safe_set("stream:configured", true)
+        if not cfg_ok then
+          log_warn("safe_set stream:configured failed: " .. tostring(cfg_err))
+        end
+      elseif commit_result.stream_ok then
+        dict:delete("stream:configured")
       end
     end
   else

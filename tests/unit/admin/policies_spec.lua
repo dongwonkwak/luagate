@@ -789,6 +789,7 @@ describe("PUT /api/v1/policies", function()
       http_version = "old_sha",
       stream_version = "old_sha",
       source_version = "abc123",
+      stream_configured = false,
     }, _loader_rollback_calls[1])
     assert.are.equal("old_sha", _loader_versions.http_version)
     assert.are.equal("old_sha", _loader_versions.stream_version)
@@ -800,6 +801,43 @@ describe("PUT /api/v1/policies", function()
     assert.truthy(body.details[1]:find("stream"))
     assert.are.equal("old_sha", body.current_http_version)
     assert.are.equal("old_sha", body.current_stream_version)
+  end)
+
+  it("captures stream:configured after the reload lock for rollback", function()
+    local stream_configured = nil
+    _G.ngx.shared.luagate_policy.get = function(_, key)
+      if key == "stream:configured" then
+        return stream_configured
+      end
+      return nil
+    end
+    _loader_before_lock_hook = function()
+      stream_configured = true
+    end
+    _loader_result = {
+      ok = true,
+      skipped = false,
+      new_version = "new_sha",
+      previous_http_version = "old_sha",
+      previous_stream_version = "old_sha",
+      http_ok = true,
+      stream_ok = false,
+      http_err = nil,
+      stream_err = "stream pointer swap failed",
+      conflicts = {},
+      shadowed = {},
+      err = nil,
+    }
+    _loader_versions.http_version = "new_sha"
+    _loader_versions.stream_version = "old_sha"
+    _loader_versions.source_version = "abc123"
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(500, _G.ngx.status)
+    assert.are.equal(1, #_loader_rollback_calls)
+    assert.is_true(_loader_rollback_calls[1].stream_configured)
   end)
 
   it("returns 500 when canonical file rename fails", function()
@@ -815,6 +853,7 @@ describe("PUT /api/v1/policies", function()
       http_version = "old_sha256_hash",
       stream_version = "old_sha256_hash",
       source_version = "abc123",
+      stream_configured = false,
     }, _loader_rollback_calls[1])
     local said = _G.ngx._get_said()
     local dkjson = require("dkjson")

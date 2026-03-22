@@ -611,6 +611,62 @@ describe("loader.load_policy — commit (pointer swap) [7단계]", function()
     assert.is_true(warn_found)
   end)
 
+  it("stream:configured 플래그가 stream_rules 존재 시 기록된다 (DON-218)", function()
+    register_valid_policy()
+    local result = loader.load_policy(VALID_PATH)
+    assert.is_true(result.ok)
+    assert.is_true(_shared_dict_instance._store["stream:configured"])
+  end)
+
+  it("stream:configured 플래그가 stream_rules 미존재 시 기록되지 않는다 (DON-218)", function()
+    local http_only_content = "http_only_policy_content"
+    _file_registry[VALID_PATH] = http_only_content
+    _lyaml_registry[http_only_content] = {
+      version = "1",
+      global = { default_action = "deny" },
+      rules = {
+        {
+          id = "http-only",
+          priority = 10,
+          action = "allow",
+          scope = { path = "/" },
+        },
+      },
+      stream_rules = {},
+    }
+    local result = loader.load_policy(VALID_PATH)
+    assert.is_true(result.ok)
+    assert.is_nil(_shared_dict_instance._store["stream:configured"])
+  end)
+
+  it("stream:configured 플래그가 stream→HTTP-only 전환 시 삭제된다 (DON-218)", function()
+    -- First load: stream_rules 있음 → flag set
+    register_valid_policy()
+    local result1 = loader.load_policy(VALID_PATH)
+    assert.is_true(result1.ok)
+    assert.is_true(_shared_dict_instance._store["stream:configured"])
+
+    -- Second load: stream_rules 없음 → flag deleted
+    local http_only_content = "http_only_transition_content"
+    _file_registry[VALID_PATH] = http_only_content
+    _lyaml_registry[http_only_content] = {
+      version = "1",
+      global = { default_action = "deny" },
+      rules = {
+        {
+          id = "http-only",
+          priority = 10,
+          action = "allow",
+          scope = { path = "/" },
+        },
+      },
+      stream_rules = {},
+    }
+    local result2 = loader.load_policy(VALID_PATH)
+    assert.is_true(result2.ok)
+    assert.is_nil(_shared_dict_instance._store["stream:configured"])
+  end)
+
   it("http pointer swap 실패 시 http_ok=false, stream_ok은 독립 판정", function()
     register_valid_policy()
     -- http set만 실패하도록
@@ -977,6 +1033,46 @@ describe("loader.load_policy — stream pointer swap 실패 (partial commit 대�
     -- partial commit: 한쪽 실패 → source_version 미기록
     assert.is_nil(_shared_dict_instance._store["source_version"])
   end)
+
+  it(
+    "http 실패 + stream 성공으로 HTTP-only 정책이 활성화되면 stream:configured를 삭제한다",
+    function()
+      register_valid_policy()
+      local initial = loader.load_policy(VALID_PATH)
+      assert.is_true(initial.ok)
+      assert.is_true(_shared_dict_instance._store["stream:configured"])
+
+      local http_only_content = "http_only_partial_commit_content"
+      _file_registry[VALID_PATH] = http_only_content
+      _lyaml_registry[http_only_content] = {
+        version = "1",
+        global = { default_action = "deny" },
+        rules = {
+          {
+            id = "http-only",
+            priority = 10,
+            action = "allow",
+            scope = { path = "/" },
+          },
+        },
+        stream_rules = {},
+      }
+
+      local original_set = _shared_dict_instance.set
+      _shared_dict_instance.set = function(self, key, value)
+        if key == "http:active_version" then
+          return false, "write error"
+        end
+        return original_set(self, key, value)
+      end
+
+      local result = loader.load_policy(VALID_PATH)
+      assert.is_false(result.http_ok)
+      assert.is_true(result.stream_ok)
+      assert.is_true(result.ok)
+      assert.is_nil(_shared_dict_instance._store["stream:configured"])
+    end
+  )
 end)
 
 describe("loader.load_policy — same-hash skip + lock 해제", function()
