@@ -318,8 +318,12 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 
 ## 5. 감사 로그 (`audit.log`) (ADR-004 §6.3)
 
-> **감사 로그 보장 범위**: audit 레코드의 JSON 직렬화(`cjson.encode`) 실패 시
-> 해당 mutation/reload를 **거부**한다 (코드 불변식, 설정 우회 불가).
+> **감사 로그 보장 범위 (pre-commit vs post-commit)**:
+>
+> - **Pre-commit audit**: 직렬화(`cjson.encode`) 실패 시 mutation/reload를 **거부**한다 (코드 불변식, 설정 우회 불가).
+> - **Post-mutation audit with rollback** (`token_rotated`): 실패 시 mutation rollback 후 거부.
+> - **Post-commit audit** (`*_success`, `*_partial`): 실패 시 경고 로그만 남김 (mutation 이미 적용됨).
+>
 > 디스크 I/O 계층(Nginx `error_log`)의 기록 보장은 운영 모니터링에 위임한다 — `ngx.log()`는
 > fire-and-forget이므로 디스크 full/I/O error는 Lua 코드에서 감지할 수 없다.
 
