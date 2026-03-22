@@ -43,7 +43,7 @@ services:
       - shared-conf:/conf
     environment:
       - LUAGATE_ENV=test
-      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token}
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token-32bytes}
     networks:
       luagate-multi-net:
     depends_on:
@@ -71,7 +71,7 @@ services:
       - shared-conf:/conf
     environment:
       - LUAGATE_ENV=test
-      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token}
+      - LUAGATE_ADMIN_TOKEN=${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token-32bytes}
     networks:
       luagate-multi-net:
     depends_on:

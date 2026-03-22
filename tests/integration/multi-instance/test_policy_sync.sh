@@ -17,7 +17,7 @@ set -euo pipefail
 
 COMPOSE_FILE="docker-compose.multi.yml"
 PROJECT_NAME="luagate-multi-test"
-ADMIN_TOKEN="${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token}"
+ADMIN_TOKEN="${LUAGATE_ADMIN_TOKEN:-test-multi-instance-token-32bytes}"
 
 INSTANCE_1_ADMIN="http://localhost:9090"
 INSTANCE_2_ADMIN="http://localhost:9091"

@@ -89,7 +89,7 @@ jobs:
       - name: Run multi-instance policy sync test
         run: make test-multi-instance
         env:
-          LUAGATE_ADMIN_TOKEN: test-multi-instance-token
+          LUAGATE_ADMIN_TOKEN: test-multi-instance-token-32bytes
 
   test-docker-compat:
     name: Test::Nginx (Docker)

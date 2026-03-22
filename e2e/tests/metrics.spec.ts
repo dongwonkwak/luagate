@@ -17,7 +17,9 @@ test.describe("Metrics Dashboard", () => {
     await expect(page).toHaveURL(/\/dashboard\/metrics/);
 
     // Should show Metrics heading
-    await expect(page.locator("text=Metrics")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Metrics", exact: true }),
+    ).toBeVisible();
 
     // Should show metric cards
     await expect(
