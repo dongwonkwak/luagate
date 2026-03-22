@@ -333,6 +333,22 @@ function _M.handle_put_policies()
     return
   end
 
+  -- [0] UTF-8 BOM check (admin-api.md §6.5: BOM not allowed)
+  if #body >= 3 and body:byte(1) == 0xEF and body:byte(2) == 0xBB and body:byte(3) == 0xBF then
+    send_error(422, "validation_failed", "request", "UTF-8 BOM is not allowed")
+    return
+  end
+
+  -- [0] Content-Type charset check (admin-api.md §6.5: UTF-8 only)
+  local content_type = ngx.req.get_headers()["Content-Type"]
+  if content_type then
+    local charset = content_type:match("charset=([^;%s]+)")
+    if charset and charset:lower() ~= "utf-8" then
+      send_error(422, "validation_failed", "request", "only UTF-8 charset is accepted")
+      return
+    end
+  end
+
   -- [1] If-Match check (ADR-005: optimistic lock on source_version)
   --     Optional when dry_run=true (no commit, so no lock needed)
   local if_match = ngx.req.get_headers()["If-Match"]
