@@ -476,8 +476,11 @@ function _M.handle_put_policies()
   -- Load from temp file (stages [1]-[7] of loader pipeline)
   local result = loader.load_policy(tmp_path, {
     on_lock_acquired = function()
-      local locked_source, locked_mismatch_msg = validate_source_if_match(if_match)
+      local locked_source, locked_mismatch_msg, locked_internal = validate_source_if_match(if_match)
       if locked_mismatch_msg then
+        if locked_internal then
+          return false, "internal_error", locked_mismatch_msg
+        end
         return false, "version_mismatch", locked_mismatch_msg
       end
       current_source = locked_source
@@ -490,6 +493,21 @@ function _M.handle_put_policies()
     os.remove(tmp_path)
 
     -- Determine error type
+    if result.err_code == "internal_error" then
+      if
+        not audit_or_reject("policy_update_failure", {
+          trigger = "api",
+          stage = "reload",
+          reason = result.err_detail or result.err,
+          current_version = current_source,
+        })
+      then
+        return
+      end
+      send_error(500, "internal_error", "reload", result.err_detail or result.err)
+      return
+    end
+
     if result.err_code == "version_mismatch" then
       local latest_source = loader.get_active_versions().source_version
       if

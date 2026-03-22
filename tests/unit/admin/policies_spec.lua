@@ -631,6 +631,25 @@ describe("PUT /api/v1/policies", function()
     assert.truthy(body.details[1]:find("expected def456"))
   end)
 
+  it("returns 500 when source_version becomes nil after lock and file is unreadable (fail-closed)", function()
+    -- Initial check passes with source_version set
+    -- After lock acquired, source_version becomes nil and file is removed
+    _loader_before_lock_hook = function()
+      _loader_versions.source_version = nil
+      _file_registry["conf/policies.yaml"] = nil
+    end
+    policies = load_policies()
+
+    policies.handle_put_policies()
+
+    assert.are.equal(500, _G.ngx.status)
+    local said = _G.ngx._get_said()
+    local dkjson = require("dkjson")
+    local body = dkjson.decode(said[1])
+    assert.are.equal("internal_error", body.error)
+    assert.are.equal("reload", body.stage)
+  end)
+
   it("returns 413 when body is missing", function()
     _G.ngx.req.get_body_data = function()
       return nil
