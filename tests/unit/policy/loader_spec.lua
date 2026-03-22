@@ -824,12 +824,13 @@ describe("loader.set_source_version", function()
     assert.are.equal("abc123", loader.get_active_versions().source_version)
   end)
 
-  it("이미 존재하는 source_version도 덮어쓰기 가능", function()
+  it("이미 존재하는 source_version은 덮어쓰지 않음", function()
     _shared_dict_instance._store["source_version"] = "old_hash"
     local ok, err = loader.set_source_version("new_hash")
     assert.is_true(ok)
     assert.is_nil(err)
-    assert.are.equal("new_hash", loader.get_active_versions().source_version)
+    -- value must remain unchanged — no overwrite
+    assert.are.equal("old_hash", loader.get_active_versions().source_version)
   end)
 end)
 

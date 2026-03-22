@@ -727,6 +727,13 @@ function _M.set_source_version(version)
   if not dict then
     return false, "no shared dict"
   end
+  -- Guard: only write when source_version is currently nil.
+  -- Prevents a skipped-backfill caller from overwriting a newer value
+  -- that a concurrent request committed after the reload lock was released.
+  local current = dict:get("source_version")
+  if current ~= nil then
+    return true, nil
+  end
   local ok, err = dict:safe_set("source_version", version)
   if not ok then
     return false, err
