@@ -28,6 +28,13 @@ local _M = {}
 -- Latency histogram bucket boundaries in milliseconds (ADR-004 §4.3)
 local LATENCY_BUCKETS = { 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000 }
 
+-- Pre-computed bucket dict keys (avoid string concat per request)
+local BUCKET_KEYS = {}
+for _, b in ipairs(LATENCY_BUCKETS) do
+  BUCKET_KEYS[b] = "latency:bucket:" .. tostring(b)
+end
+BUCKET_KEYS["+Inf"] = "latency:bucket:+Inf"
+
 -- Threat type allowlist (ADR-006 §1.1).
 -- Unknown values are normalized to "other" before key composition.
 local THREAT_TYPE_ALLOWLIST = {
@@ -61,17 +68,17 @@ local function safe_incr(dict, key, delta)
 end
 
 --- Find the smallest histogram bucket >= latency_ms.
--- Returns the bucket boundary string or "+Inf" if all buckets exceeded.
+-- Returns the pre-computed dict key for the matching bucket.
 -- ADR-006 ss3.1: +Inf bucket key is "latency:bucket:+Inf"
 -- @param latency_ms number
--- @return string
-local function latency_bucket(latency_ms)
+-- @return string  Pre-computed dict key
+local function latency_bucket_key(latency_ms)
   for _, b in ipairs(LATENCY_BUCKETS) do
     if latency_ms <= b then
-      return tostring(b)
+      return BUCKET_KEYS[b]
     end
   end
-  return "+Inf"
+  return BUCKET_KEYS["+Inf"]
 end
 
 -- ---------------------------------------------------------------------------
@@ -113,11 +120,10 @@ function _M.record(ctx)
     safe_incr(dict, "metrics:http_scanner_threats_total:threat:" .. normalized)
   end
 
-  -- Latency histogram bucket
+  -- Latency histogram bucket (pre-computed keys avoid per-request concat)
   local request_time_s = tonumber(ngx.var.request_time) or 0
   local latency_ms = request_time_s * 1000
-  local bucket = latency_bucket(latency_ms)
-  safe_incr(dict, "latency:bucket:" .. bucket)
+  safe_incr(dict, latency_bucket_key(latency_ms))
   safe_incr(dict, "latency:sum", latency_ms)
   safe_incr(dict, "latency:count")
 end
