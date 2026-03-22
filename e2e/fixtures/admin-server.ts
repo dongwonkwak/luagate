@@ -25,6 +25,7 @@ let currentYaml = MOCK_POLICY_YAML;
 const MOCK_STATUS = {
   luagate_version: "0.1.0",
   uptime_seconds: 3600,
+  policy_age_seconds: 1200,
   worker_count: 4,
   active_http_version: currentEtag,
   active_stream_version: currentEtag,
