@@ -96,7 +96,7 @@ info "Deploying updated policy to shared volume..."
 
 # Write policy to shared volume via container exec (simulates CI/CD file deploy)
 # Use printf to avoid trailing newline from heredoc/herestring
-docker exec -i luagate-multi-1 sh -c "cat > /usr/local/openresty/nginx/conf/policies.yaml" <<'POLICY_EOF'
+docker exec -i luagate-multi-1 sh -c "cat > /conf/policies.yaml" <<'POLICY_EOF'
 global:
   default_action: deny
 rules:
@@ -109,7 +109,7 @@ rules:
 POLICY_EOF
 
 # Compute target_version from actual deployed file bytes (ADR-008 §8.3 step 1)
-TARGET_VERSION=$(docker exec luagate-multi-1 sha256sum /usr/local/openresty/nginx/conf/policies.yaml | awk '{print $1}')
+TARGET_VERSION=$(docker exec luagate-multi-1 sha256sum /conf/policies.yaml | awk '{print $1}')
 info "Target version (SHA256 of deployed file): $TARGET_VERSION"
 pass "Policy file written to shared volume"
 
