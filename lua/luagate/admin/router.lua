@@ -197,11 +197,13 @@ local function handle_health()
   -- ADR-009 Phase 3: per-worker FFI watchdog leak counts
   local leak_counts, ffi_timeouts, max_leak = collect_ffi_leak_counts()
 
+  local NULL = cjson.null
+
   local body = {
-    source_version = source_version,
-    active_http_version = http_version,
-    active_stream_version = stream_version,
-    policy_loaded_at = format_iso8601(loaded_at_epoch),
+    source_version = source_version or NULL,
+    active_http_version = http_version or NULL,
+    active_stream_version = stream_version or NULL,
+    policy_loaded_at = format_iso8601(loaded_at_epoch) or NULL,
     ffi_watchdog_leak_count = leak_counts,
     ffi_watchdog_timeouts = ffi_timeouts,
   }
@@ -362,16 +364,25 @@ local function handle_metrics()
   -- ── Policy loaded gauge (ADR-008 §8.2) ────────────────────────────
   -- Version hashes are exposed only via /health (not as Prometheus labels)
   -- to comply with ADR-006 cardinality rules. This gauge tracks whether
-  -- policy is loaded (1) or not (0).
-  prom_header(buf, "luagate_policy_loaded", "gauge", "Whether policy is loaded (1=loaded, 0=not loaded).")
+  -- policy is loaded (1) or not (0) per subsystem.
+  -- DON-213: subsystem label allows HTTP-only deployments to report loaded=1
+  -- without requiring stream active_version.
+  prom_header(buf, "luagate_policy_loaded", "gauge", "Whether policy is loaded per subsystem (1=loaded, 0=not loaded).")
   local policy_dict = ngx.shared.luagate_policy
   if policy_dict then
     local http_ver = policy_dict:get("http:active_version")
     local stream_ver = policy_dict:get("stream:active_version")
-    local loaded = (http_ver and http_ver ~= "none" and stream_ver and stream_ver ~= "none") and 1 or 0
-    prom_line(buf, "luagate_policy_loaded", "", loaded)
+    local http_loaded = (http_ver and http_ver ~= "none") and 1 or 0
+    prom_line(buf, "luagate_policy_loaded", '{subsystem="http"}', http_loaded)
+    -- DON-213: Only emit stream subsystem metric when stream is configured.
+    -- If stream:active_version was never set (nil) or is "none", stream is
+    -- not configured — omit the time series entirely so HTTP-only deployments
+    -- do not produce a perpetual 0 that confuses alerting.
+    if stream_ver and stream_ver ~= "none" then
+      prom_line(buf, "luagate_policy_loaded", '{subsystem="stream"}', 1)
+    end
   else
-    prom_line(buf, "luagate_policy_loaded", "", 0)
+    prom_line(buf, "luagate_policy_loaded", '{subsystem="http"}', 0)
   end
 
   -- ── Send response ──────────────────────────────────────────────────

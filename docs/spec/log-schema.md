@@ -454,7 +454,7 @@ MCP 서버를 통한 Admin API 호출 시, 모든 감사 로그 이벤트에 아
 | `luagate_stream_protocol_detected_total` | counter | `protocol` | 탐지된 프로토콜별 카운터 |
 | `luagate_policy_reload_total` | counter | — | reload 시도 횟수 |
 | `luagate_policy_reload_failures_total` | counter | — | reload 실패 횟수 |
-| `luagate_policy_loaded` | gauge | — | 정책 로드 상태 (1=로드됨, 0=미로드). [ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.2. 버전 해시는 `/health`에서만 노출 (ADR-006 카디널리티 규칙) |
+| `luagate_policy_loaded` | gauge | `subsystem` | 서브시스템별 정책 로드 상태 (1=로드됨, 0=미로드). `subsystem="http"`는 항상 노출. `subsystem="stream"`은 stream이 활성화된 배포에서만 노출되며, HTTP-only 배포에서는 해당 시계열 자체가 생략된다. [ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.2. 버전 해시는 `/health`에서만 노출 (ADR-006 카디널리티 규칙) |
 | `luagate_shared_dict_capacity_bytes` | gauge | `zone` | shared_dict 용량 (zone별) |
 | `luagate_shared_dict_free_bytes` | gauge | `zone` | shared_dict 여유 공간 (zone별) |
 

@@ -79,15 +79,30 @@ groups:
           description: "Policy reload has failed in the last 5 minutes."
           runbook_url: "docs/runbook/alert-response.md#LuagatePolicyReloadFailed"
 
+      # ── Stream Policy ─────────────────────────────────────────────────
+      # DON-213: Now an active rule. The {subsystem="stream"} time series is
+      # only emitted when stream is configured, so HTTP-only deployments
+      # never produce this series and the alert will not fire (absent series
+      # does not match == 0).
+      - alert: LuagateStreamPolicyNotLoaded
+        expr: luagate_policy_loaded{subsystem="stream"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stream policy not loaded on {{ $labels.instance }}"
+          description: "luagate_policy_loaded{subsystem=\"stream\"} has been 0 for 5 minutes."
+          runbook_url: "docs/runbook/alert-response.md#LuagateStreamPolicyNotLoaded"
+
       # ── Service Health ───────────────────────────────────────────────
       - alert: LuagateWorkerDown
         expr: |
           absent(up{job="luagate"} == 1)
-          or luagate_policy_loaded == 0
+          or luagate_policy_loaded{subsystem="http"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "LuaGate target down or policy not loaded"
-          description: "Prometheus cannot reach LuaGate scrape target, or policy is not loaded for 1 minute. Note: luagate_policy_loaded requires both HTTP and Stream versions; HTTP-only deployments should verify via /health endpoint."
+          summary: "LuaGate target down or HTTP policy not loaded"
+          description: "Prometheus cannot reach LuaGate scrape target, or HTTP policy is not loaded for 1 minute."
           runbook_url: "docs/runbook/alert-response.md#LuagateWorkerDown"

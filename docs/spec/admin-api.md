@@ -157,12 +157,12 @@ GET /health
 | `status` | string | `"ok"` 또는 `"unhealthy"` |
 | `source_version` | string\|null | Canonical source (YAML) SHA256 해시. [ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.2 |
 | `active_http_version` | string\|null | HTTP 서브시스템 active 정책 버전 |
-| `active_stream_version` | string\|null | Stream 서브시스템 active 정책 버전 |
+| `active_stream_version` | string\|null | Stream 서브시스템 active 정책 버전. null/"none"일 때: `nginx.conf`에 stream 블록이 없으면 HTTP-only 배포(정상), stream 블록이 있으면 stream 정책 로드 장애 — `LuagateStreamPolicyNotLoaded` alert 확인 필요 |
 | `policy_loaded_at` | string\|null | 마지막 성공적 정책 로드 시각 (ISO-8601 UTC) |
 | `ffi_watchdog_leak_count` | array\<integer\> | Per-worker detached thread leak 카운터 배열 (인덱스 = worker id). [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
 | `ffi_watchdog_timeouts` | integer | 전체 worker의 leak count 합산. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3 |
 
-> 멀티 인스턴스 환경에서 외부 모니터링은 각 인스턴스의 `source_version`, `active_http_version`, `active_stream_version`이 CI/CD가 계산한 `target_version`과 모두 일치하는지 확인해야 한다 ([ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.3).
+> 멀티 인스턴스 환경에서 외부 모니터링은 각 인스턴스의 `source_version`, `active_http_version`, `active_stream_version`이 CI/CD가 계산한 `target_version`과 모두 일치하는지 확인해야 한다 ([ADR-008](../design/adr/ADR-008-multi-instance-policy-sync.md) §8.3). 단, HTTP-only 배포(`active_stream_version`이 null)인 경우 stream version 비교를 건너뛴다.
 
 **응답 503** (unhealthy):
 
@@ -487,7 +487,18 @@ luagate_active_connections{type="stream"} 3
 # TYPE luagate_shared_dict_capacity_bytes gauge
 luagate_shared_dict_capacity_bytes{zone="luagate_policy"} 10485760
 luagate_shared_dict_free_bytes{zone="luagate_policy"} 8388608
+
+# HELP luagate_policy_loaded Whether policy is loaded per subsystem (1=loaded, 0=not loaded).
+# TYPE luagate_policy_loaded gauge
+luagate_policy_loaded{subsystem="http"} 1
+luagate_policy_loaded{subsystem="stream"} 1  # stream 미설정 시 이 라인 생략
 ```
+
+`luagate_policy_loaded`는 `subsystem` 라벨로 HTTP/Stream을 구분한다.
+stream이 설정되지 않은 배포에서는 `{subsystem="stream"}` 시계열이 생략된다.
+이로 인해 HTTP-only 배포에서 stream 관련 alert가 발화되지 않는다.
+
+**Migration note**: v0.x 이전의 `luagate_policy_loaded` (라벨 없음)에서 `{subsystem="http"|"stream"}` 라벨이 추가됨. 기존 Grafana 대시보드/alert rule 업데이트 필요.
 
 log-schema.md §7 메트릭 전체 목록 참조.
 
