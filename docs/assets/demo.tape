@@ -51,7 +51,7 @@ Sleep 2s
 Type "# Gateway request — expect 403 (policy deny)"
 Enter
 Sleep 500ms
-Type 'curl -s -w "\nHTTP %{http_code}\n" http://localhost:8080/admin/secret | jq .'
+Type 'curl -s -o >(jq .) -w "HTTP %{http_code}\n" http://localhost:8080/admin/secret'
 Enter
 Sleep 2s
 
