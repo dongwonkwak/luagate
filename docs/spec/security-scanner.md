@@ -270,8 +270,7 @@ conf/
     └── custom.yaml     # 사용자 정의 패턴
 ```
 
-<!-- ADR 필요 -->
-> **TODO**: 패턴 핫 업데이트(서버 재시작 없이 패턴 갱신) 구현 시 ADR 필요
+설계 결정은 [ADR-014: Scanner Pattern Hot Update](../design/adr/ADR-014-scanner-pattern-hot-update.md) 참조.
 
 ## 7. 성능 요구사항
 
