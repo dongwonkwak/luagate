@@ -27,7 +27,7 @@
 
 1. **런타임 패턴 갱신**: 새 OWASP 패턴, 커스텀 규칙을 서비스 중단 없이 적용
 2. **원자성**: 패턴 교체 중 스캔 요청이 불완전한 패턴 세트를 사용하는 상황 방지
-3. **Concurrent read 성능**: 패턴 교체가 진행 중이 아닌 동안 스캔 요청 간 lock contention 최소화
+3. **Concurrent read 성능**: worker 내부에서 reload가 진행되지 않는 정상 상태에서 scan 호출의 lock contention 최소화
 4. **실패 안전성**: 새 패턴이 유효하지 않을 때 기존 패턴(LKG) 유지
 5. **버전 추적**: 어느 패턴 세트가 현재 활성인지 확인
 
@@ -35,7 +35,7 @@
 
 | 항목 | 현재 상태 | 문제 |
 |------|----------|------|
-| `SCANNER` 타입 | `Lazy<Mutex<Option<Scanner>>>` | Mutex는 모든 `luagate_scan_http` 호출마다 exclusive lock 필요 — read-heavy 워크로드에서 불필요한 contention |
+| `SCANNER` 타입 | `Lazy<Mutex<Option<Scanner>>>` | Mutex는 모든 `luagate_scan_http` 호출마다 exclusive lock 필요 — reload가 없는 정상 상태에서도 불필요한 contention |
 | 패턴 소스 | Rust 바이너리 하드코딩 | YAML stub만 존재, 런타임 로드 불가 |
 | 패턴 교체 | `luagate_scanner_init()` 재호출 | init은 startup-fatal 계약 (실패 시 서버 시작 차단) — 런타임 reload 용도에 부적합 |
 
@@ -43,8 +43,8 @@
 
 | 대안 | 장점 | 단점 |
 |------|------|------|
-| `luagate_scanner_init()` 재호출 | 기존 함수 재사용 | startup-fatal 계약 위반 (런타임 실패 시 서버 abort 위험), Mutex로 인한 read contention |
-| **전용 `luagate_scanner_reload()` + RwLock** | read-heavy 최적화, reload 실패 시 LKG 유지, startup 계약 분리 | 새 FFI 함수 추가 필요, RwLock 마이그레이션 |
+| `luagate_scanner_init()` 재호출 | 기존 함수 재사용 | startup-fatal 계약 위반 (런타임 실패 시 서버 abort 위험), Mutex로 인한 scan/reload 간 contention |
+| **전용 `luagate_scanner_reload()` + RwLock** | reload 미진행 시 read lock contention-free 획득, reload 실패 시 LKG 유지, startup 계약 분리 | 새 FFI 함수 추가 필요, RwLock 마이그레이션 |
 | Lua 레벨에서 패턴 관리 | FFI 변경 불필요 | 정규식 컴파일 성능 저하, Lua-Rust 경계 데이터 전달 복잡 |
 
 ---
@@ -82,7 +82,7 @@ static SCANNER: Lazy<Mutex<Option<Scanner>>> = Lazy::new(|| Mutex::new(None));
 static SCANNER: Lazy<RwLock<Option<Scanner>>> = Lazy::new(|| RwLock::new(None));
 ```
 
-- **`luagate_scan_http()`**: `try_read()`로 RwLock 접근. 읽기 lock은 여러 worker가 동시에 획득 가능하여 스캔 처리량 향상.
+- **`luagate_scan_http()`**: `try_read()`로 RwLock 접근. reload가 진행되지 않는 정상 상태에서 read lock은 contention 없이 즉시 획득 가능하여 Mutex 대비 스캔 성능 향상. SCANNER는 worker-local이므로 worker 내부에서 reload thread(write)와 scan 호출(read) 간 동기화가 목적이다.
 - **`luagate_scanner_init()`**: `write()`로 exclusive lock 획득 (startup 시 1회).
 - **`luagate_scanner_reload()`**: `write()`로 exclusive lock 획득 (패턴 교체 시).
 
@@ -356,7 +356,7 @@ conf/scanner-patterns/          # YAML 패턴 파일 디렉토리
 ### 긍정적
 
 - **무중단 패턴 갱신**: Nginx 재시작 없이 새 OWASP 패턴 또는 커스텀 규칙 적용
-- **read contention 제거**: `Mutex` → `RwLock` 변경으로 스캔 요청 간 lock 경합 해소
+- **read contention 제거**: `Mutex` → `RwLock` 변경으로 worker 내부에서 reload가 없는 정상 상태의 scan 호출이 contention-free로 read lock 획득
 - **실패 안전성**: reload 실패 시 LKG 패턴 유지 — 보안 스캔 중단 없음
 - **버전 추적**: shared dict 메타데이터로 현재 패턴 버전 확인 가능
 - **정책 관리와 일관된 UX**: Admin API 패턴이 `/api/v1/policies`와 동일
