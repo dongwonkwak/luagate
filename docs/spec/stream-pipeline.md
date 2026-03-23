@@ -291,7 +291,7 @@ OpenResty stream phase 순서: **ssl_certificate_by_lua → preread_by_lua → p
 Port 8444 (터미네이션 서버)에서만 실행되며, TLS ClientHello의 SNI를 기반으로 인증서를 동적 선택한다.
 
 - **인증서 로드**: `init_by_lua`에서 `conf/certs/` 디렉토리의 모든 PEM 파일을 사전 로드하여 DER 변환 후 worker upvalue에 캐시
-- **ssl_certificate_by_lua 동작**: worker upvalue 캐시에서 SNI에 해당하는 DER 인증서/키를 조회. **파일 I/O 없음** (blocking I/O 금지 불변식 준수)
+- **ssl_certificate_by_lua 동작**: `ssl.server_name()`으로 SNI를 확인하고, SNI가 nil이면 `_default`로 fallback. worker upvalue 캐시에서 해당 도메인의 DER 인증서/키를 조회. **파일 I/O 없음** (blocking I/O 금지 불변식 준수)
 - **캐시 miss**: `ngx.exit(ngx.ERROR)` -- fail-closed. 사전 로드되지 않은 도메인은 연결 거부
 - **인증서 갱신**: `init_worker_by_lua` 타이머(60초 주기)가 `luagate_tls_certs` shared dict의 `tls_certs_version`을 주기적으로 확인하고, 변경 감지 시 백그라운드에서 파일 재로드. 타이머 콜백 내 파일 읽기는 기술적으로 blocking이나, 인증서 파일이 수 KB로 작고 주기가 60초이므로 실질적 영향 극소 (ADR-015 참조)
 
@@ -334,19 +334,31 @@ TLS terminate 세션은 8443과 8444 양쪽 server block에서 `log_by_lua`가 �
 | 8443 | `tls_termination=false` (패스스루) | 정상 출력 | 정상 카운트 | 8443이 최종 처리자 |
 | 8444 | 항상 | 정상 출력 | 정상 카운트 | PROXY protocol로 전달받은 원본 IP/port 사용 |
 
-**log_by_lua 구현:**
+**preread_by_lua 구현 (8443):**
+
+```lua
+-- 8443 preread_by_lua에서 tls_termination=true 세션은 active_stream 증가하지 않음
+if not ctx.tls_termination then
+    ngx.shared.luagate_connections:incr("active_stream", 1, 0)
+end
+```
+
+**log_by_lua 구현 (8443):**
 
 ```lua
 -- 8443 log_by_lua에서의 억제 로직
 local ctx = ngx.ctx.luagate_stream
 if ctx and ctx.tls_termination == true then
-    -- 내부 홉: 로그/메트릭 스킵. 8444에서 처리.
+    -- 내부 홉: 로그/메트릭/active_stream 감소 모두 스킵.
+    -- preread에서 active_stream +1을 하지 않았으므로 -1도 불필요.
+    -- 8444에서 처리.
     return
 end
--- 이하 기존 로그/메트릭 로직
+-- 이하 기존 로그/메트릭 로직 (active_stream -1 포함)
 ```
 
 - stream metrics(`luagate_stream_connections_total`, `luagate_active_connections{type="stream"}` 등)도 동일 규칙: 8443→8444 전달 세션은 8443에서 카운트하지 않고 8444에서만 카운트
+- **active_stream gauge 누수 방지**: `tls_termination=true` 세션에서 8443이 accept 시 +1하고 log_by_lua에서 억제하면 -1이 누락되어 gauge가 무한 증가한다. 8443에서는 `tls_termination=true` 세션의 `active_stream` 증가 자체를 하지 않으며, 해당 세션의 활성 연결 추적은 8444가 전담한다
 
 ### 10.7 SSL 세션 캐시 및 무효화
 

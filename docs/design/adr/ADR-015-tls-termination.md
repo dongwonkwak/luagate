@@ -118,7 +118,7 @@ Port 8444 (listen 8444 ssl proxy_protocol, 내부 전용) — 터미네이션 �
     │
     ├─ PROXY protocol v2로 원본 클라이언트 IP/port 수신
     ├─ ssl_certificate_by_lua: SNI 기반 인증서 선택 (캐시 조회만, 파일 I/O 없음)
-    │   ├─ ngx.ssl.server_name() → SNI 확인
+    │   ├─ ngx.ssl.server_name() → SNI 확인 (nil이면 "_default"로 fallback)
     │   ├─ worker upvalue 캐시에서 DER 인증서/키 조회
     │   │   ├─ hit → ngx.ssl.set_der_cert() + ngx.ssl.set_der_priv_key()
     │   │   └─ miss → ngx.exit(ngx.ERROR) (fail-closed, init_by_lua에서 사전 로드 필수)
@@ -150,8 +150,10 @@ local ssl = require("ngx.ssl")
 
 local sni, err = ssl.server_name()
 if not sni then
-    ngx.log(ngx.ERR, "failed to get SNI: ", err)
-    return ngx.exit(ngx.ERROR)  -- fail-closed
+    -- SNI가 없는 클라이언트 → _default 인증서로 fallback
+    -- _default 인증서는 필수(conf/certs/_default/)이므로 캐시에 항상 존재
+    ngx.log(ngx.WARN, "no SNI in ClientHello, falling back to _default cert")
+    sni = "_default"
 end
 
 -- worker upvalue 캐시에서만 조회. 파일 I/O 없음.
@@ -345,7 +347,7 @@ ssl_prefer_server_ciphers off;  # TLS 1.3에서는 클라이언트 선호 존중
 | 키 파일 권한 오류 (0600 아님) | 해당 도메인 로드 거부 | 키 파일 보안 위반 |
 | PEM 파싱 실패 | 해당 도메인 연결 거부 | 손상된 인증서 사용 방지 |
 | DER 변환 실패 | 해당 도메인 연결 거부 | OpenSSL 내부 오류 |
-| SNI 없는 TLS 연결 + 기본 인증서 없음 | 연결 거부 | 잘못된 인증서 제공 방지 |
+| SNI 없는 TLS 연결 | `_default` 인증서로 fallback | `_default` 인증서는 필수이므로 항상 존재. 캐시 miss(로드 실패) 시 fail-closed |
 
 > **패스스루 fallback 금지**: 터미네이션 실패 시 패스스루로 전환하면, 공격자가 의도적으로 인증서 오류를 유발하여 암호화된 트래픽을 업스트림에 직접 전달시킬 수 있다. fail-closed만 허용한다.
 
@@ -362,8 +364,11 @@ ssl_prefer_server_ciphers off;  # TLS 1.3에서는 클라이언트 선호 존중
 **구현 방법:**
 
 - 8443 `preread_by_lua`에서 `tls_termination=true` 판정 시 `ngx.ctx.luagate_stream.tls_termination = true` 설정
-- 8443 `log_by_lua`에서 `ngx.ctx.luagate_stream.tls_termination == true`이면 로그 생성과 메트릭 카운트를 모두 스킵
+- 8443 `preread_by_lua`에서 `tls_termination=true`인 경우 `active_stream` gauge를 증가시키지 않는다 (8444에서 accept 시 +1)
+- 8443 `log_by_lua`에서 `ngx.ctx.luagate_stream.tls_termination == true`이면 로그 생성과 메트릭 카운트를 모두 스킵 (`active_stream` 감소 포함 — preread에서 증가하지 않았으므로 감소도 불필요)
 - stream metrics(`luagate_stream_connections_total`, `luagate_active_connections{type="stream"}` 등)도 동일 규칙: 8443→8444 전달 세션은 8443에서 카운트하지 않고 8444에서만 카운트
+
+> **active_stream gauge 누수 방지**: `tls_termination=true` 세션에서 8443이 accept 시 +1하고 log_by_lua에서 억제하면 -1이 누락되어 gauge가 무한 증가한다. 이를 방지하기 위해 8443에서는 `tls_termination=true` 세션의 `active_stream` 증가 자체를 하지 않는다. 해당 세션의 활성 연결 추적은 8444가 전담한다.
 
 ---
 
