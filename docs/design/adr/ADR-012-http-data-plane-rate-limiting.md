@@ -74,11 +74,12 @@ weighted_count = prev_count * (1 - elapsed_fraction) + curr_count
 |------|-----|
 | **Zone 이름** | `luagate_ratelimit` |
 | **크기** | 4 MB |
-| **키 스키마** | `rl:<scope_key>:<slot>` |
+| **키 스키마** | `rl:<rule_id>:<scope_key>:<slot>` |
 | **TTL** | `window * 2` (이전 slot 보존) |
 | **Eviction 정책** | LRU (ngx.shared.DICT 기본) |
 
-- `<scope_key>`: scope에 따른 식별자 (MVP: client IP, 예: `rl:192.168.1.1:42371`)
+- `<rule_id>`: 매칭된 규칙의 `id` 필드. 서로 다른 규칙이 동일한 scope_key와 window를 사용하더라도 카운터가 독립적으로 유지된다
+- `<scope_key>`: scope에 따른 식별자 (MVP: client IP, 예: `rl:api-rate-limit:192.168.1.1:42371`)
 - `<slot>`: `floor(now / window)` 정수값
 
 **Eviction 시 동작**:
@@ -91,7 +92,7 @@ Data plane rate limiter의 `incr()` 실패를 fail-open으로 처리하는 반�
 - **Data plane (fail-open)**: 가용성 우선. rate limiter 오류로 정상 사용자의 프로덕션 트래픽을 차단하는 것은 rate limiting 부재보다 더 큰 비즈니스 리스크다. rate limit이 일시적으로 풀려도 정책 엔진(deny 규칙)과 보안 스캐너가 여전히 보호를 제공한다.
 - **Admin plane (fail-closed)**: 보안 우선. Admin API는 정책 변경/조회 등 권한이 높은 관리 작업을 수행하며, brute-force 공격 방어가 필수적이다. rate limiter 오류 시 요청을 통과시키면 인증 우회 공격에 노출될 수 있으므로 503으로 차단한다.
 
-**용량 산정**: 4 MB 기준 약 80,000개 키 수용 가능 (`ngx.shared.DICT` 키당 약 50 bytes 오버헤드, `rl:<15-char-ip>:<8-digit-slot>` = ~30 bytes 키 + 8 bytes 값). scope가 `client_ip`이고 활성 IP가 40,000개 이하이면 (현재 slot + 이전 slot = 2키/IP) 충분하다.
+**용량 산정**: 4 MB 기준 약 50,000개 키 수용 가능 (`ngx.shared.DICT` 키당 약 50 bytes 오버헤드, `rl:<20-char-rule-id>:<15-char-ip>:<8-digit-slot>` = ~50 bytes 키 + 8 bytes 값). 규칙 R개, scope가 `client_ip`이고 규칙당 활성 IP가 N개이면 총 키 수 = R × N × 2 (현재 slot + 이전 slot). 예: 5개 규칙, 규칙당 5,000 활성 IP = 50,000 키로 4 MB 내 수용 가능.
 
 ### 3. 정책 규칙 `rate_limit` 필드 (선택적)
 
@@ -120,9 +121,9 @@ rules:
 
 | `scope` 값 | 키 생성 | 예시 |
 |------------|---------|------|
-| `client_ip` | `rl:<src_ip>:<slot>` | `rl:192.168.1.1:42371` |
+| `client_ip` | `rl:<rule_id>:<src_ip>:<slot>` | `rl:api-rate-limit:192.168.1.1:42371` |
 
-> **향후 확장**: `scope`에 `path`, `header:<name>`, `api_key` 등을 추가할 수 있다. 키 스키마는 `rl:<scope_type>:<scope_value>:<slot>` 형태로 확장 가능하나, MVP에서는 `client_ip`만 지원하므로 `scope_type` prefix를 생략한다.
+> **향후 확장**: `scope`에 `path`, `header:<name>`, `api_key` 등을 추가할 수 있다. 키 스키마는 `rl:<rule_id>:<scope_type>:<scope_value>:<slot>` 형태로 확장 가능하나, MVP에서는 `client_ip`만 지원하므로 `scope_type` prefix를 생략한다.
 
 **검증 규칙** (정책 로드 시):
 - `rate_limit` 필드가 있으면 `requests`, `window`, `scope` 모두 필수
@@ -149,6 +150,31 @@ access_by_lua 처리 순서:
 
 1. **deny된 요청을 카운트하지 않음**: 정책에 의해 차단된 요청까지 rate limit 카운터에 포함하면 공격자가 deny 대상 요청을 대량 전송하여 정상 사용자의 quota를 소진시킬 수 있다.
 2. **규칙별 rate_limit 필드 참조**: rate limit 설정이 매칭된 규칙에 내장되어 있으므로, 어떤 규칙이 매칭되었는지 먼저 알아야 rate limit 파라미터를 결정할 수 있다.
+
+**스캐너 비용 trade-off**: 이 순서에서 rate limit 초과 요청도 보안 스캐너(Rust FFI)를 먼저 통과한다. 이는 의도된 trade-off이다:
+- 스캐너를 건너뛰면 rate limit 이내의 악성 요청이 탐지되지 않는다. 보안 검사는 항상 rate limit보다 우선해야 한다.
+- 스캐너 FFI 호출은 budget 0.5ms 이내로 제한되어 있어 (ADR-001 §c-ffi-modules.md §7) 성능 영향이 제한적이다.
+- rate limit 초과 요청에 대한 스캐너 비용은 429 응답 생성 비용 대비 미미하며, deny 요청 카운트 방지와 규칙별 파라미터 참조라는 정확성 이점이 이를 정당화한다.
+
+> **향후 개선**: 매우 높은 트래픽 환경에서 스캐너 비용이 문제될 경우, 규칙 매칭 전에 적용되는 "global rate limit" (단일 threshold, 전체 요청 대상) 옵션을 도입할 수 있다. 이는 정책 규칙과 독립적이므로 스캐너 이전에 배치 가능하다.
+
+**`evaluate_http()` 반환 확장**: 매칭된 규칙의 rate_limit 파라미터를 호출자(`handler.lua`)에게 전달하기 위해 반환값을 확장한다.
+
+```text
+-- 기존 반환: (action, rule_id, deny_reason)
+-- 확장 반환: (action, rule_id, deny_reason, rate_limit)
+
+function evaluate_http(request):
+    rules = get_active_http_rules()
+    for rule in rules:
+        if matches(rule.scope, request):
+            return rule.action, rule.id, nil, rule.rate_limit  -- rate_limit은 nil 가능
+    return global.default_action, nil, nil, nil
+```
+
+- `rate_limit`: 매칭된 규칙의 `rate_limit` 테이블 (`{requests, window, scope}`) 또는 `nil` (rate_limit 미설정 규칙)
+- `handler.lua`의 `access()`는 `action == "allow"` AND `rate_limit ~= nil`일 때만 rate limit 검사를 수행한다
+- `deny` 판정 시 4번째 반환값은 무시된다 (deny 규칙에는 rate_limit 필드가 없으므로 항상 nil)
 
 ### 5. 응답: 429 + Rate Limit 헤더
 

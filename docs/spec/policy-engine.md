@@ -145,12 +145,25 @@ function evaluate_http(request):
     for rule in rules:
         if matches(rule.scope, request):
             log_access(action=rule.action, matched_rule=rule.id)
-            return rule.action
+            return rule.action, rule.id, nil, rule.rate_limit
 
     # 매칭 없음 → 기본 정책
     log_access(action=global.default_action, matched_rule=nil)
-    return global.default_action
+    return global.default_action, nil, nil, nil
 ```
+
+**반환값 계약** (ADR-012 확장):
+
+| 순서 | 이름 | 타입 | 설명 |
+| --- | --- | --- | --- |
+| 1 | `action` | `"allow"` \| `"deny"` | 판정 결과 |
+| 2 | `rule_id` | `string` \| `nil` | 매칭된 규칙 ID. 매칭 없으면 `nil` |
+| 3 | `deny_reason` | `string` \| `nil` | 거부 사유. 현재 미사용 (`nil`), 향후 확장 예약 |
+| 4 | `rate_limit` | `table` \| `nil` | 매칭된 규칙의 `rate_limit` 설정 (`{requests, window, scope}`). 미설정 시 `nil` |
+
+> `handler.lua`는 `action == "allow"` AND `rate_limit ~= nil`일 때만 rate limit 검사를 수행한다.
+> `deny` 판정 시 `rate_limit`은 항상 `nil`이다 (`action: deny` 규칙에는 rate_limit 필드 불허).
+> 상세: [ADR-012 §4](../design/adr/ADR-012-http-data-plane-rate-limiting.md)
 
 ### 3.2 Stream 규칙 평가
 
