@@ -78,13 +78,27 @@ weighted_count = prev_count * (1 - elapsed_fraction) + curr_count
 | **TTL** | `window * 2` (이전 slot 보존) |
 | **Eviction 정책** | LRU (ngx.shared.DICT 기본) |
 
-- `<rule_id>`: 매칭된 규칙의 `id` 필드. 서로 다른 규칙이 동일한 scope_key와 window를 사용하더라도 카운터가 독립적으로 유지된다
-- `<scope_key>`: scope에 따른 식별자 (MVP: client IP, 예: `rl:api-rate-limit:192.168.1.1:42371`)
+- `<rule_id>`: 매칭된 규칙의 `id` 필드. 서로 다른 규칙이 동일한 scope_key와 window를 사용하더라도 카운터가 독립적으로 유지된다. **문자 제한**: `[a-z0-9-]+` (소문자 영숫자와 하이픈만 허용, `:` 금지). 구분자 `:`와의 충돌을 방지한다. 정책 로드 시 검증하며, 위반 시 로드 거부 (ADR-003 startup-fatal)
+- `<scope_key>`: scope에 따른 식별자 (MVP: client IP). **IPv6 주소는 bracket으로 감싸서** 구분자 `:`와의 충돌을 방지한다. 예: IPv4 `rl:api-rate-limit:192.168.1.1:42371`, IPv6 `rl:api-rate-limit:[::1]:42371`, IPv6 `rl:api-rate-limit:[2001:db8::1]:42371`
 - `<slot>`: `floor(now / window)` 정수값
+
+**구분자 안전성 규칙**:
+- 키 구분자는 `:`를 사용한다
+- `rule_id`에 `:`를 금지하여 구분자 충돌을 원천 차단한다
+- IPv6 주소는 `[addr]` 형태로 감싸서 주소 내 `:`가 구분자로 오인되지 않도록 한다
+- `<slot>`은 정수값이므로 `:`를 포함하지 않는다
+- 이를 통해 키의 각 필드를 `:`로 안전하게 분할(split)할 수 있다
 
 **Eviction 시 동작**:
 - **카운터 키 eviction (fail-open)**: shared dict 용량 부족으로 카운터 키가 eviction되면 `incr(key, 1, 0, ttl)`이 새 키를 생성한다. 기존 카운트가 유실되므로 일시적으로 제한이 풀린다 (fail-open). 이는 의도된 trade-off이다 -- 트래픽이 극히 높을 때 일부 요청이 제한을 우회하는 것이 전체 서비스를 차단하는 것보다 낫다.
 - **shared dict 자체 불가 (fail-closed)**: `ngx.shared.luagate_ratelimit`이 nil인 경우 (nginx.conf 설정 누락 등), **503 Service Unavailable**을 반환한다. 이는 구성 오류이므로 fail-closed가 적절하다.
+  - **503 경로 메타데이터**:
+    - `decision_source`: `rate_limiter`
+    - `deny_reason`: `ratelimit_unavailable`
+    - `request_state`: `internal_error`
+    - `action`: `deny`
+  - **503 응답 body**: `{"error":"Service Unavailable","request_id":"<request_id>"}`
+  - **응답 헤더**: `Content-Type: application/json`, `Cache-Control: no-store`, `X-Request-ID: <request_id>`
 - **`incr()` 실패 (fail-open)**: `incr()` 호출이 nil을 반환하는 경우 (예상치 못한 오류), WARN 로그를 남기고 요청을 통과시킨다 (fail-open). rate limiter 오류가 정상 트래픽을 차단해서는 안 된다.
 
 **Data plane fail-open vs Admin fail-closed 정당화**:
@@ -121,7 +135,7 @@ rules:
 
 | `scope` 값 | 키 생성 | 예시 |
 |------------|---------|------|
-| `client_ip` | `rl:<rule_id>:<src_ip>:<slot>` | `rl:api-rate-limit:192.168.1.1:42371` |
+| `client_ip` | `rl:<rule_id>:<src_ip>:<slot>` (IPv6는 `[addr]`로 감싸기) | IPv4: `rl:api-rate-limit:192.168.1.1:42371`, IPv6: `rl:api-rate-limit:[::1]:42371` |
 
 > **향후 확장**: `scope`에 `path`, `header:<name>`, `api_key` 등을 추가할 수 있다. 키 스키마는 `rl:<rule_id>:<scope_type>:<scope_value>:<slot>` 형태로 확장 가능하나, MVP에서는 `client_ip`만 지원하므로 `scope_type` prefix를 생략한다.
 

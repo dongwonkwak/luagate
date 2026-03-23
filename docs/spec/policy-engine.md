@@ -80,7 +80,7 @@ stream_rules:                   # TCP 스트림 규칙 목록 (top-level key: "s
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `id` | string | ✓ | 규칙 고유 식별자 — **파일 전체(http + stream) 유일성** |
+| `id` | string | ✓ | 규칙 고유 식별자 — **파일 전체(http + stream) 유일성**. 문자 제한: `[a-z0-9-]+` (소문자 영숫자와 하이픈만 허용). rate limit 카운터 키 구분자 `:`와의 충돌 방지 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 | `description` | string | — | 설명 |
 | `enabled` | boolean | — | 기본값 `true`. `false`이면 평가에서 제외 (schema 검증은 수행, conflict detect에서 제외) |
 | `priority` | integer | ✓ | **낮은 숫자 = 높은 우선순위** (ADR-002). 동률은 `rule.id ASC` stable sort |
@@ -242,6 +242,8 @@ load_policy(filepath):
 ```lua
 -- 필수 필드 검증
 assert(rule.id, "rule.id is required")
+assert(type(rule.id) == "string" and rule.id:match("^[a-z0-9%-]+$"),
+       "rule.id must match [a-z0-9-]+ (no ':' allowed)")
 assert(type(rule.priority) == "number", "rule.priority must be number")
 
 -- action 검증: HTTP와 Stream은 허용 action이 다름

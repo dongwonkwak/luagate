@@ -205,6 +205,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 |---------|--------|-----------------|---------|
 | 403 | 정책 deny 또는 스캐너 차단 | `application/json` | `{"error":"Forbidden","request_id":"...","reason":"<rule_id 또는 threat_type>"}` |
 | 429 | Rate limit 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) | `application/json` | `{"error":"Too Many Requests","request_id":"...","retry_after":<seconds>}` |
+| 503 | Rate limiter shared dict 불가 (구성 오류, fail-closed) ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) | `application/json` | `{"error":"Service Unavailable","request_id":"..."}` |
 | 502 | 업스트림 연결 실패 | `application/json` | `{"error":"Bad Gateway","request_id":"..."}` |
 
 **공통 응답 헤더** (deny/error 응답 시):
@@ -284,7 +285,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 | policy deny | — | 403 | 정책 매칭 deny |
 | upstream fail | — | 502 | proxy_pass 연결 실패 |
 | rate limit counter eviction | fail-open | — | shared_dict 용량 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
-| shared dict nil (luagate_ratelimit) | fail-closed | 503 | nginx.conf에 `lua_shared_dict luagate_ratelimit` 미선언 (구성 오류). [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
+| shared dict nil (luagate_ratelimit) | fail-closed | 503 | nginx.conf에 `lua_shared_dict luagate_ratelimit` 미선언 (구성 오류). `decision_source=rate_limiter`, `deny_reason=ratelimit_unavailable`, `request_state=internal_error`. [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
 | rate limit incr() 실패 | fail-open | — | `incr()` nil 반환 시 WARN 로그만, 요청 통과. [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
 | logging 실패 (감사 로그 직렬화) | pre-commit: fail-closed, post-commit: warn-only | — | ADR-004: pre-commit audit 실패 → 거부. post-commit → 경고. 디스크 I/O는 Nginx에 위임 |
 | native crash (worker) | process failure | — | nginx master가 재기동 |
