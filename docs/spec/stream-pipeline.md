@@ -251,8 +251,7 @@ LuaGate Stream 파이프라인은 기본적으로 **TLS 패스스루** 모드다
 - SNI만 탐지하여 라우팅/차단 결정에 사용
 - 실제 TLS 핸드쉐이크는 업스트림이 처리
 
-<!-- ADR 필요 -->
-> **TODO**: TLS 터미네이션 지원(LuaGate에서 인증서 처리) 필요 시 ADR 필요
+설계 결정은 [ADR-015: TLS Termination](../design/adr/ADR-015-tls-termination.md) 참조.
 
 ## 10. 타임아웃 설정
 

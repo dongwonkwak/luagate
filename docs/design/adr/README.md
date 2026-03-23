@@ -18,6 +18,7 @@
 | [ADR-010](./ADR-010-opentelemetry-tracing.md) | OpenTelemetry 분산 트레이싱 도입 | Accepted | 2026-03-20 | 커스텀 OTLP/HTTP 모듈 + head-based 샘플링 |
 | [ADR-011](./ADR-011-mcp-server.md) | MCP 서버 설계 | Accepted | 2026-03-19 | Admin API → MCP tool 노출 |
 | [ADR-014](./ADR-014-scanner-pattern-hot-update.md) | Scanner Pattern Hot Update | Accepted | 2026-03-23 | RwLock + 5단계 reload 파이프라인 + Admin API |
+| [ADR-015](./ADR-015-tls-termination.md) | TLS Termination | Accepted | 2026-03-23 | ssl_certificate_by_lua 동적 인증서 + 파일 기반 관리 |
 
 ## 의존성 관계
 
@@ -30,7 +31,8 @@ ADR-001 (실행 모델)
 ├── ADR-008 (멀티 인스턴스; +ADR-003)
 ├── ADR-009 (FFI 타임아웃; +ADR-003)
 ├── ADR-011 (MCP 서버; ADR-004 + ADR-005)
-└── ADR-014 (Scanner 핫 업데이트; +ADR-003 + ADR-009)
+├── ADR-014 (Scanner 핫 업데이트; +ADR-003 + ADR-009)
+└── ADR-015 (TLS 터미네이션; +ADR-001 + ADR-003)
 ```
 
 > 각 ADR의 정확한 `Depends on`은 해당 문서의 front matter를 참조하세요.
@@ -51,6 +53,7 @@ ADR-001 (실행 모델)
 | ADR-010 | [log-schema.md](../../spec/log-schema.md), [http-pipeline.md](../../spec/http-pipeline.md) |
 | ADR-011 | [admin-api.md](../../spec/admin-api.md), [log-schema.md](../../spec/log-schema.md) |
 | ADR-014 | [security-scanner.md](../../spec/security-scanner.md), [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [admin-api.md](../../spec/admin-api.md) |
+| ADR-015 | [stream-pipeline.md](../../spec/stream-pipeline.md) |
 
 ## ADR 작성 가이드
 
