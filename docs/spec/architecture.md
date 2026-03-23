@@ -179,9 +179,12 @@ Client TCP Connect
   │                                    src_ip/dst_port/detected_protocol/sni 기반 매칭
   │                                    ├─ deny → 연결 종료, 로그 기록
   │                                    ├─ proxy (패스스루) → 업스트림 직접 전달
-  │                                    └─ proxy (tls_termination=true) → 127.0.0.1:8444
+  │                                    └─ proxy (tls_termination=true) → 127.0.0.1:8445
   ▼                                                                        │
 [stream proxy_pass]                                                        ▼
+  │                                    [Port 8445: proxy_protocol on] ── 원본 클라이언트 메타데이터 전달
+  │                                      │
+  │                                      ▼
   │                                    [Port 8444: ssl_certificate_by_lua] ── SNI 기반 인증서 선택
   │                                      │                                    (캐시 조회만, 파일 I/O 없음)
   │                                      ▼
