@@ -86,7 +86,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 |----|------|
 | `policy_engine` | 정책 엔진이 판정 (allow 또는 policy deny) |
 | `security_scanner` | 보안 스캐너가 탐지하여 deny |
-| `rate_limiter` | 레이트 리밋으로 deny (MVP 비범위) |
+| `rate_limiter` | 레이트 리밋으로 deny ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 | `nginx_core` | nginx core early short-circuit (400/413/414/502 등) |
 
 ### 3.3 request_state 값 정의표 (HTTP)
@@ -96,9 +96,10 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `allowed` | 정책 allow + 업스트림 응답 성공 |
 | `policy_denied` | 정책 엔진 deny |
 | `scanner_denied` | 보안 스캐너 차단 |
-| `rate_limited` | 레이트 리밋 초과 (MVP 비범위) |
+| `rate_limited` | 레이트 리밋 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 | `upstream_error` | allow 판정이었으나 업스트림 502 |
 | `short_circuited` | nginx_core early termination (400/413/414 등) — 기본값 |
+| `internal_error` | 내부 오류로 인한 fail-closed (예: shared dict 미선언 503) ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 
 ### 3.4 예시 JSON — HTTP allow
 

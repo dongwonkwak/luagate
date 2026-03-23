@@ -85,8 +85,9 @@ ADR-004 §4.3은 메트릭 이름 목록, Cardinality 원칙(레이블 제한, `
 | `luagate_policy_reload_failures_total` | Counter | — |
 | `luagate_shared_dict_capacity_bytes` | Gauge | `zone` |
 | `luagate_shared_dict_free_bytes` | Gauge | `zone` |
+| `luagate_ratelimit_rejected_total` | Counter | — |
 
-> **메트릭 이름 불변**: ADR-004 §4.3에서 확정된 14개 이름은 변경하지 않는다. `luagate_http_scanner_threats_total`은 이 ADR에서 추가된 15번째 메트릭이다.
+> **메트릭 이름 불변**: ADR-004 §4.3에서 확정된 14개 이름은 변경하지 않는다. `luagate_http_scanner_threats_total`은 ADR-006에서 추가된 15번째, `luagate_ratelimit_rejected_total`은 [ADR-012](./ADR-012-http-data-plane-rate-limiting.md)에서 추가된 16번째 메트릭이다.
 
 #### 1.3 금지 레이블
 
@@ -164,6 +165,7 @@ architecture.md §3.2의 `metrics:*` prefix 규칙에 따라 전체 키를 다�
 | `metrics:http_upstream_errors_total` | number | `luagate_http_upstream_errors_total` |
 | `metrics:policy_reload_total` | number | `luagate_policy_reload_total` |
 | `metrics:policy_reload_failures_total` | number | `luagate_policy_reload_failures_total` |
+| `metrics:ratelimit_rejected_total` | number | `luagate_ratelimit_rejected_total` |
 | `latency:bucket:0.1` | number | `luagate_http_response_time_ms_bucket{le="0.1"}` |
 | `latency:bucket:0.5` | number | `luagate_http_response_time_ms_bucket{le="0.5"}` |
 | `latency:bucket:1` | number | `luagate_http_response_time_ms_bucket{le="1"}` |
