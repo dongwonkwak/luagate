@@ -57,7 +57,7 @@ LuaGate에 처음 기여한다면 다음과 같은 작은 작업부터 시작하
 
 ## Architecture 개요
 
-상세: [`.claude/knowledge/architecture.md`](.claude/knowledge/architecture.md), [`docs/design/adr/`](docs/design/adr/) (ADR-001 ~ ADR-004)
+상세: [`.claude/knowledge/architecture.md`](.claude/knowledge/architecture.md), [`docs/design/adr/`](docs/design/adr/)
 
 ### Shared Dict (ngx.shared.DICT)
 
