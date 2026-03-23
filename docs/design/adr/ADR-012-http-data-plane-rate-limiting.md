@@ -68,12 +68,12 @@ weighted_count = prev_count * (1 - elapsed_fraction) + curr_count
 
 **Increment-then-check**: 현재 slot 카운터를 먼저 원자적으로 증분한 뒤 weighted count를 계산한다. 이를 통해 여러 worker가 동시에 동일 스냅샷을 읽어 모두 통과하는 race condition을 방지한다.
 
-### 2. 카운터 Zone: `luagate_ratelimit` (4 MB)
+### 2. 카운터 Zone: `luagate_ratelimit` (8 MB)
 
 | 항목 | 값 |
 |------|-----|
 | **Zone 이름** | `luagate_ratelimit` |
-| **크기** | 4 MB |
+| **크기** | 8 MB |
 | **키 스키마** | `rl:<rule_id>:<scope_key>:<slot>` |
 | **TTL** | `window * 2` (이전 slot 보존) |
 | **Eviction 정책** | LRU (ngx.shared.DICT 기본) |
@@ -92,7 +92,7 @@ Data plane rate limiter의 `incr()` 실패를 fail-open으로 처리하는 반�
 - **Data plane (fail-open)**: 가용성 우선. rate limiter 오류로 정상 사용자의 프로덕션 트래픽을 차단하는 것은 rate limiting 부재보다 더 큰 비즈니스 리스크다. rate limit이 일시적으로 풀려도 정책 엔진(deny 규칙)과 보안 스캐너가 여전히 보호를 제공한다.
 - **Admin plane (fail-closed)**: 보안 우선. Admin API는 정책 변경/조회 등 권한이 높은 관리 작업을 수행하며, brute-force 공격 방어가 필수적이다. rate limiter 오류 시 요청을 통과시키면 인증 우회 공격에 노출될 수 있으므로 503으로 차단한다.
 
-**용량 산정**: 4 MB 기준 약 50,000개 키 수용 가능 (`ngx.shared.DICT` 키당 약 50 bytes 오버헤드, `rl:<20-char-rule-id>:<15-char-ip>:<8-digit-slot>` = ~50 bytes 키 + 8 bytes 값). 규칙 R개, scope가 `client_ip`이고 규칙당 활성 IP가 N개이면 총 키 수 = R × N × 2 (현재 slot + 이전 slot). 예: 5개 규칙, 규칙당 5,000 활성 IP = 50,000 키로 4 MB 내 수용 가능.
+**용량 산정**: `ngx.shared.DICT` 키당 약 50 bytes 오버헤드 + `rl:<20-char-rule-id>:<15-char-ip>:<8-digit-slot>` = ~50 bytes 키 + 8 bytes 값 = 108 bytes/키. 규칙 R개, scope가 `client_ip`이고 규칙당 활성 IP가 N개이면 총 키 수 = R x N x 2 (현재 slot + 이전 slot). 예: 5개 규칙, 규칙당 5,000 활성 IP = 50,000 키 x 108 bytes = 5.4 MB. 8 MB로 설정하면 약 74,000개 키를 수용 가능하여 50,000 키 기준 충분한 여유를 확보한다.
 
 ### 3. 정책 규칙 `rate_limit` 필드 (선택적)
 
@@ -231,7 +231,7 @@ Rate limit에 의한 차단은 기존 http-pipeline.md의 decision 체계에 통
 - shared dict `luagate_metrics`에 저장 (ADR-006 카디널리티 제어 준수)
 - 레이블 없음 (ADR-006: low-cardinality 원칙. 규칙별/IP별 레이블은 고카디널리티이므로 제외)
 - `safe_incr()` 패턴 사용 (실패 시 WARN 로그만, 요청 처리 계속)
-- 기존 `metrics:http:requests:deny` 카운터에도 포함 (rate limit deny도 deny의 일종)
+- 기존 `metrics:http_requests_total:deny` 카운터에도 포함 (rate limit deny도 deny의 일종, ADR-006 §3.2 키 스키마 준수)
 
 ---
 
@@ -276,7 +276,7 @@ access.log 필드 변경 없음. 기존 30필드 체계를 그대로 사용한�
 
 ### 부정적
 
-- shared dict 4 MB 추가 메모리 사용
+- shared dict 8 MB 추가 메모리 사용
 - Sliding Window Counter의 근사 오차 (~1 요청)
 - 정책 YAML 스키마 복잡도 증가 (`rate_limit` 필드 추가)
 
@@ -284,7 +284,7 @@ access.log 필드 변경 없음. 기존 30필드 체계를 그대로 사용한�
 
 | 리스크 | 완화 |
 |--------|------|
-| shared dict eviction으로 rate limit 우회 | fail-open 허용 (가용성 우선). 4 MB로 ~40,000 활성 IP 수용. 용량 부족 시 WARN 로그 |
+| shared dict eviction으로 rate limit 우회 | fail-open 허용 (가용성 우선). 8 MB로 ~74,000 키 수용. 용량 부족 시 WARN 로그 |
 | 멀티 인스턴스 배포 시 인스턴스별 카운터 분리 | shared dict는 프로세스 로컬. 인스턴스 N대일 때 실질 limit = N * requests. 분산 카운터는 Phase 2 (Redis 또는 외부 store) |
 | window가 매우 짧을 때 (예: 1초) 정밀도 저하 | 최소 window 권장값 문서화 (10초 이상). 검증에서 최소값 강제는 하지 않음 |
 | rate_limit이 있는 규칙이 많을 때 shared dict 접근 증가 | 매칭된 단일 규칙에 대해서만 2회 접근 (incr + get). O(1) 연산이므로 규칙 수와 무관 |
@@ -296,8 +296,8 @@ access.log 필드 변경 없음. 기존 30필드 체계를 그대로 사용한�
 1. **정책 스키마 확장**: `conf/policies.yaml` 및 policy loader에 `rate_limit` 필드 추가 + 검증 로직
 2. **`lua/luagate/http/ratelimit.lua`**: data plane rate limiter 모듈 구현 (check 함수: 규칙의 rate_limit 설정 + src_ip 입력 → allow/deny 판정)
 3. **`lua/luagate/http/handler.lua`**: `access()` 함수에서 정책 allow 판정 후 rate limit 검사 호출 추가
-4. **`conf/nginx.conf`**: `lua_shared_dict luagate_ratelimit 4m;` 추가
+4. **`conf/nginx.conf`**: `lua_shared_dict luagate_ratelimit 8m;` 추가
 5. **429 응답 처리**: `do_rate_limit_deny()` 함수 구현 (JSON body + 헤더)
-6. **quota 헤더 주입**: 정상 응답(allow + rate_limit 규칙 매칭)에도 `X-RateLimit-*` 헤더 추가 (`header_filter_by_lua` 또는 `access_by_lua`에서 `ngx.header` 설정)
+6. **quota 헤더 주입**: 정상 응답(allow + rate_limit 규칙 매칭)에도 `X-RateLimit-*` 헤더 추가. **`header_filter_by_lua`에서 `ngx.header` 설정** — access_by_lua에서 설정하면 proxy_pass 이전에 설정되어 upstream 응답 헤더와 충돌할 수 있으므로, upstream 응답 후 게이트웨이가 헤더를 추가/덮어쓰는 header_filter_by_lua가 적절하다. access_by_lua에서 계산한 quota 정보(`remaining`, `limit`, `reset`)를 `ngx.ctx.luagate`에 저장하고, header_filter_by_lua에서 읽어 `ngx.header`에 설정한다
 7. **메트릭**: `luagate_ratelimit_rejected_total` 카운터 추가
 8. **테스트**: unit test + integration test

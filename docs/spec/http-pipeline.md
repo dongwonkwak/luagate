@@ -88,14 +88,20 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 │                                             │
 │  3. 정책 평가 (ADR-002)                     │
 │     priority 정렬 → first-match-wins        │
-│     ├─ allow → 통과                        │
-│     └─ deny  → 403 반환                    │
+│     ├─ allow → 4번으로                     │
+│     └─ deny  → 403 반환 (rate limit 미검사)│
 │                │                            │
 │                ▼                            │
-│  4. deny 처리:                              │
-│     - ngx.status = 403                     │
+│  4. Rate limit 검사 (§11, ADR-012)          │
+│     매칭 규칙에 rate_limit 필드 있을 때만   │
+│     ├─ 초과 → 429 반환                     │
+│     └─ 통과 → proxy_pass                   │
+│                │                            │
+│                ▼                            │
+│  5. deny 처리:                              │
+│     - ngx.status = 403 또는 429            │
 │     - ngx.say(JSON 에러 응답)               │
-│     - ngx.exit(403)                        │
+│     - ngx.exit(403 또는 429)               │
 │     - 로그: action=deny 기록 예약           │
 └─────────────────────────────────────────────┘
 ```
@@ -278,6 +284,30 @@ HTTP 파이프라인 에러 분류 통일 표:
 ## 11. Rate Limiting
 
 > **ADR 참조**: [ADR-012: HTTP Data Plane Rate Limiting](../design/adr/ADR-012-http-data-plane-rate-limiting.md) — Sliding Window Counter + 정책 규칙별 `rate_limit` 필드
+
+### 11.1 파이프라인 위치
+
+Rate limit 검사는 `access_by_lua` 내에서 **정책 평가(§2.3 3단계) 직후, proxy_pass 직전**에 수행한다. 정책 평가 결과가 `allow`이고 매칭된 규칙에 `rate_limit` 필드가 있을 때만 검사한다. `deny` 판정된 요청은 rate limit 카운터에 포함하지 않는다.
+
+### 11.2 429 응답 분기
+
+Rate limit 초과 시:
+- `ngx.status = 429`
+- `decision_source = "rate_limiter"`, `deny_reason = "rate_limit_exceeded"`, `request_state = "rate_limited"`
+- JSON body: `{"error":"Too Many Requests","request_id":"...","retry_after":<seconds>}`
+- `Retry-After` 헤더 포함 (429 응답 시만)
+
+### 11.3 `evaluate_http()` 반환 확장
+
+정책 평가 함수 `evaluate_http()`는 4번째 반환값으로 매칭된 규칙의 `rate_limit` 테이블(`{requests, window, scope}`)을 반환한다. rate_limit 필드가 없는 규칙이면 `nil`을 반환한다.
+
+```text
+(action, rule_id, deny_reason, rate_limit)
+```
+
+### 11.4 응답 헤더 주입
+
+rate_limit 규칙이 매칭된 요청(allow/429 모두)에 `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` 헤더를 주입한다. 헤더 주입은 **`header_filter_by_lua`** 단계에서 수행한다 (ADR-012 §5 참조). access_by_lua에서 계산한 quota 정보를 `ngx.ctx.luagate`에 저장하고, header_filter_by_lua에서 `ngx.header`에 설정한다.
 
 ## 12. 타임아웃 설정
 
