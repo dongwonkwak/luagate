@@ -34,6 +34,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 │  │  luagate_policy | luagate_metrics |           │           │
 │  │  luagate_stream_metrics | luagate_connections │           │
 │  │  luagate_state | luagate_scanner_patterns     │           │
+│  │  luagate_tls_certs                            │           │
 │  └──────────────────────────────────────────────┘           │
 │                                                             │
 │  ┌──────────────────────────────────────────────┐           │
@@ -69,6 +70,7 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 | `luagate_state` | Reload/health 플래그 + token rotation | **State**: `state:reload_flag`, `state:health`; **Token**: `luagate_admin_token` (rotated active), `luagate_admin_token_old` (grace period, TTL=30s) | reload worker / token rotate | 키 단위 |
 | `luagate_admin_ratelimit` | Admin API IP별 sliding window rate limit 카운터 | 단순 카운터: `rl:<ip>:<slot>` | 각 worker (incr) | 키 단위 |
 | `luagate_scanner_patterns` | 스캐너 패턴 버전 메타데이터 + reload lock | **State**: `scanner:active_version`(SHA256), `scanner:loaded_at`(ISO 8601), `scanner:pattern_count`(정수), `scanner_reload_lock`(TTL 5s) | reload worker | 키 단위 |
+| `luagate_tls_certs` | TLS 인증서 메타데이터 (경로, 해시, 버전). PEM/DER 데이터 미저장 ([ADR-015](../design/adr/ADR-015-tls-termination.md)) | **State**: `tls_certs_version`(전체 버전); `cert:<domain>:cert_path`, `cert:<domain>:key_path`, `cert:<domain>:hash`(도메인별 메타) | Admin API / reload worker | 키 단위 |
 
 > **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):
 > 새 정책을 `policy:<new_version>:blob`에 먼저 기록한 뒤, `http:active_version` / `stream:active_version` 포인터를 교체한다.
@@ -172,18 +174,28 @@ Client Response
 Client TCP Connect
   │
   ▼
-[stream preread_by_lua] ── 프로토콜 탐지 + 스트림 정책 평가
-  │                        ngx.req.socket() 기반 preread buffer 조회
-  │                        src_ip/dst_port/detected_protocol/sni 기반 매칭
-  │                        ├─ deny → 연결 종료, 로그 기록
-  │                        └─ proxy → 다음 단계
-  ▼
-[stream proxy_pass] ── Nginx native TCP 프록시
-  │                    (Lua가 아닌 Nginx native data plane)
+[Port 8443: stream preread_by_lua] ── 프로토콜 탐지 + 스트림 정책 평가
+  │                                    ngx.req.socket() 기반 preread buffer 조회
+  │                                    src_ip/dst_port/detected_protocol/sni 기반 매칭
+  │                                    ├─ deny → 연결 종료, 로그 기록
+  │                                    ├─ proxy (패스스루) → 업스트림 직접 전달
+  │                                    └─ proxy (tls_termination=true) → 127.0.0.1:8444
+  ▼                                                                        │
+[stream proxy_pass]                                                        ▼
+  │                                    [Port 8444: ssl_certificate_by_lua] ── SNI 기반 인증서 선택
+  │                                      │                                    (캐시 조회만, 파일 I/O 없음)
+  │                                      ▼
+  │                                    [Port 8444: preread_by_lua] ── 복호화된 데이터 처리
+  │                                      │
+  │                                      ▼
+  │                                    [Port 8444: proxy_pass] ── 평문 업스트림 전달
   ▼
 [stream log_by_lua] ── 세션 로그 기록 (18필드, ADR-004)
 ```
 
+> **Phase 순서 (Port 8444)**: ssl_certificate_by_lua → preread_by_lua → proxy_pass.
+> TLS 핸드셰이크가 먼저 완료된 후 preread 단계에 진입한다.
+>
 > **설계 원칙**: stream 파이프라인은 `content_by_lua`나 가상의 `stream access_by_lua`가 아니라 Nginx native `proxy_pass`를 사용한다.
 > Lua는 `preread_by_lua`(탐지 + 정책 판정)와 `log_by_lua`에만 관여하며, 실제 바이트 전달은 Nginx가 담당한다.
 > `ngx.req.get_body_data()`는 stream context에서 사용하지 않는다. preread buffer 조회는 `ngx.req.socket()` 기반 접근을 기준으로 설명한다.
@@ -295,6 +307,7 @@ Internet
 - **ADR-004**: 로그/메트릭 스키마, Admin 보안 → `lua/luagate/log/`, `lua/luagate/admin/`
 - **ADR-009**: FFI 타임아웃 강제 메커니즘 → 3계층 방어(budget guard + watchdog + health check)
 - **ADR-014**: Scanner Pattern Hot Update → `luagate_scanner_patterns` zone, `luagate_scanner_reload()` FFI 함수
+- **ADR-015**: TLS Termination → dual-port 구조, 인증서 관리, `luagate_tls_certs` zone
 
 <!-- ADR 필요 -->
 > **TODO**: 멀티 인스턴스 정책 동기화(실시간) 구현 시 ADR 필요

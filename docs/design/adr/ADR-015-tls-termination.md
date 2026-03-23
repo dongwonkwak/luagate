@@ -95,29 +95,41 @@ conf/certs/
 
 ### 3. SSL 컨텍스트: `ssl_certificate_by_lua_block` + `ngx.ssl` API
 
-**SNI 기반 동적 인증서 선택:**
+**Dual-port 구조 + Phase 순서:**
+
+OpenResty stream에서 phase 순서는 `ssl_certificate_by_lua` → `preread_by_lua` → `proxy_pass`이다. `listen ssl`로 선언된 서버에서는 TLS 핸드셰이크가 먼저 완료된 후 preread 단계에 진입한다. 따라서 **하나의 `listen` 블록에서 패스스루와 터미네이션을 동시에 처리할 수 없다**.
+
+이 제약을 해결하기 위해 dual-port 구조를 사용한다:
 
 ```
-[TLS ClientHello]
+Port 8443 (listen 8443, ssl 없음) — 패스스루 전용
     │
-    ├─ SNI 추출 (stream preread_by_lua: 기존 detect_protocol FFI)
+    ├─ preread_by_lua: 프로토콜 탐지 + 정책 매칭
+    │   ├─ tls_termination=true → proxy_pass를 localhost:8444로 내부 리다이렉트
+    │   └─ tls_termination=false → 기존 패스스루 (업스트림에 직접 proxy_pass)
+    └─ TLS 핸드셰이크 없음. 암호화된 스트림을 투명 전달
+
+Port 8444 (listen 8444 ssl, 내부 전용) — 터미네이션 전용
     │
-    ├─ 정책 확인: tls_termination=true?
-    │   ├─ false → TLS 패스스루 (기존 동작)
-    │   └─ true  → ssl_certificate_by_lua_block 진입
+    ├─ ssl_certificate_by_lua: SNI 기반 인증서 선택 (캐시 조회만, 파일 I/O 없음)
+    │   ├─ ngx.ssl.server_name() → SNI 확인
+    │   ├─ worker upvalue 캐시에서 DER 인증서/키 조회
+    │   │   ├─ hit → ngx.ssl.set_der_cert() + ngx.ssl.set_der_priv_key()
+    │   │   └─ miss → ngx.exit(ngx.ERROR) (fail-closed, init_by_lua에서 사전 로드 필수)
+    │   └─ 실패 시 → ngx.exit(ngx.ERROR) (fail-closed)
     │
-    └─ ssl_certificate_by_lua_block:
-        ├─ ngx.ssl.server_name() → SNI 확인
-        ├─ worker upvalue 캐시에서 SSL context 조회
-        │   ├─ hit → ngx.ssl.set_der_cert() + ngx.ssl.set_der_priv_key()
-        │   └─ miss → 파일에서 PEM 로드 → DER 변환 → 캐시 저장 → 설정
-        └─ 실패 시 → ngx.exit(ngx.ERROR) (fail-closed)
+    ├─ preread_by_lua: 복호화된 데이터에 대한 추가 처리 (TLS 핸드셰이크 이미 완료)
+    │
+    └─ proxy_pass: 평문 업스트림으로 전달
 ```
+
+> **Port 8444는 외부 노출하지 않는다.** 방화벽/네트워크 정책으로 localhost만 접근 가능하게 제한한다.
+> 외부 클라이언트는 항상 8443으로 연결하고, 터미네이션이 필요한 경우 내부적으로 8444로 전달된다.
 
 **OpenResty `ngx.ssl` API 사용:**
 
 ```lua
--- ssl_certificate_by_lua_block
+-- ssl_certificate_by_lua_block (Port 8444 터미네이션 서버에서만 실행)
 local ssl = require("ngx.ssl")
 
 local sni, err = ssl.server_name()
@@ -126,9 +138,11 @@ if not sni then
     return ngx.exit(ngx.ERROR)  -- fail-closed
 end
 
-local cert_der, key_der = load_cert_for_domain(sni)
+-- worker upvalue 캐시에서만 조회. 파일 I/O 없음.
+-- init_by_lua에서 모든 인증서를 사전 로드하여 캐시에 저장.
+local cert_der, key_der = get_cached_cert(sni)
 if not cert_der or not key_der then
-    ngx.log(ngx.ERR, "no cert for domain: ", sni)
+    ngx.log(ngx.ERR, "no cached cert for domain: ", sni)
     return ngx.exit(ngx.ERROR)  -- fail-closed
 end
 
@@ -151,6 +165,10 @@ if not ok then
 end
 ```
 
+> **Blocking I/O 금지**: `ssl_certificate_by_lua` 내에서 파일 읽기(PEM 로드)를 수행하지 않는다.
+> 모든 인증서는 `init_by_lua` 단계에서 사전 로드하여 worker upvalue에 DER 변환 결과를 캐시한다.
+> 캐시 miss = 인증서 미등록 → fail-closed (연결 거부).
+
 ### 4. SNI 매핑: `luagate_tls_certs` shared dict + worker upvalue 캐시
 
 **2-tier 캐시 구조 (ADR-001/003 패턴 준수):**
@@ -171,9 +189,10 @@ end
 
 **L1 캐시 갱신 프로토콜:**
 
-1. `ssl_certificate_by_lua` 진입 시 `luagate_tls_certs:get("tls_certs_version")` 확인
-2. L1 캐시 버전과 다르면 해당 도메인의 인증서를 파일에서 재로드
-3. 동일하면 L1 캐시 hit → SSL context 즉시 설정
+1. **`init_by_lua`** (서버 기동 시): `conf/certs/` 디렉토리를 스캔하여 모든 도메인의 PEM 파일을 읽고 DER 변환 후 module-level table에 저장. 이 시점에만 파일 I/O 허용.
+2. **`init_worker_by_lua`** (각 worker 기동 후): `ngx.timer.every()`로 주기적 타이머 등록 (예: 60초). 타이머 콜백에서 `luagate_tls_certs:get("tls_certs_version")`을 확인하고, 버전 변경 감지 시 파일에서 재로드 (cosocket 컨텍스트이므로 blocking I/O 아닌 timer context에서 수행).
+3. **`ssl_certificate_by_lua`** (TLS 핸드셰이크 시): worker upvalue 캐시에서만 조회. **파일 I/O 없음**. 캐시 miss → fail-closed.
+4. **Admin API 인증서 업로드 시**: 파일 저장 후 `luagate_tls_certs:set("tls_certs_version", new_version)` 갱신 → 다음 타이머 주기에 각 worker가 감지하여 백그라운드 재로드.
 
 **zone 크기**: `luagate_tls_certs` -- 2m (메타데이터만 저장, PEM/DER 데이터 미저장)
 
@@ -217,16 +236,19 @@ stream_rules:
 - `action: deny` 규칙에 `tls_termination` 필드가 있으면 무시 (의미 없음)
 - non-TLS 프로토콜 규칙(`detected_protocol: http/raw`)에 `tls_termination: true` 설정 시 스키마 검증 경고
 
-**preread_by_lua 판정 흐름 변경:**
+**preread_by_lua 판정 흐름 변경 (Port 8443 패스스루 서버):**
 
 ```
 1. 프로토콜 탐지 (기존)
 2. 정책 매칭 (기존)
 3. 매칭된 규칙의 tls_termination 확인
    ├─ true  → ngx.ctx.luagate_stream.tls_termination = true
-   │          (ssl_certificate_by_lua에서 참조)
-   └─ false → 기존 패스스루 동작
+   │          → $luagate_upstream = "127.0.0.1:8444" (터미네이션 서버로 내부 전달)
+   └─ false → 기존 패스스루 동작 ($luagate_upstream = 정책의 upstream 값)
 ```
+
+> **Phase 순서 주의**: Port 8443에서는 `listen ssl`이 아니므로 `ssl_certificate_by_lua`가 실행되지 않는다.
+> TLS 터미네이션 판정은 preread 단계에서 SNI 기반으로 수행하고, 실제 TLS 핸드셰이크는 8444 서버가 처리한다.
 
 ### 6. mTLS: Phase 4 연기
 
@@ -253,7 +275,14 @@ ssl_session_tickets off;  # 보안 우선 (ticket key 관리 복잡도 회피)
 
 - 도메인별 DER 변환 결과를 worker module upvalue에 캐시
 - SSL 핸드셰이크마다 파일 I/O + PEM→DER 변환을 반복하지 않음
-- 캐시 무효화: `tls_certs_version` 변경 감지 시 해당 도메인만 재로드
+- 캐시 무효화: `tls_certs_version` 변경 감지 시 `init_worker_by_lua` 타이머가 해당 도메인만 재로드
+
+**SSL 세션 캐시 무효화 (인증서 교체 시):**
+
+- SSL session resumption 시 `ssl_certificate_by_lua`가 스킵된다. 이전 인증서로 생성된 세션이 재사용될 수 있다.
+- 인증서 교체 시 세션 캐시를 무효화해야 새 인증서가 즉시 반영된다.
+- **무효화 전략**: `ssl_session_cache shared:luagate_ssl_sessions:10m`을 사용하므로 `ngx.shared.luagate_ssl_sessions:flush_all()`로 모든 세션 항목을 삭제한다. Admin API 인증서 업로드 핸들러가 인증서 저장 + `tls_certs_version` 갱신과 함께 세션 캐시 flush를 수행한다.
+- **대안**: `nginx -s reload`는 프로세스 재시작으로 세션 캐시가 자연스럽게 소멸되나, Hot Reload 목표(무중단)와 상충하므로 `flush_all()` 방식을 우선한다.
 
 **성능 영향 추정:**
 
@@ -327,16 +356,36 @@ ngx.ctx.luagate_stream = {
 
 ## Nginx Configuration 변경
 
-stream server block에 TLS 터미네이션 관련 지시자 추가:
+Dual-port 구조로 패스스루와 터미네이션을 분리한다:
 
 ```nginx
 stream {
+    # ── Port 8443: 패스스루 서버 (기존 + 터미네이션 라우팅) ──
     server {
-        listen 8443 ssl;
+        listen 8443;
+        # ssl 파라미터 없음 — TLS 핸드셰이크를 수행하지 않는다
+
+        preread_by_lua_block {
+            -- 프로토콜 탐지 + 정책 매칭
+            -- tls_termination=true → $luagate_upstream = "127.0.0.1:8444"
+            -- tls_termination=false → $luagate_upstream = 정책 upstream
+            require("luagate.stream.handler").preread()
+        }
+
+        proxy_pass $luagate_upstream;
+
+        log_by_lua_block {
+            require("luagate.stream.handler").log()
+        }
+    }
+
+    # ── Port 8444: TLS 터미네이션 서버 (내부 전용) ──
+    server {
+        listen 8444 ssl;
 
         # TLS 프로토콜/cipher 설정
         ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_ciphers '...';  # Mozilla Modern
+        ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305';
         ssl_prefer_server_ciphers off;
 
         # 세션 캐시
@@ -348,25 +397,29 @@ stream {
         ssl_certificate     conf/certs/_default/fullchain.pem;
         ssl_certificate_key conf/certs/_default/privkey.pem;
 
-        # 동적 인증서 선택
+        # 동적 인증서 선택 (Phase 순서: ssl_certificate_by_lua → preread_by_lua)
         ssl_certificate_by_lua_block {
+            -- worker upvalue 캐시에서만 조회. 파일 I/O 없음.
             require("luagate.tls.ssl_handler").select_cert()
         }
 
         preread_by_lua_block {
-            require("luagate.stream.handler").preread()
+            -- TLS 핸드셰이크 완료 후 실행. 복호화된 데이터 처리 가능.
+            require("luagate.stream.handler").preread_terminated()
         }
 
         proxy_pass $luagate_upstream;
 
         log_by_lua_block {
-            -- 기존 로직 ...
+            require("luagate.stream.handler").log()
         }
     }
 }
 ```
 
-> **`listen 8443 ssl` vs 현재 `listen 8443`**: TLS 터미네이션을 위해 `ssl` 파라미터를 추가한다. 패스스루 전용 포트가 필요하면 별도 `listen` 블록을 구성한다. `ssl_certificate_by_lua`에서 정책에 따라 패스스루/터미네이션을 분기한다.
+> **Dual-port 설계 근거**: `listen ssl`을 선언하면 해당 서버의 모든 연결에 TLS 핸드셰이크가 강제되어 패스스루가 불가능하다. Port 8443(패스스루)과 Port 8444(터미네이션)를 분리하여 정책의 `tls_termination` 필드에 따라 preread 단계에서 적절한 upstream으로 라우팅한다.
+>
+> **Port 8444 접근 제한**: 외부에서 직접 접근하면 안 된다. 방화벽 규칙 또는 `allow 127.0.0.1; deny all;` (stream 모듈에서 지원 시)로 제한한다.
 
 ---
 
@@ -406,6 +459,7 @@ lua_shared_dict luagate_tls_certs 2m;
 | 인증서 만료 미감지 | Phase 2: Admin API `/api/v1/certs/status`에서 만료일 조회 기능 추가 |
 | SSL context 캐시 메모리 증가 | 도메인 수 제한 없으나, DER 인증서 크기는 도메인당 ~5KB 수준. 1000 도메인 = ~5MB |
 | 패스스루/터미네이션 정책 혼동 | `tls_termination` 필드 생략 시 기본값 `false` (패스스루). 스키마 검증에서 경고 |
+| SSL session resumption 시 인증서 교체 미반영 | 인증서 교체 시 `luagate_ssl_sessions:flush_all()`로 세션 캐시 무효화. §7 참조 |
 | ACME 미지원으로 인한 수동 갱신 부담 | Phase 4에서 ACME 통합 예정. 현재는 외부 certbot + Admin API 업로드 워크플로 |
 
 ---
@@ -413,11 +467,14 @@ lua_shared_dict luagate_tls_certs 2m;
 ## Implementation Plan
 
 1. **DON-231** (예정): `lua/luagate/tls/` 모듈 구현 (init, cert_manager, ssl_handler)
+   - `init.lua`: `init_by_lua`에서 인증서 디렉토리 스캔, PEM→DER 변환, worker upvalue 초기화
+   - `cert_manager.lua`: `init_worker_by_lua` 타이머로 `tls_certs_version` 변경 감지 및 백그라운드 재로드
+   - `ssl_handler.lua`: `ssl_certificate_by_lua` 진입점 (캐시 조회만, 파일 I/O 없음)
 2. `luagate_tls_certs` shared dict zone 추가 (`conf/nginx.conf`)
-3. stream server block에 `ssl` 파라미터 + `ssl_certificate_by_lua_block` 추가
+3. Dual-port stream 구성: Port 8443 (패스스루) + Port 8444 (터미네이션, `ssl` + `ssl_certificate_by_lua_block`)
 4. stream rule 스키마에 `tls_termination` 필드 추가 (정책 검증 로직 수정)
-5. `preread_by_lua`에서 `tls_termination` 필드를 `ngx.ctx.luagate_stream`에 전달
-6. Admin API 인증서 업로드 엔드포인트 구현 (Phase 2)
+5. Port 8443 `preread_by_lua`에서 `tls_termination=true` 시 `$luagate_upstream = "127.0.0.1:8444"` 설정
+6. Admin API 인증서 업로드 엔드포인트 구현 (Phase 2) — 업로드 시 `luagate_ssl_sessions:flush_all()` 세션 캐시 무효화 포함
 7. ACME 자동 발급 통합 (Phase 4)
 8. mTLS 지원 (Phase 4, 별도 ADR)
 

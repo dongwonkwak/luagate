@@ -4,6 +4,7 @@
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
 > - [ADR-002 정책 평가 규칙](../design/adr/ADR-002-policy-evaluation-conflict-detection.md)
 > - [ADR-004 로그/메트릭](../design/adr/ADR-004-log-metrics-admin-security.md)
+> - [ADR-015 TLS Termination](../design/adr/ADR-015-tls-termination.md)
 
 ## 1. 개요
 
@@ -249,11 +250,81 @@ Stream 파이프라인 에러 분류 통일 표:
 LuaGate Stream 파이프라인은 기본적으로 **TLS 패스스루** 모드다:
 - TLS 연결을 복호화하지 않음
 - SNI만 탐지하여 라우팅/차단 결정에 사용
-- 실제 TLS 핸드쉐이크는 업스트림이 처리
+- 실제 TLS 핸드셰이크는 업스트림이 처리
 
 설계 결정은 [ADR-015: TLS Termination](../design/adr/ADR-015-tls-termination.md) 참조.
 
-## 10. 타임아웃 설정
+### 10.1 Dual-port 구조
+
+TLS 터미네이션은 dual-port 구조로 구현한다. 하나의 `listen ssl` 블록에서는 패스스루가 불가능하기 때문이다.
+
+| 포트 | 역할 | `listen` 설정 | TLS 핸드셰이크 |
+|------|------|--------------|----------------|
+| 8443 | 패스스루 + 터미네이션 라우팅 | `listen 8443` (ssl 없음) | 없음 |
+| 8444 | TLS 터미네이션 전용 (내부) | `listen 8444 ssl` | LuaGate가 수행 |
+
+**처리 흐름:**
+
+```
+Client → Port 8443 (preread_by_lua)
+             │
+             ├─ tls_termination=false → 업스트림 직접 proxy_pass (패스스루)
+             │
+             └─ tls_termination=true → proxy_pass 127.0.0.1:8444
+                                           │
+                                           ├─ ssl_certificate_by_lua: SNI 기반 인증서 선택
+                                           ├─ TLS 핸드셰이크 완료
+                                           ├─ preread_by_lua: 복호화된 데이터 처리
+                                           └─ proxy_pass: 평문 업스트림
+```
+
+### 10.2 ssl_certificate_by_lua 단계
+
+OpenResty stream phase 순서: **ssl_certificate_by_lua → preread_by_lua → proxy_pass**
+
+Port 8444 (터미네이션 서버)에서만 실행되며, TLS ClientHello의 SNI를 기반으로 인증서를 동적 선택한다.
+
+- **인증서 로드**: `init_by_lua`에서 `conf/certs/` 디렉토리의 모든 PEM 파일을 사전 로드하여 DER 변환 후 worker upvalue에 캐시
+- **ssl_certificate_by_lua 동작**: worker upvalue 캐시에서 SNI에 해당하는 DER 인증서/키를 조회. **파일 I/O 없음** (blocking I/O 금지 불변식 준수)
+- **캐시 miss**: `ngx.exit(ngx.ERROR)` -- fail-closed. 사전 로드되지 않은 도메인은 연결 거부
+- **인증서 갱신**: `init_worker_by_lua` 타이머가 `luagate_tls_certs` shared dict의 `tls_certs_version`을 주기적으로 확인하고, 변경 감지 시 백그라운드에서 파일 재로드
+
+### 10.3 정책 스키마: `tls_termination` 필드
+
+stream rule에 `tls_termination` boolean 필드가 추가된다:
+
+| 필드 | 타입 | 기본값 | 설명 |
+|------|------|--------|------|
+| `tls_termination` | boolean | `false` | `true`: LuaGate가 TLS 종료, `false`: 패스스루 |
+
+- 필드 생략 시 기본값 `false` (기존 패스스루 동작 유지, 하위 호환)
+- `action: deny` 규칙에서는 무시됨
+- non-TLS 규칙(`detected_protocol: http/raw`)에 `true` 설정 시 스키마 검증 경고
+
+### 10.4 `luagate_tls_certs` shared dict zone
+
+| Zone | 역할 | 크기 | Key Model |
+|------|------|------|-----------|
+| `luagate_tls_certs` | 인증서 메타데이터 (경로, 해시, 버전) | 2m | `tls_certs_version`, `cert:<domain>:cert_path`, `cert:<domain>:key_path`, `cert:<domain>:hash` |
+
+> **Private key 저장 금지**: shared dict에는 인증서/키 파일의 메타데이터만 저장한다. PEM/DER 데이터 및 private key는 worker upvalue (OpenSSL 구조체)에만 보관한다. LRU eviction으로 인한 키 유출 방지.
+
+### 10.5 ngx.ctx.luagate_stream TLS 확장
+
+```lua
+ngx.ctx.luagate_stream = {
+    -- 기존 필드 (S7) ...
+    tls_termination = boolean,  -- true: LuaGate가 TLS 종료, false: 패스스루
+}
+```
+
+### 10.6 SSL 세션 캐시 및 무효화
+
+- `ssl_session_cache shared:luagate_ssl_sessions:10m` -- 세션 재사용으로 핸드셰이크 비용 절감
+- `ssl_session_tickets off` -- ticket key 관리 복잡도 회피 (보안 우선)
+- **인증서 교체 시**: `luagate_ssl_sessions:flush_all()`로 세션 캐시 무효화. session resumption에서 `ssl_certificate_by_lua`가 스킵되므로, 캐시 flush 없이는 이전 인증서가 재사용될 수 있다.
+
+## 11. 타임아웃 설정
 
 | 설정 | 값 | 설명 |
 |------|----|------|
@@ -261,7 +332,7 @@ LuaGate Stream 파이프라인은 기본적으로 **TLS 패스스루** 모드다
 | `proxy_connect_timeout` | 5s | 업스트림 연결 대기 |
 | `proxy_timeout` | 300s | 세션 유휴 타임아웃 |
 
-## 11. 의존성
+## 12. 의존성
 
 - [spec/policy-engine.md](./policy-engine.md) — 스트림 정책 평가
 - [spec/log-schema.md](./log-schema.md) — TCP 세션 로그 스키마 (18필드)
