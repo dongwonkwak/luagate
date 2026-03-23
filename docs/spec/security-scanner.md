@@ -2,6 +2,7 @@
 
 > **ADR 참조**:
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — Rust FFI 통합 방식
+> - [ADR-014 Scanner Pattern Hot Update](../design/adr/ADR-014-scanner-pattern-hot-update.md) — RwLock 도입, 런타임 패턴 교체
 
 ## 1. 개요
 
@@ -160,7 +161,7 @@ function M.scan(ctx)
     )
 
     -- return code 직접 확인 (pcall은 Lua-level 예외 대비용 — ADR-001 §1.2 참조)
-    if rc == -3 or rc == -4 then  -- BUDGET_EXCEEDED or INTERNAL_ERROR
+    if rc == -3 or rc == -4 or rc == -5 then  -- BUDGET_EXCEEDED, INTERNAL_ERROR, or TIMEOUT
         return nil, "scanner_fail:" .. rc
     end
 
@@ -179,7 +180,7 @@ return M
 
 **호출자 계약:**
 - `M.scan(ctx)` 호출자는 반드시 `pcall(M.scan, ctx)`로 Lua-level exception을 흡수해야 한다.
-- `scanner_fail:-3`은 `budget_exceeded`, `scanner_fail:-4`와 Lua wrapper exception은 `scanner_internal_error`로 매핑한다.
+- `scanner_fail:-3`은 `budget_exceeded`, `scanner_fail:-4`와 Lua wrapper exception은 `scanner_internal_error`, `scanner_fail:-5`는 `ffi_timeout`으로 매핑한다.
 - 보안 경로에서는 위 예외를 `500`으로 전파하지 않고 `403 fail-closed`로 처리한다.
 
 ## 4. OWASP 패턴 (§5)
@@ -270,18 +271,19 @@ conf/
     └── custom.yaml     # 사용자 정의 패턴
 ```
 
-<!-- ADR 필요 -->
-> **TODO**: 패턴 핫 업데이트(서버 재시작 없이 패턴 갱신) 구현 시 ADR 필요
+설계 결정은 [ADR-014: Scanner Pattern Hot Update](../design/adr/ADR-014-scanner-pattern-hot-update.md) 참조.
 
 ## 7. 성능 요구사항
 
 - 스캔 완료 시간: < 5ms (`budget_exceeded` threshold)
 - `budget_exceeded` 초과 시 → fail-closed (403)
 - 메모리: 패턴 로딩 후 정적 메모리 사용 (worker당 추가 할당 최소화)
-- 스레드 안전성: 동일 worker 내 단일 스레드이므로 mutex 불필요
+- 스레드 안전성: `SCANNER` global은 `RwLock<Option<Scanner>>`로 보호된다 ([ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md)). `luagate_scan_http()`는 `try_read()`로 접근하여 reload가 없는 정상 상태에서 contention-free로 read lock을 획득한다. `luagate_scanner_reload()`는 `write()` lock을 Swap 단계(< 1ms)에서만 획득하여 패턴을 원자적으로 교체한다. Reload 중(write lock 보유) `try_read()`가 실패하면 `LUAGATE_INTERNAL_ERROR`를 반환한다 (fail-closed).
+- Cross-worker 동기화: `SCANNER`는 worker 프로세스 로컬 상태이므로, Admin API reload는 요청을 처리한 worker만 즉시 갱신한다. 다른 worker는 `init_worker_by_lua`에서 등록한 1초 주기 타이머(`ngx.timer.every`)로 shared dict `scanner:active_version` 변경을 감지하고, 해당 worker 내에서 `luagate_scanner_reload()`를 호출하여 동기화한다 (ADR-014 §5). 최대 전파 지연: 1초.
 
 ## 8. 의존성
 
 - [spec/http-pipeline.md](./http-pipeline.md) — 스캐너 호출 컨텍스트
 - [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — FFI 공통 패턴
 - [ADR-001](../design/adr/ADR-001-execution-shared-state-model.md) — FFI 호출 모델
+- [ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md) — Scanner Pattern Hot Update (RwLock, reload FFI, shared dict zone)

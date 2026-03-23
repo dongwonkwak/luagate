@@ -103,6 +103,17 @@ int luagate_scan_http(
 
 /** 초기화 (init_by_lua에서 1회). patterns_path: patterns 디렉토리 경로. */
 int luagate_scanner_init(const char *patterns_path, size_t patterns_path_len);
+
+/**
+ * 런타임 패턴 교체 (Admin API 트리거).
+ * init과 달리 실패 시 LKG(Last Known Good) 패턴을 유지하고 에러 코드를 반환한다.
+ * 반환: LUAGATE_OK, LUAGATE_INTERNAL_ERROR (LKG 유지), LUAGATE_TIMEOUT (L2 watchdog)
+ *
+ * 5단계 파이프라인: Read → Parse → Compile → Swap(write lock) → Verify(shared dict)
+ * Write lock은 Swap 단계(< 1ms)에서만 보유하여 스캔 요청 차단을 최소화한다.
+ * ADR-014 참조.
+ */
+int luagate_scanner_reload(const char *patterns_path, size_t patterns_path_len);
 ```
 
 ### 4.2 Lua FFI 바인딩
@@ -123,6 +134,7 @@ int luagate_scan_http(
     double *score_out
 );
 int luagate_scanner_init(const char *patterns_path, size_t patterns_path_len);
+int luagate_scanner_reload(const char *patterns_path, size_t patterns_path_len);
 ]]
 
 local lib = ffi.load("luagate_scanner")
@@ -335,7 +347,8 @@ typedef struct {
 
 | 모듈 | Layer 1 budget (내부) | Layer 2 hard timeout (watchdog) |
 |------|----------------------|-------------------------------|
-| `luagate_scanner.so` | 5ms | 50ms |
+| `luagate_scanner.so` (scan) | 5ms | 50ms |
+| `luagate_scanner.so` (reload) | 100ms | 1000ms |
 | `luagate_decoder.so` | 2ms | 20ms |
 | `luagate_stream.so` (detect/sni) | 1ms | 10ms |
 | `luagate_stream.so` (radix_build) | 100ms | 1000ms |

@@ -5,6 +5,7 @@
 > - [ADR-003 정책 저장소 + Hot Reload](../design/adr/ADR-003-policy-storage-hot-reload.md)
 > - [ADR-004 로그/메트릭 + 관리면 보안](../design/adr/ADR-004-log-metrics-admin-security.md)
 > - [ADR-005 정책 활성화 모델 + 동시성 제어](../design/adr/ADR-005-policy-activation-concurrency.md)
+> - [ADR-014 Scanner Pattern Hot Update](../design/adr/ADR-014-scanner-pattern-hot-update.md)
 
 ## 1. 개요
 
@@ -605,6 +606,108 @@ Content-Type: application/json
 | 500 | `internal_error` | shared dict 사용 불가 (fail-closed) |
 | 500 | `audit_write_failed` | 감사 로그 직렬화 실패 → mutation 거부 (stage: `audit`). `cjson.encode` 실패 시 발생 |
 
+### 6.11 스캐너 패턴 조회
+
+```http
+GET /api/v1/scanner/patterns
+Authorization: Bearer <token>
+```
+
+현재 로드된 스캐너 패턴 상태를 조회한다.
+
+**응답 200:**
+
+```json
+{
+  "active_version": "a3f2c1d4e5b6...",
+  "loaded_at": "2026-03-23T10:30:00Z",
+  "pattern_count": 24,
+  "patterns": [
+    {
+      "threat_type": "sqli",
+      "rule_name": "sqli_union_select",
+      "score": 0.9
+    }
+  ]
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `active_version` | string\|null | 현재 활성 패턴 버전 (SHA256 해시). `luagate_scanner_patterns` shared dict에서 조회 |
+| `loaded_at` | string\|null | 마지막 패턴 로드 시각 (ISO-8601 UTC) |
+| `pattern_count` | integer | 현재 로드된 패턴 수 |
+| `patterns` | array | 로드된 패턴 목록 (threat_type, rule_name, score만 포함. pattern 정규식은 미노출) |
+
+---
+
+### 6.12 스캐너 패턴 업데이트
+
+```http
+PUT /api/v1/scanner/patterns
+Authorization: Bearer <token>
+Content-Type: application/yaml
+
+<패턴 YAML (bare array 또는 patterns: 래핑)>
+```
+
+패턴 파일을 업로드한다. 설계 상세: [ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md) §6.
+
+**파일 매핑**: `conf/scanner-patterns/custom.yaml`에 저장. Bare array body는 서버가 `patterns:` top-level 키로 래핑하여 저장한다.
+
+**처리 순서**: [1] 임시 파일 기록 (`custom.yaml.tmp`) → [2] YAML 파싱 + 스키마 검증 + 정규식 컴파일 (실패 시 임시 파일 삭제, canonical source 변경 없음, 400 반환) → [3] 기존 `custom.yaml` → `custom.yaml.bak` 백업 → [4] `rename()` 원자적 교체 (`custom.yaml.tmp` → `custom.yaml`) → [5] `luagate_scanner_reload()` 호출 → [6] reload 실패 시 `.bak`에서 복원 (rollback). 성공 시 `.bak` 삭제 + shared dict `scanner:active_version` 갱신 (cross-worker 동기화 트리거, ADR-014 §5)
+
+**응답 200 (업로드 + reload 성공):**
+
+```json
+{
+  "previous_version": "a3f2c1d4...",
+  "new_version": "b4e3f2a1...",
+  "pattern_count": 25,
+  "reloaded_at": "2026-03-23T10:35:00Z"
+}
+```
+
+**에러 응답:**
+
+| 상태 코드 | error 코드 | 조건 |
+|----------|----------|------|
+| 400 | `bad_request` | YAML 파싱 실패, 스키마 검증 실패, 정규식 컴파일 실패 |
+| 409 | `reload_in_progress` | 다른 reload가 진행 중 (`scanner_reload_lock`) |
+
+---
+
+### 6.13 스캐너 패턴 리로드
+
+```http
+POST /api/v1/scanner/patterns/reload
+Authorization: Bearer <token>
+```
+
+기존 `conf/scanner-patterns/` 디렉토리의 패턴 파일에서 다시 로드한다 (파일 시스템에 직접 패턴 파일을 배치한 경우).
+
+**응답 200:**
+
+```json
+{
+  "previous_version": "a3f2c1d4...",
+  "new_version": "b4e3f2a1...",
+  "pattern_count": 24,
+  "reloaded_at": "2026-03-23T10:35:00Z"
+}
+```
+
+**에러 응답:**
+
+| 상태 코드 | error 코드 | 조건 |
+|----------|----------|------|
+| 400 | `bad_request` | 패턴 파일 파싱 또는 정규식 컴파일 실패 (LKG 유지) |
+| 409 | `reload_in_progress` | 다른 reload가 진행 중 |
+
+**동시 reload 방지**: `luagate_scanner_patterns` shared dict에 `scanner_reload_lock` 키 사용 (ADR-014 §5). TTL 5초 자동 해제.
+
+---
+
 ## 7. 감사 로그 (audit.log) 섹션
 
 감사 로그 상세 스키마: [log-schema.md §5](./log-schema.md#5-감사-로그-auditlog-adr-004-63)
@@ -768,3 +871,4 @@ add_header Cache-Control          "no-store" always;
 - [ADR-005](../design/adr/ADR-005-policy-activation-concurrency.md) — 정책 활성화 모델 + 동시성 제어
 - [spec/policy-engine.md](./policy-engine.md) — 정책 검증/평가, If-Match 대상
 - [spec/log-schema.md](./log-schema.md) — 감사 로그 스키마, 메트릭 목록
+- [ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md) — 스캐너 패턴 Hot Update (§6.11-6.13)
