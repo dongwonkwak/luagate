@@ -655,7 +655,7 @@ Content-Type: application/yaml
 
 **파일 매핑**: `conf/scanner-patterns/custom.yaml`에 저장. Bare array body는 서버가 `patterns:` top-level 키로 래핑하여 저장한다.
 
-**처리 순서**: [1] YAML 파싱 → [2] 스키마 검증 → [3] 정규식 컴파일 → [4] 임시 파일 기록 → [5] `rename()` 원자적 교체 → [6] `luagate_scanner_reload()` 호출
+**처리 순서**: [1] 임시 파일 기록 (`custom.yaml.tmp`) → [2] YAML 파싱 + 스키마 검증 + 정규식 컴파일 (실패 시 임시 파일 삭제, canonical source 변경 없음, 400 반환) → [3] 기존 `custom.yaml` → `custom.yaml.bak` 백업 → [4] `rename()` 원자적 교체 (`custom.yaml.tmp` → `custom.yaml`) → [5] `luagate_scanner_reload()` 호출 → [6] reload 실패 시 `.bak`에서 복원 (rollback). 성공 시 `.bak` 삭제 + shared dict `scanner:active_version` 갱신 (cross-worker 동기화 트리거, ADR-014 §5)
 
 **응답 200 (업로드 + reload 성공):**
 

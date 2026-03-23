@@ -142,7 +142,37 @@ ADR-003의 정책 Hot Reload 7단계를 참고하여 스캐너 패턴에 적합�
 
 > **zone prefix**: `luagate_scanner_patterns` — `luagate_` prefix 규칙 준수.
 
-### 5. Admin API 엔드포인트
+### 5. Cross-Worker 동기화
+
+`SCANNER`는 Rust 프로세스 로컬(static) 상태이므로, `luagate_scanner_reload()`는 호출한 worker 프로세스 내에서만 패턴을 갱신한다. Admin API 요청을 처리한 단일 worker만 새 패턴을 적용하고, 나머지 worker는 구 패턴을 유지하는 문제가 발생한다.
+
+ADR-003 정책 Hot Reload와 동일한 shared dict version polling 패턴으로 해결한다.
+
+1. Admin API handler가 `luagate_scanner_reload()` 호출 성공 후, `luagate_scanner_patterns` shared dict에 `scanner:active_version`을 새 SHA256 해시로 갱신한다.
+2. 각 worker는 `init_worker_by_lua`에서 `ngx.timer.every(1)`로 1초 주기 타이머를 등록한다.
+3. 타이머 콜백에서 `luagate_scanner_patterns:get("scanner:active_version")`을 읽고, worker 로컬 버전(`_local_scanner_version` module upvalue)과 비교한다.
+4. 버전이 다르면 해당 worker 내에서 `luagate_scanner_reload()`를 호출하여 패턴을 갱신한다.
+5. reload 성공 시 `_local_scanner_version`을 새 버전으로 업데이트한다. 실패 시 LKG 유지, WARN 로그.
+
+```
+[Admin API worker]                    [Other workers]
+   │                                      │
+   ├─ luagate_scanner_reload() 성공        │
+   ├─ shared dict: scanner:active_version  │
+   │   = "new_sha256"                      │
+   │                                      ┌┤ timer.every(1s) 콜백
+   │                                      ││ get("scanner:active_version")
+   │                                      ││ != _local_scanner_version?
+   │                                      ││  → luagate_scanner_reload()
+   │                                      ││  → _local_scanner_version = new
+   │                                      └┤
+```
+
+**전파 지연**: 최대 1초 (타이머 주기). ADR-003 정책 reload는 "다음 요청 시" 전파되지만, 스캐너 패턴은 Rust FFI 호출이므로 요청 처리 시점에 lazy 확인이 불가능하다. 따라서 주기적 타이머로 능동적 polling을 수행한다.
+
+**init_worker_by_lua 초기화**: 각 worker 시작 시 shared dict에서 현재 `scanner:active_version`을 읽어 `_local_scanner_version`을 초기화한다. 이 시점에서 `luagate_scanner_init()`은 이미 `init_by_lua`에서 완료된 상태이므로 추가 reload는 불필요하다.
+
+### 6. Admin API 엔드포인트
 
 `/api/v1/scanner/patterns` 하위 3개 엔드포인트를 추가한다. 기존 정책 관리(`/api/v1/policies`)와 동일한 auth/locking 패턴을 따른다.
 
@@ -178,9 +208,14 @@ ADR-003의 정책 Hot Reload 7단계를 참고하여 스캐너 패턴에 적합�
 **처리 순서:**
 
 1. 요청 body를 임시 파일에 기록 (`custom.yaml.tmp`)
-2. YAML 파싱 + 스키마 검증 + 정규식 컴파일 (검증 실패 시 임시 파일 삭제, 400 반환)
-3. `rename()` 시스템 콜로 `custom.yaml.tmp` → `custom.yaml` 원자적 교체 (ADR-003 atomic write 패턴)
-4. 자동으로 reload 트리거 (`luagate_scanner_reload()` 호출 — 전체 `conf/scanner-patterns/` 디렉토리 재로드)
+2. YAML 파싱 + 스키마 검증 + 정규식 컴파일 (검증 실패 시 임시 파일 삭제, 400 반환. canonical source는 변경 없음)
+3. 기존 `custom.yaml`이 존재하면 `custom.yaml.bak`으로 복사 (rollback 백업)
+4. `rename()` 시스템 콜로 `custom.yaml.tmp` → `custom.yaml` 원자적 교체
+5. `luagate_scanner_reload()` 호출 — 전체 `conf/scanner-patterns/` 디렉토리 재로드
+6. reload 실패 시: `custom.yaml.bak` → `custom.yaml`로 복원 (rollback), `.bak` 삭제, LKG 유지, 에러 반환
+7. reload 성공 시: `custom.yaml.bak` 삭제, shared dict `scanner:active_version` 갱신 (§5 cross-worker 동기화 트리거)
+
+**Rollback 보장**: 검증(Parse + Compile)은 rename 전에 완료되므로, 검증 실패 시 canonical source(`custom.yaml`)는 변경되지 않는다. Reload 단계(전체 디렉토리 재로드)에서 실패하는 경우에만 `.bak` rollback이 필요하며, 이는 다른 파일(`sqli.yaml` 등)과의 조합 문제 등 사전 검증으로 잡을 수 없는 케이스를 처리한다.
 
 ```
 PUT /api/v1/scanner/patterns
@@ -223,7 +258,7 @@ Authorization: Bearer <token>
 
 **동시 reload 방지:**
 
-ADR-003과 동일하게 shared dict에 `scanner_reload_lock` 키를 사용한다.
+ADR-003과 동일하게 shared dict에 `scanner_reload_lock` 키를 사용한다. Admin API handler는 reload 후 shared dict `scanner:active_version`을 갱신하고 응답한다. 다른 worker로의 전파는 §5 cross-worker 동기화 타이머가 담당한다.
 
 ```lua
 local ok = dict:add("scanner_reload_lock", ngx.worker.id(), 5)
@@ -234,7 +269,7 @@ end
 dict:delete("scanner_reload_lock")
 ```
 
-### 6. Reload Budget 및 ADR-009 Watchdog 적용
+### 7. Reload Budget 및 ADR-009 Watchdog 적용
 
 `luagate_scanner_reload()`는 ADR-009의 L2 watchdog 계층을 적용한다.
 
@@ -267,7 +302,7 @@ write lock은 Swap 단계(< 1ms)에서만 획득한다. Read/Parse/Compile은 lo
 
 > **핵심**: write lock 보유 시간을 최소화하기 위해 새 `Scanner` 인스턴스를 lock 바깥에서 완전히 구성한 뒤, Swap 단계에서만 lock을 획득하여 교체한다.
 
-### 7. YAML 패턴 파일 스키마
+### 8. YAML 패턴 파일 스키마
 
 ```yaml
 # conf/scanner-patterns/sqli.yaml
@@ -304,7 +339,8 @@ patterns:
 ```
 src/scanner/src/lib.rs          # RwLock 변경, luagate_scanner_reload() 추가, YAML 로더 구현
 lua/luagate/scanner/ffi.lua     # reload() 함수 바인딩 추가
-lua/luagate/admin/scanner.lua   # Admin API 핸들러 (GET/PUT/POST)
+lua/luagate/scanner/worker.lua  # init_worker_by_lua 타이머: cross-worker 동기화 (§5)
+lua/luagate/admin/scanner.lua   # Admin API 핸들러 (GET/PUT/POST), PUT rollback 포함
 conf/scanner-patterns/          # YAML 패턴 파일 디렉토리
     sqli.yaml
     xss.yaml
@@ -324,10 +360,13 @@ conf/scanner-patterns/          # YAML 패턴 파일 디렉토리
 - **실패 안전성**: reload 실패 시 LKG 패턴 유지 — 보안 스캔 중단 없음
 - **버전 추적**: shared dict 메타데이터로 현재 패턴 버전 확인 가능
 - **정책 관리와 일관된 UX**: Admin API 패턴이 `/api/v1/policies`와 동일
+- **Cross-worker 동기화**: shared dict version polling으로 모든 worker가 최대 1초 이내에 새 패턴 적용
+- **PUT rollback 안전성**: 검증 후 rename, reload 실패 시 `.bak`에서 복원하여 canonical source 일관성 보장
 
 ### 부정적
 
 - **reload 중 fail-closed**: write lock 보유 시간(< 1ms) 동안 도착하는 요청은 deny 처리. 정상 트래픽 10,000 req/s 기준 최대 10건 영향
+- **Cross-worker 전파 지연**: 타이머 주기(1초) 동안 일부 worker는 구 패턴을 사용. 보안상 허용 가능한 수준 (정책 reload와 동일 패턴)
 - **YAML 파서 의존성**: Rust 바이너리에 YAML 파싱 라이브러리(`serde_yaml`) 추가 필요
 - **새 FFI 함수**: `luagate_scanner_reload()` 추가로 ABI 표면 확대
 - **새 shared dict zone**: `luagate_scanner_patterns` zone 추가로 공유 메모리 사용량 증가 (1MB 이내)
@@ -350,9 +389,10 @@ conf/scanner-patterns/          # YAML 패턴 파일 디렉토리
 2. **YAML 로더 구현**: `serde_yaml` 의존성 추가. `conf/scanner-patterns/*.yaml` 파일 읽기 + 파싱 + 정규식 컴파일
 3. **`luagate_scanner_reload()` 구현**: 5단계 파이프라인 (Read → Parse → Compile → Swap → Verify)
 4. **Lua FFI 바인딩 업데이트**: `ffi.lua`에 `reload()` 함수 추가
-5. **Admin API 핸들러**: `lua/luagate/admin/scanner.lua` — GET/PUT/POST 엔드포인트
-6. **shared dict zone 추가**: `nginx.conf`에 `lua_shared_dict luagate_scanner_patterns 1m;` 선언
-7. **기본 YAML 패턴 파일 생성**: 현재 하드코딩 패턴을 YAML로 추출하여 `conf/scanner-patterns/` 배치
+5. **Admin API 핸들러**: `lua/luagate/admin/scanner.lua` — GET/PUT/POST 엔드포인트. PUT은 검증 후 rename + .bak rollback 패턴 적용
+6. **Cross-worker 동기화**: `init_worker_by_lua`에서 `ngx.timer.every(1)` 타이머 등록. shared dict `scanner:active_version` polling + worker 로컬 `luagate_scanner_reload()` 호출
+7. **shared dict zone 추가**: `nginx.conf`에 `lua_shared_dict luagate_scanner_patterns 1m;` 선언
+8. **기본 YAML 패턴 파일 생성**: 현재 하드코딩 패턴을 YAML로 추출하여 `conf/scanner-patterns/` 배치
 
 ---
 
