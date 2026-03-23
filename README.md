@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD041 MD036 -->
 <div align="center">
 
 <img src="docs/assets/logo.svg" alt="LuaGate Logo" width="480"/>
@@ -135,7 +136,7 @@ graph TB
 | 시나리오 | RPS | p50 | p99 |
 |---------|-----|-----|-----|
 | 게이트웨이 단독 (`/health`) | 338,831 | 0.23ms | 1.40ms |
-| 정책 평가 (allow/deny) | 66,157 | 1.00ms | 11.22ms |
+| 정책 평가 (deny) | 66,157 | 1.00ms | 11.22ms |
 | Deny 평가 | 66,490 | 1.01ms | 10.94ms |
 
 ---
@@ -174,7 +175,7 @@ luagate/
 ├── src/            # Rust FFI 소스 (scanner, decoder, stream)
 ├── conf/           # nginx.conf 및 정책 YAML
 ├── docs/
-│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 001~015)
+│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 14개, 001~015 중 013 결번)
 │   └── spec/       # 스펙 문서 (10개)
 ├── tests/          # 단위(busted) + 통합(Test::Nginx) 테스트
 ├── e2e/            # Playwright E2E 테스트
