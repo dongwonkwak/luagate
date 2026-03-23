@@ -54,9 +54,9 @@ ADR-001 (실행 모델)
 | ADR-009 | [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [http-pipeline.md](../../spec/http-pipeline.md), [stream-pipeline.md](../../spec/stream-pipeline.md), [architecture.md](../../spec/architecture.md) |
 | ADR-010 | [log-schema.md](../../spec/log-schema.md), [http-pipeline.md](../../spec/http-pipeline.md) |
 | ADR-011 | [admin-api.md](../../spec/admin-api.md), [log-schema.md](../../spec/log-schema.md) |
-| ADR-012 | [http-pipeline.md](../../spec/http-pipeline.md), [policy-engine.md](../../spec/policy-engine.md) |
-| ADR-014 | [security-scanner.md](../../spec/security-scanner.md), [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [admin-api.md](../../spec/admin-api.md) |
-| ADR-015 | [stream-pipeline.md](../../spec/stream-pipeline.md) |
+| ADR-012 | [http-pipeline.md](../../spec/http-pipeline.md), [policy-engine.md](../../spec/policy-engine.md), [architecture.md](../../spec/architecture.md), [log-schema.md](../../spec/log-schema.md) |
+| ADR-014 | [security-scanner.md](../../spec/security-scanner.md), [rust-ffi-modules.md](../../spec/rust-ffi-modules.md), [admin-api.md](../../spec/admin-api.md), [architecture.md](../../spec/architecture.md) |
+| ADR-015 | [stream-pipeline.md](../../spec/stream-pipeline.md), [admin-api.md](../../spec/admin-api.md), [architecture.md](../../spec/architecture.md), [policy-engine.md](../../spec/policy-engine.md) |
 
 ## ADR 작성 가이드
 

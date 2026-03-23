@@ -136,7 +136,7 @@ ADR을 supersede할 때는:
 스펙 문서는 ADR 내용을 중복 기재하지 않고 참조 링크를 사용한다:
 
 ```markdown
-> **ADR 참조**: [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-*.md)
+> **ADR 참조**: [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
 ```
 
 ### 6.2 ADR 필요 마커
