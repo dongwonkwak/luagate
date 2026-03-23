@@ -13,9 +13,14 @@ MD033:
     - summary
     - br
     - img
+    - div
+    - strong
 
-# MD041 — first line should be top-level heading
-MD041: true
+# MD041 — first line should be top-level heading: disabled (README uses centered div hero)
+MD041: false
+
+# MD036 — emphasis as heading: disabled (hero section uses bold tagline)
+MD036: false
 
 # MD024 — no duplicate headings within a section (siblings allowed)
 MD024:
