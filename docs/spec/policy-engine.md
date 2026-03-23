@@ -87,6 +87,18 @@ stream_rules:                   # TCP 스트림 규칙 목록 (top-level key: "s
 | `scope` | map | — | 매칭 조건 (AND). 생략 시 catch-all (wildcard) |
 | `action` | enum | ✓ | HTTP: `allow` \| `deny`. Stream: `proxy` \| `deny` |
 | `tags` | `list<string>` | — | 분류용 태그. 평가에 영향 없음 |
+| `rate_limit` | map | — | HTTP 규칙 전용. 요청 속도 제한 설정. 상세: [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) |
+
+**`rate_limit` 필드 (HTTP 규칙, 선택적):**
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `rate_limit.requests` | integer (> 0) | Y (rate_limit 존재 시) | 윈도우 내 최대 허용 요청 수 |
+| `rate_limit.window` | integer (> 0) | Y (rate_limit 존재 시) | 윈도우 크기 (초) |
+| `rate_limit.scope` | enum | Y (rate_limit 존재 시) | 카운터 키 scope. MVP: `client_ip`만 지원 |
+
+> `rate_limit`은 `action: allow` 규칙에서만 유효하다 (`action: deny` 규칙에는 rate limiting 불필요).
+> `rate_limit` 필드가 있으면 `requests`, `window`, `scope` 모두 필수. 검증 실패 시 정책 로드 거부 (ADR-003 startup-fatal).
 
 **Stream 전용:**
 

@@ -167,7 +167,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 |----|------|
 | `policy_engine` | 정책 엔진이 판정 (allow 또는 policy deny) |
 | `security_scanner` | 스캐너가 탐지하여 deny |
-| `rate_limiter` | 레이트 리밋으로 deny (MVP 비범위) |
+| `rate_limiter` | 레이트 리밋으로 deny ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 | `nginx_core` | nginx core가 early short-circuit (400/413/414/502 등) |
 
 ## 5. threat_type 값 체계
@@ -189,7 +189,7 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 | 상태 코드 | 트리거 | 응답 Content-Type | 응답 바디 |
 |---------|--------|-----------------|---------|
 | 403 | 정책 deny 또는 스캐너 차단 | `application/json` | `{"error":"Forbidden","request_id":"...","reason":"<rule_id 또는 threat_type>"}` |
-| 429 | Rate limit 초과 (MVP 비범위) | `application/json` | `{"error":"Too Many Requests","request_id":"...","retry_after":<seconds>}` |
+| 429 | Rate limit 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) | `application/json` | `{"error":"Too Many Requests","request_id":"...","retry_after":<seconds>}` |
 | 502 | 업스트림 연결 실패 | `application/json` | `{"error":"Bad Gateway","request_id":"..."}` |
 
 **공통 응답 헤더** (deny/error 응답 시):
@@ -247,7 +247,7 @@ ngx.ctx.luagate = {
   action            = "allow" | "deny",
   matched_rule_id   = string | nil,
   deny_reason       = string | nil,
-  decision_source   = "policy_engine" | "security_scanner" | "rate_limiter" | "nginx_core",  -- rate_limiter: MVP 비범위
+  decision_source   = "policy_engine" | "security_scanner" | "rate_limiter" | "nginx_core",  -- rate_limiter: ADR-012
   threat_type       = string | nil,
   rule_name         = string | nil,   -- 스캐너 매칭 rule_name
   active_version    = string,         -- 요청 시작 시 스냅샷
@@ -268,7 +268,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 | ffi_timeout (Layer 2 watchdog) | fail-closed | 403 | Layer 2 hard timeout 초과 (ADR-009). per-worker leak 카운터 증가 |
 | policy deny | — | 403 | 정책 매칭 deny |
 | upstream fail | — | 502 | proxy_pass 연결 실패 |
-| rate limit counter eviction | fail-open | — | shared_dict 용량 초과 (MVP 비범위) |
+| rate limit counter eviction | fail-open | — | shared_dict 용량 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 | logging 실패 (감사 로그 직렬화) | pre-commit: fail-closed, post-commit: warn-only | — | ADR-004: pre-commit audit 실패 → 거부. post-commit → 경고. 디스크 I/O는 Nginx에 위임 |
 | native crash (worker) | process failure | — | nginx master가 재기동 |
 
@@ -279,7 +279,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 > **ADR 참조**: [ADR-012: HTTP Data Plane Rate Limiting](../design/adr/ADR-012-http-data-plane-rate-limiting.md) — Sliding Window Counter + 정책 규칙별 `rate_limit` 필드
 
-## 11. 타임아웃 설정
+## 12. 타임아웃 설정
 
 > **ADR 참조**: [ADR-009 FFI 타임아웃 강제](../design/adr/ADR-009-ffi-timeout-enforcement.md) — 3계층 방어 전략 확정
 
@@ -295,14 +295,14 @@ HTTP 파이프라인 에러 분류 통일 표:
 >
 > **Layer 2 timeout 시 부수효과**: per-worker leak 카운터(`ffi:timeout:leak:<worker_id>`) 증가. 누적 임곗값(10) 초과 시 admin `/health` (`127.0.0.1:9090/health`)가 503으로 전환된다 (`reason: "ffi_thread_leak_threshold_exceeded"`). data plane `:8080/health`에는 적용되지 않는다. [ADR-009](../design/adr/ADR-009-ffi-timeout-enforcement.md) Phase 3, [admin-api.md](admin-api.md) §6.1 참조.
 
-## 12. 헬스체크
+## 13. 헬스체크
 
 - 경로: `GET /health`
 - 정책 평가 없이 즉시 응답
 - 응답: `200 OK` + `{"status": "ok", "policy_version": "..."}`
 - Nginx `location /health` 별도 처리 블록
 
-## 13. 의존성
+## 14. 의존성
 
 - [spec/security-scanner.md](./security-scanner.md) — 보안 스캐너 상세
 - [spec/policy-engine.md](./policy-engine.md) — 정책 평가 엔진 상세

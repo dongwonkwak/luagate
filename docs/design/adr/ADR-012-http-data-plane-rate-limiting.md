@@ -86,6 +86,11 @@ weighted_count = prev_count * (1 - elapsed_fraction) + curr_count
 - **shared dict 자체 불가 (fail-closed)**: `ngx.shared.luagate_ratelimit`이 nil인 경우 (nginx.conf 설정 누락 등), **503 Service Unavailable**을 반환한다. 이는 구성 오류이므로 fail-closed가 적절하다.
 - **`incr()` 실패 (fail-open)**: `incr()` 호출이 nil을 반환하는 경우 (예상치 못한 오류), WARN 로그를 남기고 요청을 통과시킨다 (fail-open). rate limiter 오류가 정상 트래픽을 차단해서는 안 된다.
 
+**Data plane fail-open vs Admin fail-closed 정당화**:
+Data plane rate limiter의 `incr()` 실패를 fail-open으로 처리하는 반면, Admin rate limiter(`lua/luagate/admin/ratelimit.lua`)는 동일 조건을 fail-closed(503)로 처리한다. 이 차이는 의도적이다:
+- **Data plane (fail-open)**: 가용성 우선. rate limiter 오류로 정상 사용자의 프로덕션 트래픽을 차단하는 것은 rate limiting 부재보다 더 큰 비즈니스 리스크다. rate limit이 일시적으로 풀려도 정책 엔진(deny 규칙)과 보안 스캐너가 여전히 보호를 제공한다.
+- **Admin plane (fail-closed)**: 보안 우선. Admin API는 정책 변경/조회 등 권한이 높은 관리 작업을 수행하며, brute-force 공격 방어가 필수적이다. rate limiter 오류 시 요청을 통과시키면 인증 우회 공격에 노출될 수 있으므로 503으로 차단한다.
+
 **용량 산정**: 4 MB 기준 약 80,000개 키 수용 가능 (`ngx.shared.DICT` 키당 약 50 bytes 오버헤드, `rl:<15-char-ip>:<8-digit-slot>` = ~30 bytes 키 + 8 bytes 값). scope가 `client_ip`이고 활성 IP가 40,000개 이하이면 (현재 slot + 이전 slot = 2키/IP) 충분하다.
 
 ### 3. 정책 규칙 `rate_limit` 필드 (선택적)
@@ -186,10 +191,10 @@ Rate limit에 의한 차단은 기존 http-pipeline.md의 decision 체계에 통
 | `decision_source` | `rate_limiter` |
 | `deny_reason` | `rate_limit_exceeded` |
 | `action` | `deny` |
-| `request_state` | `policy_denied` |
+| `request_state` | `rate_limited` |
 | `matched_rule_id` | 매칭된 규칙의 `id` (rate_limit을 트리거한 규칙) |
 
-> `decision_source` 값 `rate_limiter`는 http-pipeline.md §4에 이미 예약되어 있다 (기존: "MVP 비범위" 표기).
+> `decision_source` 값 `rate_limiter`는 http-pipeline.md §4에 예약되어 있으며, 이 ADR로 활성화된다.
 
 ### 7. 메트릭
 
