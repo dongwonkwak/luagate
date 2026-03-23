@@ -68,6 +68,7 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 | `luagate_metrics` | HTTP 메트릭 | 단순 카운터: `metrics:*` + Histogram: `latency:*` (ADR-006 §3.2 참조) | 각 worker (incr) | 키 단위 |
 | `luagate_connections` | 활성 연결 수 | 단순 카운터: `active_http`, `active_stream` | 해당 worker | 키 단위 |
 | `luagate_state` | Reload/health 플래그 + token rotation | **State**: `state:reload_flag`, `state:health`; **Token**: `luagate_admin_token` (rotated active), `luagate_admin_token_old` (grace period, TTL=30s) | reload worker / token rotate | 키 단위 |
+| `luagate_ratelimit` | Data plane HTTP 규칙별 sliding window rate limit 카운터 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) | 단순 카운터: `rl:<rule_id>:<scope_key>:<slot>` | 각 worker (incr) | 키 단위 |
 | `luagate_admin_ratelimit` | Admin API IP별 sliding window rate limit 카운터 | 단순 카운터: `rl:<ip>:<slot>` | 각 worker (incr) | 키 단위 |
 | `luagate_scanner_patterns` | 스캐너 패턴 버전 메타데이터 + reload lock | **State**: `scanner:active_version`(SHA256), `scanner:loaded_at`(ISO 8601), `scanner:pattern_count`(정수), `scanner_reload_lock`(TTL 5s) | reload worker | 키 단위 |
 | `luagate_tls_certs` | TLS 인증서 메타데이터 (경로, 해시, 버전). PEM/DER 데이터 미저장 ([ADR-015](../design/adr/ADR-015-tls-termination.md)) | **State**: `tls_certs_version`(전체 버전); `cert:<domain>:cert_path`, `cert:<domain>:key_path`, `cert:<domain>:hash`(도메인별 메타) | Admin API / reload worker | 키 단위 |
