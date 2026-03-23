@@ -2,6 +2,7 @@
 
 > **ADR 참조**:
 > - [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md) — Rust FFI 통합 방식
+> - [ADR-014 Scanner Pattern Hot Update](../design/adr/ADR-014-scanner-pattern-hot-update.md) — RwLock 도입, 런타임 패턴 교체
 
 ## 1. 개요
 
@@ -277,10 +278,11 @@ conf/
 - 스캔 완료 시간: < 5ms (`budget_exceeded` threshold)
 - `budget_exceeded` 초과 시 → fail-closed (403)
 - 메모리: 패턴 로딩 후 정적 메모리 사용 (worker당 추가 할당 최소화)
-- 스레드 안전성: 동일 worker 내 단일 스레드이므로 mutex 불필요
+- 스레드 안전성: `SCANNER` global은 `RwLock<Option<Scanner>>`로 보호된다 ([ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md)). `luagate_scan_http()`는 `try_read()`로 접근하여 여러 worker의 동시 읽기를 허용한다. `luagate_scanner_reload()`는 `write()` lock을 Swap 단계(< 1ms)에서만 획득하여 패턴을 원자적으로 교체한다. Reload 중(write lock 보유) `try_read()`가 실패하면 `LUAGATE_INTERNAL_ERROR`를 반환한다 (fail-closed).
 
 ## 8. 의존성
 
 - [spec/http-pipeline.md](./http-pipeline.md) — 스캐너 호출 컨텍스트
 - [spec/rust-ffi-modules.md](./rust-ffi-modules.md) — FFI 공통 패턴
 - [ADR-001](../design/adr/ADR-001-execution-shared-state-model.md) — FFI 호출 모델
+- [ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md) — Scanner Pattern Hot Update (RwLock, reload FFI, shared dict zone)

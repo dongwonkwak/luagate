@@ -33,7 +33,7 @@ HTTP 요청 및 TCP 스트림을 가로채어 정책 기반 허용/차단, 위�
 │  │         ngx.shared.DICT (mmap)               │           │
 │  │  luagate_policy | luagate_metrics |           │           │
 │  │  luagate_stream_metrics | luagate_connections │           │
-│  │  luagate_state                               │           │
+│  │  luagate_state | luagate_scanner_patterns     │           │
 │  └──────────────────────────────────────────────┘           │
 │                                                             │
 │  ┌──────────────────────────────────────────────┐           │
@@ -68,6 +68,7 @@ Zone은 저장 방식에 따라 두 가지 모델로 분류된다:
 | `luagate_connections` | 활성 연결 수 | 단순 카운터: `active_http`, `active_stream` | 해당 worker | 키 단위 |
 | `luagate_state` | Reload/health 플래그 + token rotation | **State**: `state:reload_flag`, `state:health`; **Token**: `luagate_admin_token` (rotated active), `luagate_admin_token_old` (grace period, TTL=30s) | reload worker / token rotate | 키 단위 |
 | `luagate_admin_ratelimit` | Admin API IP별 sliding window rate limit 카운터 | 단순 카운터: `rl:<ip>:<slot>` | 각 worker (incr) | 키 단위 |
+| `luagate_scanner_patterns` | 스캐너 패턴 버전 메타데이터 + reload lock | **State**: `scanner:active_version`(SHA256), `scanner:loaded_at`(ISO 8601), `scanner:pattern_count`(정수), `scanner_reload_lock`(TTL 5s) | reload worker | 키 단위 |
 
 > **Versioned keyspace 원칙** (ADR-001 §1.1, ADR-002 §3.4):
 > 새 정책을 `policy:<new_version>:blob`에 먼저 기록한 뒤, `http:active_version` / `stream:active_version` 포인터를 교체한다.
@@ -293,6 +294,7 @@ Internet
 - **ADR-003**: Hot Reload 시맨틱스 → `lua/luagate/policy/loader.lua`
 - **ADR-004**: 로그/메트릭 스키마, Admin 보안 → `lua/luagate/log/`, `lua/luagate/admin/`
 - **ADR-009**: FFI 타임아웃 강제 메커니즘 → 3계층 방어(budget guard + watchdog + health check)
+- **ADR-014**: Scanner Pattern Hot Update → `luagate_scanner_patterns` zone, `luagate_scanner_reload()` FFI 함수
 
 <!-- ADR 필요 -->
 > **TODO**: 멀티 인스턴스 정책 동기화(실시간) 구현 시 ADR 필요

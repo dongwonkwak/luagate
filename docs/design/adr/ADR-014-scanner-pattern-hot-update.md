@@ -167,11 +167,20 @@ ADR-003의 정책 Hot Reload 7단계를 참고하여 스캐너 패턴에 적합�
 
 #### PUT /api/v1/scanner/patterns
 
-패턴 파일을 업로드한다. 요청 body는 YAML 또는 JSON 형식의 패턴 배열이다.
+패턴 파일을 업로드한다. 요청 body는 YAML 형식의 패턴 배열(bare array)이다.
 
-1. 임시 파일에 기록
-2. `rename()` 시스템 콜로 원자적 교체 (ADR-003 atomic write 패턴)
-3. 자동으로 reload 트리거 (`luagate_scanner_reload()` 호출)
+**파일 매핑 규칙:**
+
+- 저장 대상: 단일 파일 `conf/scanner-patterns/custom.yaml`
+- 스키마 변환: 요청 body가 bare array(`- threat_type: ...`)인 경우, 서버가 `patterns:` top-level 키로 래핑하여 저장한다. `patterns:` 키가 이미 포함된 body는 그대로 저장한다.
+- 기존 `custom.yaml`은 원자적으로 교체된다 (다른 패턴 파일 `sqli.yaml`, `xss.yaml` 등은 변경하지 않음).
+
+**처리 순서:**
+
+1. 요청 body를 임시 파일에 기록 (`custom.yaml.tmp`)
+2. YAML 파싱 + 스키마 검증 + 정규식 컴파일 (검증 실패 시 임시 파일 삭제, 400 반환)
+3. `rename()` 시스템 콜로 `custom.yaml.tmp` → `custom.yaml` 원자적 교체 (ADR-003 atomic write 패턴)
+4. 자동으로 reload 트리거 (`luagate_scanner_reload()` 호출 — 전체 `conf/scanner-patterns/` 디렉토리 재로드)
 
 ```
 PUT /api/v1/scanner/patterns
@@ -183,6 +192,15 @@ Authorization: Bearer <token>
   pattern: "(?i)(custom_injection_pattern)"
   score: 0.95
 ```
+
+> 위 bare array body는 서버에서 다음과 같이 `patterns:` 래핑되어 저장된다:
+> ```yaml
+> patterns:
+>   - threat_type: sqli
+>     rule_name: custom_sqli_1
+>     pattern: "(?i)(custom_injection_pattern)"
+>     score: 0.95
+> ```
 
 응답:
 - `200 OK`: 업로드 + reload 성공
@@ -222,9 +240,18 @@ dict:delete("scanner_reload_lock")
 
 | 항목 | 값 |
 |------|---|
-| Reload budget | 100ms |
-| 초과 시 동작 | write lock 해제, LKG 유지, `LUAGATE_BUDGET_EXCEEDED` 반환 |
+| Reload budget (Layer 1) | 100ms |
+| Hard timeout (Layer 2) | 1000ms |
+| 초과 시 동작 | `LUAGATE_TIMEOUT(-5)` 반환, LKG 유지 |
 | Watchdog | L2 detached thread (ADR-009 §3.2) |
+
+**Layer 2 timeout 시 동작:**
+
+L2 watchdog는 detached thread 방식이다 (ADR-009 §3.2). 작업 thread가 timeout을 초과하면 호출자 thread는 즉시 `LUAGATE_TIMEOUT(-5)`을 반환하고, 작업 thread는 detach된다. Detached thread에서 보유 중인 write lock은 해당 thread 외부에서 명시적으로 해제할 수 없다. 그러나 Rust `panic=abort` 설정(rust-ffi-modules.md §8)에 의해 detached thread 내부에서 panic이 발생하면 worker 프로세스 자체가 abort되며, Nginx master가 worker를 재시작한다. Detached thread가 정상 종료하면 `Drop`에 의해 lock이 해제된다. 무한 hang 시에는 per-worker leak 카운터가 증가하며, 임곗값 초과 시 `/health` 503 전환 → 외부 오케스트레이터가 프로세스를 재시작한다 (ADR-009 §3.3).
+
+**Write lock 보유 시간 최소화:**
+
+write lock은 Swap 단계(< 1ms)에서만 획득한다. Read/Parse/Compile은 lock 바깥에서 수행되므로, L2 hard timeout(1000ms)에 도달할 가능성은 극소화된다. L2 timeout이 발동하는 상황은 Swap 단계에서의 비정상적 지연(OS 스케줄링 극단 사례)에 한정된다.
 
 **단계별 budget 분배:**
 
