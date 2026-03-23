@@ -153,7 +153,7 @@ access_by_lua 처리 순서:
 
 **스캐너 비용 trade-off**: 이 순서에서 rate limit 초과 요청도 보안 스캐너(Rust FFI)를 먼저 통과한다. 이는 의도된 trade-off이다:
 - 스캐너를 건너뛰면 rate limit 이내의 악성 요청이 탐지되지 않는다. 보안 검사는 항상 rate limit보다 우선해야 한다.
-- 스캐너 FFI 호출은 budget 0.5ms 이내로 제한되어 있어 (ADR-001 §c-ffi-modules.md §7) 성능 영향이 제한적이다.
+- 스캐너 FFI 호출은 budget 5ms 이내로 제한되어 있어 ([ADR-009](./ADR-009-ffi-timeout-enforcement.md), [rust-ffi-modules.md §7](../../spec/rust-ffi-modules.md)) 성능 영향이 제한적이다.
 - rate limit 초과 요청에 대한 스캐너 비용은 429 응답 생성 비용 대비 미미하며, deny 요청 카운트 방지와 규칙별 파라미터 참조라는 정확성 이점이 이를 정당화한다.
 
 > **향후 개선**: 매우 높은 트래픽 환경에서 스캐너 비용이 문제될 경우, 규칙 매칭 전에 적용되는 "global rate limit" (단일 threshold, 전체 요청 대상) 옵션을 도입할 수 있다. 이는 정책 규칙과 독립적이므로 스캐너 이전에 배치 가능하다.
