@@ -324,7 +324,31 @@ ngx.ctx.luagate_stream = {
 }
 ```
 
-### 10.6 SSL 세션 캐시 및 무효화
+### 10.6 로그/메트릭 소유권 규칙 (Multi-port 중복 방지)
+
+TLS terminate 세션은 8443과 8444 양쪽 server block에서 `log_by_lua`가 실행된다. 중복 로그/메트릭을 방지하기 위해 다음 소유권 규칙을 적용한다 (ADR-015 S9 참조):
+
+| 포트 | 조건 | 로그 | 메트릭 | 이유 |
+|------|------|------|--------|------|
+| 8443 | `tls_termination=true` (8444로 전달) | 억제 | 억제 | 내부 홉. 8444가 실제 세션 소유 |
+| 8443 | `tls_termination=false` (패스스루) | 정상 출력 | 정상 카운트 | 8443이 최종 처리자 |
+| 8444 | 항상 | 정상 출력 | 정상 카운트 | PROXY protocol로 전달받은 원본 IP/port 사용 |
+
+**log_by_lua 구현:**
+
+```lua
+-- 8443 log_by_lua에서의 억제 로직
+local ctx = ngx.ctx.luagate_stream
+if ctx and ctx.tls_termination == true then
+    -- 내부 홉: 로그/메트릭 스킵. 8444에서 처리.
+    return
+end
+-- 이하 기존 로그/메트릭 로직
+```
+
+- stream metrics(`luagate_stream_connections_total`, `luagate_active_connections{type="stream"}` 등)도 동일 규칙: 8443→8444 전달 세션은 8443에서 카운트하지 않고 8444에서만 카운트
+
+### 10.7 SSL 세션 캐시 및 무효화
 
 - `ssl_session_cache shared:luagate_ssl_sessions:10m` -- 세션 재사용으로 핸드셰이크 비용 절감
 - `ssl_session_tickets off` -- ticket key 관리 복잡도 회피 (보안 우선)

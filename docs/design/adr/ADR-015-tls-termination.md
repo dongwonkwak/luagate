@@ -349,6 +349,22 @@ ssl_prefer_server_ciphers off;  # TLS 1.3에서는 클라이언트 선호 존중
 
 > **패스스루 fallback 금지**: 터미네이션 실패 시 패스스루로 전환하면, 공격자가 의도적으로 인증서 오류를 유발하여 암호화된 트래픽을 업스트림에 직접 전달시킬 수 있다. fail-closed만 허용한다.
 
+### 9. 로그/메트릭 소유권 규칙 (Multi-port 중복 방지)
+
+8443 → 8445 → 8444 경로에서 TLS terminate 세션은 8443과 8444 양쪽 server block에서 `log_by_lua`가 실행된다. 중복 로그/메트릭을 방지하기 위해 다음 소유권 규칙을 적용한다:
+
+| 포트 | 조건 | 로그 | 메트릭 | 이유 |
+|------|------|------|--------|------|
+| 8443 | `tls_termination=true` (8444로 전달) | 억제 | 억제 | 내부 홉. 8444가 실제 세션 소유 |
+| 8443 | `tls_termination=false` (패스스루) | 정상 출력 | 정상 카운트 | 8443이 최종 처리자 |
+| 8444 | 항상 | 정상 출력 | 정상 카운트 | PROXY protocol로 전달받은 원본 IP/port 사용 |
+
+**구현 방법:**
+
+- 8443 `preread_by_lua`에서 `tls_termination=true` 판정 시 `ngx.ctx.luagate_stream.tls_termination = true` 설정
+- 8443 `log_by_lua`에서 `ngx.ctx.luagate_stream.tls_termination == true`이면 로그 생성과 메트릭 카운트를 모두 스킵
+- stream metrics(`luagate_stream_connections_total`, `luagate_active_connections{type="stream"}` 등)도 동일 규칙: 8443→8444 전달 세션은 8443에서 카운트하지 않고 8444에서만 카운트
+
 ---
 
 ## File Structure
@@ -487,7 +503,7 @@ lua_shared_dict luagate_tls_certs 2m;
 
 - LuaGate에서 TLS를 종료하여 업스트림에 평문 트래픽 전달 가능 (upstream TLS 설정 불필요)
 - 도메인별 선택적 터미네이션/패스스루로 유연한 배포 구성
-- `ssl_certificate_by_lua`로 Nginx reload 없이 인증서 추가/교체 가능
+- 인증서 파일 교체 시 worker가 타이머로 자동 감지하여 새 TLS 핸드셰이크부터 적용. 단, 기존 세션 캐시의 완전 무효화가 필요하면 `nginx -s reload`를 수행한다
 - 기존 TLS 패스스루 동작과 완전 하위 호환
 
 ### 부정적
