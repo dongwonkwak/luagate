@@ -59,7 +59,10 @@ Sleep 2s
 Type "# Update policy — allow /admin from all sources"
 Enter
 Sleep 500ms
-Type 'curl -s -X PUT http://localhost:9090/api/v1/policies -H "Authorization: Bearer $LUAGATE_ADMIN_TOKEN" -H "Content-Type: application/x-yaml" -d @- <<POLICY | jq .'
+Type 'export POLICY_ETAG=$(curl -s -H "Authorization: Bearer $LUAGATE_ADMIN_TOKEN" http://localhost:9090/api/v1/policies/version | jq -r ".etag")'
+Enter
+Sleep 500ms
+Type 'curl -s -X PUT http://localhost:9090/api/v1/policies -H "Authorization: Bearer $LUAGATE_ADMIN_TOKEN" -H "If-Match: \"$POLICY_ETAG\"" -H "Content-Type: application/x-yaml" -d @- <<POLICY | jq .'
 Enter
 Type 'version: "1"'
 Enter
