@@ -10,28 +10,25 @@
 
 ```mermaid
 flowchart LR
-    A[README.md] --> B[docs/spec/architecture.md]
-    B --> C[docs/design/adr/]
-    C --> D[관련 spec]
-    D --> E[AGENTS.md]
-    E --> F[CLAUDE.md]
+    A[README.md] --> B[.claude/knowledge/architecture.md]
+    B --> C[관련 spec]
+    C --> D[AGENTS.md]
+    D --> E[CLAUDE.md]
 
     style A fill:#e8f5e9,stroke:#2e7d32
     style B fill:#e3f2fd,stroke:#1565c0
-    style C fill:#e3f2fd,stroke:#1565c0
-    style D fill:#fff3e0,stroke:#e65100
-    style E fill:#fce4ec,stroke:#c62828
-    style F fill:#f3e5f5,stroke:#6a1b9a
+    style C fill:#fff3e0,stroke:#e65100
+    style D fill:#fce4ec,stroke:#c62828
+    style E fill:#f3e5f5,stroke:#6a1b9a
 ```
 
 | 순서 | 문서 | 설명 |
 |------|------|------|
 | 1 | `README.md` | 프로젝트 개요, 빠른 시작 |
-| 2 | `docs/spec/architecture.md` | 전체 아키텍처, 파이프라인 다이어그램 |
-| 3 | `docs/design/adr/` | 설계 결정 배경 (ADR-001 ~ ADR-004) |
-| 4 | 관련 spec (작업 영역별) | HTTP, Stream, Policy, Admin API 등 |
-| 5 | `AGENTS.md` | 코딩 컨벤션, 불변식, 용어집 |
-| 6 | `CLAUDE.md` | AI 개발 워크플로우 (참고용) |
+| 2 | `.claude/knowledge/architecture.md` | 전체 아키텍처, 파이프라인 다이어그램 |
+| 3 | 관련 spec (작업 영역별) | HTTP, Stream, Policy, Admin API, ADR 등 |
+| 4 | `AGENTS.md` | 코딩 컨벤션, 불변식, 용어집 |
+| 5 | `CLAUDE.md` | AI 개발 워크플로우 (참고용) |
 
 ---
 
@@ -60,7 +57,7 @@ LuaGate에 처음 기여한다면 다음과 같은 작은 작업부터 시작하
 
 ## Architecture 개요
 
-상세 스펙: [`docs/spec/architecture.md`](docs/spec/architecture.md), ADR-001 ~ ADR-004
+상세: [`.claude/knowledge/architecture.md`](.claude/knowledge/architecture.md), [`docs/design/adr/`](docs/design/adr/) (ADR-001 ~ ADR-004)
 
 ### Shared Dict (ngx.shared.DICT)
 
