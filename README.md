@@ -1,6 +1,8 @@
 # LuaGate
 
 > OpenResty(Nginx + LuaJIT) 기반 정책 구동 API/보안 게이트웨이
+>
+> Policy-driven API security gateway built on OpenResty (Nginx + LuaJIT) with Rust FFI threat detection
 
 ![Integration Tests](https://github.com/dongwonkwak/luagate/actions/workflows/integration-test.yml/badge.svg)
 ![Frontend Quality](https://github.com/dongwonkwak/luagate/actions/workflows/frontend-quality.yml/badge.svg)
@@ -8,102 +10,112 @@
 ![Frontend E2E Tests](https://github.com/dongwonkwak/luagate/actions/workflows/frontend-e2e.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
+- YAML policy engine with hot reload (zero-downtime, no nginx reload)
+- Rust FFI-based threat scanner (SQLi, XSS detection) with sub-millisecond overhead
+- Structured JSON audit logging with decision tracing
+- Admin Dashboard (React) + MCP server for AI-assisted policy management
+
 <!-- Demo GIF placeholder -->
+<!-- Generate with VHS: vhs docs/assets/demo.tape -->
+<!-- Output: docs/assets/demo.gif -->
 <!-- ![Demo](docs/assets/demo.gif) -->
-
----
-
-## 주요 기능
-
-| 기능 | 설명 | 상태 |
-|------|------|------|
-| 정책 기반 허용/차단 | YAML 정책 파일로 IP/경로/메서드 필터링 | Done |
-| Hot Reload | 무중단 정책 갱신 (nginx reload 불필요) | Done |
-| 위협 탐지 | Rust FFI 기반 스캐너 (SQLi, XSS 등) | Done |
-| 감사 로그 | 구조화 JSON 로그 (결정 근거 포함) | Done |
-| Admin API | REST API로 정책/상태 관리 (포트 9090) | Done |
-| 스트림 프록시 | TCP/UDP 스트림 정책 적용 | Done |
-| 메트릭 | Prometheus 형식 노출 (/metrics) | Done |
-| Admin Dashboard | React 기반 관리 대시보드 (정책 편집, 메트릭 시각화) | Done |
-| MCP 서버 | AI 어시스턴트용 Model Context Protocol 서버 | Done |
 
 ---
 
 ## Quick Start
 
-### 사전 요건
+### Prerequisites
 
-| 방법 | 필요 도구 |
-|------|----------|
-| **권장 (Nix)** | [Nix](https://nixos.org/download) + [direnv](https://direnv.net/) |
-| Docker (데모) | Docker 24+, Docker Compose v2 |
-| 수동 | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, Node.js 20+ |
+| Method | Requirements |
+|--------|-------------|
+| **Recommended (Nix)** | [Nix](https://nixos.org/download) + [direnv](https://direnv.net/) |
+| Docker (demo) | Docker 24+, Docker Compose v2 |
+| Manual | OpenResty 1.25+, LuaJIT 2.1, Rust 1.75+, Node.js 20+ |
 
-### 1) 데모 실행 (Docker)
+### 1) Demo (Docker)
 
 ```bash
-# 1. 클론
+# 1. Clone
 git clone https://github.com/dongwonkwak/luagate.git
 cd luagate
 
-# 2. 기동
+# 2. Create .env (required — Admin API token)
+echo 'LUAGATE_ADMIN_TOKEN=your-token-here-at-least-32-bytes-long' > .env
+
+# 3. Start
 make up
 
-# 3. 검증
-# Health check (Admin API 포트)
+# 4. Verify
+# Health check (Admin API port)
 curl http://localhost:9090/health
 
-# 게이트웨이 요청 (정책 평가)
+# Gateway request (policy evaluation)
 curl http://localhost:8080/
 
 # Admin API
 curl http://localhost:9090/health
 ```
 
-### 2) 개발 환경 (Nix)
+### 2) Development (Nix)
 
 ```bash
 git clone https://github.com/dongwonkwak/luagate.git
 cd luagate
 
-# Nix 개발 셸 진입 (모든 의존성 자동 설치)
+# Enter Nix dev shell (all dependencies auto-installed)
 nix develop
-# 또는 direnv 사용 시: direnv allow
+# Or with direnv: direnv allow
 
-# 빌드
+# Build
 make build
 
-# 전체 테스트
-# HTTP 통합 테스트는 로컬 Test::Nginx가 없으면 Docker Compose로 자동 fallback
+# Full test suite
+# HTTP integration tests auto-fallback to Docker Compose if local Test::Nginx is unavailable
 make test
 ```
 
-### 테스트 실행 요약
+### Test Commands
 
 ```bash
-# 단위 테스트
+# Unit tests
 make test-unit
 
-# HTTP 통합 테스트만
+# HTTP integration tests only
 make test-integration-http
 
-# HTTP 통합 테스트를 Docker Compose로 고정 실행
+# HTTP integration tests via Docker Compose
 make test-docker
 ```
 
-자세한 계약은 [docs/spec/test-strategy.md](docs/spec/test-strategy.md) 참조.
+See [docs/spec/test-strategy.md](docs/spec/test-strategy.md) for details.
 
-### 포트 표
+### Port Map
 
-| 포트 | 역할 |
+| Port | Role |
 |------|------|
-| 8080 | HTTP data plane (게이트웨이) |
-| 8443 | HTTPS data plane (TLS 종료, Phase 1 예정) |
+| 8080 | HTTP data plane (gateway) |
+| 8443 | Stream entry point (TLS passthrough / termination via 8444–8445) |
 | 9090 | Admin API + /metrics + /health |
 
 ---
 
-## 아키텍처
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| Policy-based allow/deny | YAML policy files for IP/path/method filtering |
+| Hot Reload | Zero-downtime policy update (no nginx reload) |
+| Threat Detection | Rust FFI scanner (SQLi, XSS, etc.) |
+| Audit Log | Structured JSON logs with decision tracing |
+| Admin API | REST API for policy/status management (port 9090) |
+| Stream Proxy | TCP/UDP stream policy enforcement |
+| Metrics | Prometheus-format export (/metrics) |
+| Admin Dashboard | React-based management UI (policy editor, metrics visualization) |
+| MCP Server | Model Context Protocol server for AI assistants |
+
+---
+
+## Architecture
 
 ```mermaid
 graph TB
@@ -125,155 +137,125 @@ graph TB
     LUA --> ADM["Admin API\n(:9090)"]
 ```
 
-**요청 흐름**: Client → Nginx TCP Accept → SSL/TLS → Lua access phase (정책 평가) → upstream proxy / deny
+**Request flow**: Client -> Nginx TCP Accept -> SSL/TLS -> Lua access phase (policy evaluation) -> upstream proxy / deny
 
 ---
 
-## 디렉토리 구조
+## Directory Structure
 
 ```
 luagate/
-├── lua/            # Lua 핸들러 및 정책 엔진 모듈
-├── src/            # Rust FFI 소스 (scanner, decoder, stream)
-├── conf/           # nginx.conf 및 정책 YAML
+├── lua/            # Lua handlers and policy engine modules
+├── src/            # Rust FFI source (scanner, decoder, stream)
+├── conf/           # nginx.conf and policy YAML
 ├── docs/
-│   ├── design/adr/ # 아키텍처 결정 기록 (ADR 14개)
-│   ├── runbook/    # 운영 대응 절차 (6개)
-│   └── spec/       # 스펙 문서 (10개)
-├── tests/          # 단위(busted) + 통합(Test::Nginx) 테스트
-├── e2e/            # Playwright E2E 테스트
-├── scripts/        # 개발/운영 보조 스크립트
+│   ├── design/adr/ # Architecture Decision Records (14)
+│   ├── runbook/    # Operations runbooks (6)
+│   └── spec/       # Specification documents (10)
+├── tests/          # Unit (busted) + integration (Test::Nginx) tests
+├── e2e/            # Playwright E2E tests
+├── scripts/        # Dev/ops helper scripts
 ├── ui/             # Admin Dashboard UI (Vite + React + TypeScript)
-├── mcp/            # MCP 서버 (Model Context Protocol)
-├── benchmarks/     # 성능 측정 스크립트
-├── policies/       # 정책 파일 예시
-└── .claude/        # Claude Code 에이전트/스킬/메모리
+├── mcp/            # MCP server (Model Context Protocol)
+├── benchmarks/     # Performance measurement scripts
+├── policies/       # Example policy files
+└── .claude/        # Claude Code agents/skills/memory
 ```
 
 ---
 
-## 기술 스택
+## Tech Stack
 
-| 레이어 | 기술 |
-|--------|------|
-| 런타임 | OpenResty 1.25 (Nginx + LuaJIT 2.1) |
-| 정책 엔진 | Lua 5.1 (LuaJIT) |
-| 위협 탐지 | Rust 1.75+ (cdylib FFI) |
-| 설정 | YAML (정책), nginx.conf |
-| 컨테이너 | Docker / Docker Compose |
-| 개발 환경 | Nix flake + direnv |
-| 테스트 | busted (단위), Test::Nginx (통합), Playwright (E2E), Vitest (UI 단위) |
+| Layer | Technology |
+|-------|-----------|
+| Runtime | OpenResty 1.25 (Nginx + LuaJIT 2.1) |
+| Policy Engine | Lua 5.1 (LuaJIT) |
+| Threat Detection | Rust 1.75+ (cdylib FFI) |
+| Configuration | YAML (policies), nginx.conf |
+| Container | Docker / Docker Compose |
+| Dev Environment | Nix flake + direnv |
+| Testing | busted (unit), Test::Nginx (integration), Playwright (E2E), Vitest (UI unit) |
 
 ---
 
-## 문서
+## Benchmark
 
-### 스펙
+> Measured on Docker Compose (single instance), 12th Gen Intel Core i7-12700H, 20 cores.
+> Full results: [docs/benchmark-results/baseline.md](docs/benchmark-results/baseline.md)
 
-| 문서 | 내용 |
-|------|------|
-| [Architecture](docs/spec/architecture.md) | 프로세스 모델, 공유 상태 |
-| [HTTP Pipeline](docs/spec/http-pipeline.md) | HTTP 요청 처리 파이프라인 |
-| [Stream Pipeline](docs/spec/stream-pipeline.md) | TCP 스트림 처리 |
-| [Policy Engine](docs/spec/policy-engine.md) | 정책 평가 규칙 |
-| [Admin API](docs/spec/admin-api.md) | REST API 명세 |
-| [Log Schema](docs/spec/log-schema.md) | 감사 로그 필드 |
-| [Security Scanner](docs/spec/security-scanner.md) | FFI 스캐너 |
+| Metric | SLO Target | Measured | Note |
+|--------|-----------|----------|------|
+| Policy eval RPS | > 10,000 req/s | **66,157 req/s** | wrk -t4 -c100 -d30s |
+| Policy eval p99 latency | < 5ms | 11.22ms | Docker overhead + upstream 502 included |
+| Gateway-only RPS | > 10,000 req/s | **338,831 req/s** | /health endpoint, no policy eval |
+| Gateway-only p99 latency | < 5ms | **1.40ms** | Pure gateway path |
+
+<!-- p99 SLO 초과 사유: Docker 네트워크 오버헤드 + Lua GC + upstream 502 응답 처리가 합산됨.
+     게이트웨이 단독 경로(/health)는 p99=1.40ms로 목표 달성.
+     베어메탈 환경에서는 p99 SLO 달성이 예상됨. -->
+
+---
+
+## Documentation
+
+### Specs
+
+| Document | Content |
+|----------|---------|
+| [Architecture](docs/spec/architecture.md) | Process model, shared state |
+| [HTTP Pipeline](docs/spec/http-pipeline.md) | HTTP request processing pipeline |
+| [Stream Pipeline](docs/spec/stream-pipeline.md) | TCP stream processing |
+| [Policy Engine](docs/spec/policy-engine.md) | Policy evaluation rules |
+| [Admin API](docs/spec/admin-api.md) | REST API specification |
+| [Log Schema](docs/spec/log-schema.md) | Audit log fields |
+| [Security Scanner](docs/spec/security-scanner.md) | FFI scanner |
 | [Rust FFI Modules](docs/spec/rust-ffi-modules.md) | Rust FFI ABI |
-| [Test Strategy](docs/spec/test-strategy.md) | 테스트 전략 |
-| [Doc Strategy](docs/spec/doc-strategy.md) | 문서화 전략 |
+| [Test Strategy](docs/spec/test-strategy.md) | Test strategy |
+| [Doc Strategy](docs/spec/doc-strategy.md) | Documentation strategy |
 
 ### ADR
 
-> 전체 목록: [ADR 인덱스](docs/design/adr/README.md)
+> Full list: [ADR Index](docs/design/adr/README.md)
 
-| 문서 | 결정 |
-|------|------|
-| [ADR-001](docs/design/adr/ADR-001-execution-shared-state-model.md) | 실행/상태 공유 모델 |
-| [ADR-002](docs/design/adr/ADR-002-policy-evaluation-conflict-detection.md) | 정책 평가/충돌 탐지 |
-| [ADR-003](docs/design/adr/ADR-003-policy-storage-hot-reload.md) | 정책 저장/Hot Reload |
-| [ADR-004](docs/design/adr/ADR-004-log-metrics-admin-security.md) | 로그/메트릭/Admin/보안 |
-| [ADR-005](docs/design/adr/ADR-005-policy-activation-concurrency.md) | 정책 활성화 모델 + 동시성 제어 |
-| [ADR-006](docs/design/adr/ADR-006-metrics-cardinality-export-model.md) | 메트릭 Cardinality 제어 + Export 모델 |
-| [ADR-007](docs/design/adr/ADR-007-log-redaction-and-retention.md) | 로그 Redaction 정책 + 보존/파기 기간 |
-| [ADR-008](docs/design/adr/ADR-008-multi-instance-policy-sync.md) | 멀티 인스턴스 정책 동기화 |
-| [ADR-009](docs/design/adr/ADR-009-ffi-timeout-enforcement.md) | FFI 타임아웃 강제 |
-| [ADR-010](docs/design/adr/ADR-010-opentelemetry-tracing.md) | OpenTelemetry 트레이싱 |
-| [ADR-011](docs/design/adr/ADR-011-mcp-server.md) | MCP 서버 설계 |
+| Document | Decision |
+|----------|----------|
+| [ADR-001](docs/design/adr/ADR-001-execution-shared-state-model.md) | Execution/shared state model |
+| [ADR-002](docs/design/adr/ADR-002-policy-evaluation-conflict-detection.md) | Policy evaluation/conflict detection |
+| [ADR-003](docs/design/adr/ADR-003-policy-storage-hot-reload.md) | Policy storage/Hot Reload |
+| [ADR-004](docs/design/adr/ADR-004-log-metrics-admin-security.md) | Log/metrics/Admin/security |
+| [ADR-005](docs/design/adr/ADR-005-policy-activation-concurrency.md) | Policy activation + concurrency control |
+| [ADR-006](docs/design/adr/ADR-006-metrics-cardinality-export-model.md) | Metrics cardinality control + export model |
+| [ADR-007](docs/design/adr/ADR-007-log-redaction-and-retention.md) | Log redaction policy + retention |
+| [ADR-008](docs/design/adr/ADR-008-multi-instance-policy-sync.md) | Multi-instance policy sync |
+| [ADR-009](docs/design/adr/ADR-009-ffi-timeout-enforcement.md) | FFI timeout enforcement |
+| [ADR-010](docs/design/adr/ADR-010-opentelemetry-tracing.md) | OpenTelemetry tracing |
+| [ADR-011](docs/design/adr/ADR-011-mcp-server.md) | MCP server design |
 | [ADR-012](docs/design/adr/ADR-012-http-data-plane-rate-limiting.md) | HTTP Data Plane Rate Limiting |
 | [ADR-014](docs/design/adr/ADR-014-scanner-pattern-hot-update.md) | Scanner Pattern Hot Update |
 | [ADR-015](docs/design/adr/ADR-015-tls-termination.md) | TLS Termination |
 
-### MCP 연동 (AI 어시스턴트)
+### MCP Integration (AI Assistants)
 
-LuaGate는 [MCP(Model Context Protocol)](https://modelcontextprotocol.io/) 서버를 제공하여 AI 어시스턴트에서 자연어로 정책을 관리할 수 있습니다.
+LuaGate provides an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server for managing policies via natural language through AI assistants.
 
 ```bash
-# .env 파일에 Admin API 토큰 설정 (make up에 필수)
+# Set Admin API token in .env (required for make up)
 echo 'LUAGATE_ADMIN_TOKEN=your-token-here-at-least-32-bytes-long' > .env
 
 cd mcp && npm install && npm run build
 ```
 
-**Claude Desktop** (`~/.config/claude/claude_desktop_config.json`):
+Setup and integration test instructions: [mcp/README.md](mcp/README.md)
 
-```json
-{
-  "mcpServers": {
-    "luagate": {
-      "command": "node",
-      "args": ["<path-to-luagate>/mcp/dist/index.js"],
-      "env": {
-        "LUAGATE_ADMIN_URL": "http://127.0.0.1:9090",
-        "LUAGATE_ADMIN_TOKEN": "your-token-here",
-        "MCP_CLIENT_NAME": "claude-desktop"
-      }
-    }
-  }
-}
-```
+### Operations
 
-**VS Code** (`.vscode/mcp.json`):
+- [Runbook Index](docs/runbook/README.md) -- Operations runbooks by scenario
 
-```json
-{
-  "servers": {
-    "luagate": {
-      "command": "node",
-      "args": ["${workspaceFolder}/mcp/dist/index.js"],
-      "env": {
-        "LUAGATE_ADMIN_URL": "http://127.0.0.1:9090",
-        "LUAGATE_ADMIN_TOKEN": "${env:LUAGATE_ADMIN_TOKEN}",
-        "MCP_CLIENT_NAME": "vscode"
-      }
-    }
-  }
-}
-```
+### Development Guide
 
-연동 테스트 시나리오 및 감사 로그 검증 절차: [mcp/README.md](mcp/README.md)
-
-### 운영
-
-- [Runbook 인덱스](docs/runbook/README.md) — 운영 시나리오별 대응 절차
-
-### 개발 가이드
-
-- [AGENTS.md](AGENTS.md) — 코딩 컨벤션, 불변식, 용어집
-- [CLAUDE.md](CLAUDE.md) — Claude Code 개발 워크플로우
-- [CONTRIBUTING.md](CONTRIBUTING.md) — 기여 가이드
-
----
-
-## 벤치마크
-
-> Phase 1 구현 완료 후 실측값 추가 예정
-
-| 지표 | SLO (목표) | 실측 |
-|------|-----------|------|
-| p99 레이턴시 (정책 평가 포함) | < 5ms | Planned |
-| 처리량 | > 10,000 req/s | Planned |
-| 메모리 (worker당) | < 50MB | Planned |
+- [AGENTS.md](AGENTS.md) -- Coding conventions, invariants, glossary
+- [CLAUDE.md](CLAUDE.md) -- Claude Code development workflow
+- [CONTRIBUTING.md](CONTRIBUTING.md) -- Contribution guide
 
 ---
 
