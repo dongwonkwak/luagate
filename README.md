@@ -15,10 +15,8 @@
 - Structured JSON audit logging with decision tracing
 - Admin Dashboard (React) + MCP server for AI-assisted policy management
 
-<!-- Demo GIF placeholder -->
 <!-- Generate with VHS: vhs docs/assets/demo.tape -->
-<!-- Output: docs/assets/demo.gif -->
-<!-- ![Demo](docs/assets/demo.gif) -->
+![Demo](docs/assets/demo.gif)
 
 ---
 

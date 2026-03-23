@@ -16,13 +16,13 @@ Require jq
 
 Set Shell "bash"
 Set FontSize 14
-Set Width 1200
-Set Height 600
-Set Theme "Dracula"
+Set Width 900
+Set Height 500
+Set Theme "Catppuccin Mocha"
 Set Padding 20
 
 # Title
-Type "# LuaGate - Policy-driven API Security Gateway"
+Type "# LuaGate — Policy-driven API Security Gateway"
 Enter
 Sleep 1s
 
@@ -36,40 +36,43 @@ Type "make up"
 Enter
 Sleep 8s
 
-# Step 2: Health check
-Type "# Health check (Admin API)"
+# Step 2: Health check (Admin API, no auth required)
+Type "# Health check"
 Enter
 Sleep 500ms
 Type 'curl -s http://localhost:9090/health | jq .'
 Enter
 Sleep 2s
 
-# Step 3: Gateway request (policy deny)
-Type "# Gateway request - policy evaluation (expect 403 deny)"
+# Step 3: Gateway request — policy deny (403)
+Type "# Gateway request — expect 403 (policy deny)"
 Enter
 Sleep 500ms
-Type 'curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost:8080/api/v1/users'
+Type 'curl -s -w "\nHTTP %{http_code}\n" http://localhost:8080/admin/secret | jq .'
 Enter
 Sleep 2s
 
-# Step 4: Inspect deny response body
-Type 'curl -s http://localhost:8080/api/v1/users | jq .'
-Enter
-Sleep 2s
-
-# Step 5: Policy reload
-Type "# Hot reload policy (zero-downtime)"
+# Step 4: Hot reload (zero-downtime)
+Type "# Hot reload policy (zero-downtime, no nginx restart)"
 Enter
 Sleep 500ms
 Type 'curl -s -X POST http://localhost:9090/api/v1/policies/reload -H "Authorization: Bearer $LUAGATE_ADMIN_TOKEN" | jq .'
 Enter
 Sleep 2s
 
-# Step 6: Check metrics
+# Step 5: Verify reload — policy version
+Type "# Verify — policy version updated"
+Enter
+Sleep 500ms
+Type 'curl -s http://localhost:9090/api/v1/policies/version | jq .'
+Enter
+Sleep 2s
+
+# Step 6: Prometheus metrics
 Type "# Prometheus metrics"
 Enter
 Sleep 500ms
-Type 'curl -s http://localhost:9090/metrics | head -20'
+Type 'curl -s http://localhost:9090/metrics | grep luagate_ | head -10'
 Enter
 Sleep 3s
 
