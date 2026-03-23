@@ -282,7 +282,32 @@ dict:delete("scanner_reload_lock")
 
 **Layer 2 timeout 시 동작:**
 
-L2 watchdog는 detached thread 방식이다 (ADR-009 §3.2). 작업 thread가 timeout을 초과하면 호출자 thread는 즉시 `LUAGATE_TIMEOUT(-5)`을 반환하고, 작업 thread는 detach된다. Detached thread에서 보유 중인 write lock은 해당 thread 외부에서 명시적으로 해제할 수 없다. 그러나 Rust `panic=abort` 설정(rust-ffi-modules.md §8)에 의해 detached thread 내부에서 panic이 발생하면 worker 프로세스 자체가 abort되며, Nginx master가 worker를 재시작한다. Detached thread가 정상 종료하면 `Drop`에 의해 lock이 해제된다. 무한 hang 시에는 per-worker leak 카운터가 증가하며, 임곗값 초과 시 `/health` 503 전환 → 외부 오케스트레이터가 프로세스를 재시작한다 (ADR-009 §3.3).
+L2 watchdog는 detached thread 방식이다 (ADR-009 §3.2). 작업 thread가 timeout을 초과하면 호출자 thread는 즉시 `LUAGATE_TIMEOUT(-5)`을 반환하고, 작업 thread는 detach된다. Detached thread에서 보유 중인 write lock은 해당 thread 외부에서 명시적으로 해제할 수 없다. 그러나 Rust `panic=abort` 설정(rust-ffi-modules.md §8)에 의해 detached thread 내부에서 panic이 발생하면 worker 프로세스 자체가 abort되며, Nginx master가 worker를 재시작한다. Detached thread가 정상 종료하면 `Drop`에 의해 lock이 해제된다.
+
+**Detached thread hang 시 /health 503 전환 메커니즘:**
+
+Detached thread가 write lock을 쥔 채 무한 hang하면, 해당 worker의 `luagate_scan_http()`는 모든 호출에서 `try_read()` 실패로 `LUAGATE_INTERNAL_ERROR(-4)`를 반환하여 403 deny 처리한다 (fail-closed). 그러나 leak 카운터가 reload 1회만 증가하면 `/health`가 200을 유지하여 오케스트레이터가 문제를 감지하지 못하는 시나리오가 발생할 수 있다. 이를 방지하기 위해 다음 3단계 메커니즘을 적용한다.
+
+1. **Per-worker leak 카운터 증가**: `luagate_scanner_reload()` timeout 발생 시 shared dict에 `ffi:timeout:leak:<worker_id>` 키를 증가시킨다 (ADR-009 §3.3과 동일 패턴). 이 카운터는 worker 재시작 전까지 감소하지 않는 단조 증가 카운터다.
+
+2. **Worker-local `scanner_reload_failed` 플래그 설정**: timeout 발생 시 Rust 측 worker-local static 변수 `SCANNER_RELOAD_FAILED: AtomicBool`을 `true`로 설정한다. 이후 모든 `luagate_scan_http()` 호출에서 `try_read()` 성공 여부와 무관하게 이 플래그를 먼저 확인한다. 플래그가 `true`이면 즉시 `LUAGATE_INTERNAL_ERROR(-4)`를 반환한다. 이는 detached thread가 뒤늦게 lock을 해제하더라도 손상된 상태의 scanner를 사용하지 않도록 보장한다. 플래그는 다음 번 `luagate_scanner_reload()` 성공 시에만 `false`로 리셋된다.
+
+3. **누적 leak 카운터 임곗값 초과 시 /health 503 전환**: `/health` 엔드포인트는 전체 worker의 `ffi:timeout:leak:*` 카운터 합산을 확인한다. 합산 값이 임곗값(10)을 초과하면 503을 반환하여 외부 오케스트레이터(로드밸런서, Kubernetes 등)가 해당 인스턴스를 서비스에서 제거하고 프로세스를 재시작하도록 유도한다.
+
+```
+[Reload timeout 발생]
+   │
+   ├─ (1) shared dict: ffi:timeout:leak:<worker_id> += 1
+   ├─ (2) worker-local: SCANNER_RELOAD_FAILED = true
+   │
+   ├─ 이후 luagate_scan_http() 호출 시:
+   │   └─ SCANNER_RELOAD_FAILED == true → INTERNAL_ERROR(-4) → 403 deny
+   │
+   └─ /health 확인 시:
+       └─ sum(ffi:timeout:leak:*) > 10 → 503
+```
+
+이 메커니즘은 단일 reload timeout으로는 `/health` 503이 발동하지 않으므로, 일시적 OS 스케줄링 지연에 의한 불필요한 재시작을 방지한다. 반복적 timeout이 누적되어야만 503으로 전환되며, 이는 worker 프로세스의 구조적 문제(메모리 부족, thread 고갈 등)를 나타내는 신호로 간주한다.
 
 **Write lock 보유 시간 최소화:**
 
