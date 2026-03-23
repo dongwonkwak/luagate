@@ -99,6 +99,7 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 | `rate_limited` | 레이트 리밋 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 | `upstream_error` | allow 판정이었으나 업스트림 502 |
 | `short_circuited` | nginx_core early termination (400/413/414 등) — 기본값 |
+| `internal_error` | 내부 오류로 인한 fail-closed (예: shared dict 미선언 503) ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 
 ### 3.4 예시 JSON — HTTP allow
 
