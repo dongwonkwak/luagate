@@ -310,7 +310,7 @@ Internet
 - **ADR-004**: 로그/메트릭 스키마, Admin 보안 → `lua/luagate/log/`, `lua/luagate/admin/`
 - **ADR-009**: FFI 타임아웃 강제 메커니즘 → 3계층 방어(budget guard + watchdog + health check)
 - **ADR-014**: Scanner Pattern Hot Update → `luagate_scanner_patterns` zone, `luagate_scanner_reload()` FFI 함수
-- **ADR-015**: TLS Termination → dual-port 구조, 인증서 관리, `luagate_tls_certs` zone
+- **ADR-015**: TLS Termination → tri-port 구조(8443 ingress, 8445 PROXY relay, 8444 termination), 인증서 관리, `luagate_tls_certs` zone
 
 <!-- ADR 필요 -->
 > **TODO**: 멀티 인스턴스 정책 동기화(실시간) 구현 시 ADR 필요
