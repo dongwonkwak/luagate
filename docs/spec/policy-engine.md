@@ -93,6 +93,7 @@ stream_rules:                   # TCP 스트림 규칙 목록 (top-level key: "s
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
 | `upstream` | string | proxy 시 ✓ | `"host:port"` 형식 |
+| `tls_termination` | boolean | — | `true`: LuaGate가 TLS 종료, `false`(기본값): 패스스루. `action: deny` 규칙에서는 무시됨. non-TLS 규칙에 `true` 설정 시 스키마 검증 경고. 상세: [stream-pipeline.md §10.3](./stream-pipeline.md#103-정책-스키마-tls_termination-필드), [ADR-015](../design/adr/ADR-015-tls-termination.md) |
 
 ### 2.2 Scope 키 및 매칭 연산자
 

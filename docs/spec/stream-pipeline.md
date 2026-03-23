@@ -261,8 +261,8 @@ TLS 터미네이션은 multi-port 구조로 구현한다. 하나의 `listen ssl`
 | 포트 | 역할 | `listen` 설정 | TLS 핸드셰이크 |
 |------|------|--------------|----------------|
 | 8443 | 진입점 + 패스스루 | `listen 8443` (ssl 없음) | 없음 |
-| 8445 | PROXY protocol 전달 (내부) | `listen 8445` | 없음. `proxy_protocol on`으로 원본 클라이언트 메타데이터를 8444에 전달 |
-| 8444 | TLS 터미네이션 전용 (내부) | `listen 8444 ssl proxy_protocol` | LuaGate가 수행. `$proxy_protocol_addr`로 원본 클라이언트 IP 사용 |
+| 8445 | PROXY protocol 전달 (내부) | `listen 127.0.0.1:8445` | 없음. `proxy_protocol on`으로 원본 클라이언트 메타데이터를 8444에 전달 |
+| 8444 | TLS 터미네이션 전용 (내부) | `listen 127.0.0.1:8444 ssl proxy_protocol` | LuaGate가 수행. `$proxy_protocol_addr`로 원본 클라이언트 IP 사용 |
 
 **처리 흐름:**
 

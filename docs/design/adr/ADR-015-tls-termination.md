@@ -109,12 +109,12 @@ Port 8443 (listen 8443, ssl 없음) — 패스스루 진입점
     │   └─ tls_termination=false → 기존 패스스루 (업스트림에 직접 proxy_pass)
     └─ TLS 핸드셰이크 없음. 암호화된 스트림을 투명 전달
 
-Port 8445 (listen 8445, 내부 전용) — PROXY protocol 전달 서버
+Port 8445 (listen 127.0.0.1:8445, 내부 전용) — PROXY protocol 전달 서버
     │
     ├─ proxy_protocol on: 원본 클라이언트 IP/port를 PROXY protocol v2로 전달
     └─ proxy_pass 127.0.0.1:8444
 
-Port 8444 (listen 8444 ssl proxy_protocol, 내부 전용) — 터미네이션 전용
+Port 8444 (listen 127.0.0.1:8444 ssl proxy_protocol, 내부 전용) — 터미네이션 전용
     │
     ├─ PROXY protocol v2로 원본 클라이언트 IP/port 수신
     ├─ ssl_certificate_by_lua: SNI 기반 인증서 선택 (캐시 조회만, 파일 I/O 없음)
@@ -129,7 +129,7 @@ Port 8444 (listen 8444 ssl proxy_protocol, 내부 전용) — 터미네이션 �
     └─ proxy_pass: 평문 업스트림으로 전달
 ```
 
-> **Port 8444는 외부 노출하지 않는다.** 방화벽/네트워크 정책으로 localhost만 접근 가능하게 제한한다.
+> **Port 8444/8445는 외부 노출하지 않는다.** `listen 127.0.0.1:8444` / `listen 127.0.0.1:8445`로 localhost에만 바인딩하여 설정 수준에서 외부 접근을 차단한다 (secure-by-default).
 > 외부 클라이언트는 항상 8443으로 연결하고, 터미네이션이 필요한 경우 내부적으로 8444로 전달된다.
 
 **PROXY Protocol v2 (8443 → 8444 원본 클라이언트 메타데이터 전달):**
@@ -138,7 +138,7 @@ Port 8444 (listen 8444 ssl proxy_protocol, 내부 전용) — 터미네이션 �
 
 - **8443 → 8445 → 8444 전달 경로**: `proxy_protocol on`은 Nginx stream의 server 레벨 지시자이므로, 패스스루(proxy_protocol 없음)와 터미네이션(proxy_protocol 필요)을 분리하기 위해 중간 서버(8445)를 둔다
 - **Port 8445 (PROXY protocol 전달)**: `proxy_protocol on` + `proxy_pass 127.0.0.1:8444`로 원본 클라이언트 IP/port를 PROXY protocol v2 헤더에 실어 전달
-- **8444 수신 시**: `listen 8444 ssl proxy_protocol`로 PROXY protocol 헤더를 파싱
+- **8444 수신 시**: `listen 127.0.0.1:8444 ssl proxy_protocol`로 PROXY protocol 헤더를 파싱
 - **로그/정책에서 사용**: `$proxy_protocol_addr` / `$proxy_protocol_port`를 src_ip / src_port로 사용
 - **preread_by_lua (8444)**: `ngx.var.proxy_protocol_addr`로 원본 클라이언트 IP 조회
 
@@ -431,7 +431,7 @@ stream {
     # PROXY protocol 헤더를 붙여 8444로 전달한다.
     # proxy_protocol on은 server 레벨 지시자이므로 별도 서버 블록이 필요하다.
     server {
-        listen 8445;
+        listen 127.0.0.1:8445;
 
         proxy_protocol on;  # 원본 클라이언트 메타데이터를 PROXY protocol v2로 전달
         proxy_pass 127.0.0.1:8444;
@@ -439,7 +439,7 @@ stream {
 
     # ── Port 8444: TLS 터미네이션 서버 (내부 전용) ──
     server {
-        listen 8444 ssl proxy_protocol;  # PROXY protocol로 원본 클라이언트 IP/port 수신
+        listen 127.0.0.1:8444 ssl proxy_protocol;  # PROXY protocol로 원본 클라이언트 IP/port 수신
 
         # TLS 프로토콜/cipher 설정
         ssl_protocols TLSv1.2 TLSv1.3;
@@ -484,9 +484,9 @@ stream {
 
 > **Multi-port 설계 근거**: `listen ssl`을 선언하면 해당 서버의 모든 연결에 TLS 핸드셰이크가 강제되어 패스스루가 불가능하다. 또한 `proxy_protocol on`은 server 레벨 지시자이므로 패스스루 연결에도 적용되어 업스트림이 예기치 않은 PROXY protocol 헤더를 수신하게 된다. 따라서 세 개의 포트로 분리한다: Port 8443(진입점 + 패스스루), Port 8445(PROXY protocol 전달), Port 8444(TLS 터미네이션).
 >
-> **PROXY Protocol**: 8443 → 8445 → 8444 경로에서 8445가 `proxy_protocol on`으로 원본 클라이언트 IP/port를 전달한다. 8444에서는 `listen 8444 ssl proxy_protocol`로 수신하여 `$proxy_protocol_addr`를 src_ip로 사용한다. 이를 통해 감사 로그와 정책 평가에서 내부 홉(`127.0.0.1`) 대신 실제 클라이언트를 식별할 수 있다.
+> **PROXY Protocol**: 8443 → 8445 → 8444 경로에서 8445가 `proxy_protocol on`으로 원본 클라이언트 IP/port를 전달한다. 8444에서는 `listen 127.0.0.1:8444 ssl proxy_protocol`로 수신하여 `$proxy_protocol_addr`를 src_ip로 사용한다. 이를 통해 감사 로그와 정책 평가에서 내부 홉(`127.0.0.1`) 대신 실제 클라이언트를 식별할 수 있다.
 >
-> **Port 8444/8445 접근 제한**: 외부에서 직접 접근하면 안 된다. 방화벽 규칙 또는 `allow 127.0.0.1; deny all;` (stream 모듈에서 지원 시)로 제한한다.
+> **Port 8444/8445 접근 제한**: `listen 127.0.0.1:8444` / `listen 127.0.0.1:8445`로 localhost 바인딩하여 외부 접근을 설정 수준에서 차단한다 (secure-by-default). 추가 방화벽 규칙은 방어적 심층 방어로 권장하나 필수가 아니다.
 
 ---
 
