@@ -277,11 +277,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 
 ## 11. Rate Limiting
 
-**MVP 비범위**: Rate Limiting은 현 스펙 범위에 포함되지 않는다.
-별도 ADR을 통해 설계 후 추가한다 (`<!-- ADR 필요 -->` 마커).
-
-<!-- ADR 필요 -->
-> **TODO**: Rate Limiting 구현 시 ADR 필요 (카운터 zone, 알고리즘, 응답 헤더 정의)
+> **ADR 참조**: [ADR-012: HTTP Data Plane Rate Limiting](../design/adr/ADR-012-http-data-plane-rate-limiting.md) — Sliding Window Counter + 정책 규칙별 `rate_limit` 필드
 
 ## 11. 타임아웃 설정
 

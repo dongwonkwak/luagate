@@ -1,0 +1,272 @@
+# ADR-012: HTTP Data Plane Rate Limiting
+
+> [← ADR 인덱스로 돌아가기](./README.md)
+
+| 항목 | 내용 |
+|------|------|
+| **Status** | Accepted |
+| **Date** | 2026-03-23 |
+| **Deciders** | LuaGate Architects |
+| **Issue** | [DON-224](https://linear.app/dongwon/issue/DON-224) |
+| **Depends on** | [ADR-001](./ADR-001-execution-shared-state-model.md), [ADR-003](./ADR-003-policy-storage-hot-reload.md), [ADR-006](./ADR-006-metrics-cardinality-export-model.md) |
+| **Resolves** | Data plane HTTP 요청에 대한 rate limiting 부재; 정책 규칙별 요청 속도 제한 메커니즘 필요 |
+
+---
+
+## Status
+
+**Accepted** -- 정책 규칙 단위의 Sliding Window Counter 기반 rate limiting을 HTTP data plane에 도입한다.
+
+---
+
+## Context
+
+현재 LuaGate는 Admin API(`:9090`)에 대해서만 IP 기반 rate limiting을 적용한다 (`lua/luagate/admin/ratelimit.lua`, shared dict `luagate_admin_ratelimit`). Data plane(`:8080`)에는 rate limiting이 없어, 정책으로 allow된 요청이라도 과도한 트래픽에 대한 보호가 불가하다.
+
+### 현재 상태
+
+1. **Admin rate limiting**: Sliding Window Counter 알고리즘, `luagate_admin_ratelimit` shared dict, IP당 60초/30회 고정. `ngx.shared.DICT:incr()` 원자적 증분으로 멀티 worker 안전
+2. **Data plane rate limiting**: 없음. http-pipeline.md §10에 `<!-- ADR 필요 -->` 마커로 표기
+3. **정책 규칙 구조**: `policies.yaml`의 `rules[]`에 `rate_limit` 필드 없음. 규칙별 속도 제한 불가
+
+### 요구 사항
+
+- 정책 규칙 단위로 rate limit 설정 가능 (규칙별 `requests`/`window`/`scope`)
+- 멀티 worker 환경에서 원자적 카운터 (race condition 방지)
+- 성능 영향 최소화 (shared dict 접근만, 외부 I/O 없음)
+- 기존 Admin rate limiter와 알고리즘 일관성 유지
+- fail-open/fail-closed 정책 명확화
+
+### 검토된 대안
+
+| 대안 | 장점 | 단점 |
+|------|------|------|
+| **Fixed Window Counter** | 구현 단순, shared dict 1키 | 윈도우 경계 burst 문제 (2x spike) |
+| **Sliding Window Log** | 정확한 윈도우 | 요청당 타임스탬프 저장, shared dict 메모리 과다 |
+| **Token Bucket** | burst 허용, 유연 | shared dict에 부동소수점 시간 연산 필요, 복잡 |
+| **Sliding Window Counter** | burst 완화, 메모리 효율, Admin과 동일 | 근사 계산 (최대 오차 ~1 요청) |
+| **External store (Redis)** | 분산 카운터 | 외부 의존성, 장애 시 전체 영향, latency 추가 |
+
+---
+
+## Decision
+
+### 1. 알고리즘: Sliding Window Counter
+
+Admin rate limiter와 동일한 Sliding Window Counter 알고리즘을 채택한다.
+
+**이유**: `ngx.shared.DICT:incr(key, 1, 0, ttl)` 원자적 증분으로 멀티 worker race condition을 방지하며, 2개 키(현재 slot + 이전 slot)만으로 근사 sliding window를 구현할 수 있다. 이미 Admin rate limiter에서 검증된 패턴이므로 유지보수 비용이 낮다.
+
+**카운터 계산**:
+```
+current_slot  = floor(now / window)
+previous_slot = current_slot - 1
+elapsed_fraction = (now - current_slot * window) / window
+
+weighted_count = prev_count * (1 - elapsed_fraction) + curr_count
+```
+
+**Increment-then-check**: 현재 slot 카운터를 먼저 원자적으로 증분한 뒤 weighted count를 계산한다. 이를 통해 여러 worker가 동시에 동일 스냅샷을 읽어 모두 통과하는 race condition을 방지한다.
+
+### 2. 카운터 Zone: `luagate_ratelimit` (4 MB)
+
+| 항목 | 값 |
+|------|-----|
+| **Zone 이름** | `luagate_ratelimit` |
+| **크기** | 4 MB |
+| **키 스키마** | `rl:<scope_key>:<slot>` |
+| **TTL** | `window * 2` (이전 slot 보존) |
+| **Eviction 정책** | LRU (ngx.shared.DICT 기본) |
+
+- `<scope_key>`: scope에 따른 식별자 (MVP: client IP, 예: `rl:192.168.1.1:42371`)
+- `<slot>`: `floor(now / window)` 정수값
+
+**Eviction 시 동작**:
+- **카운터 키 eviction (fail-open)**: shared dict 용량 부족으로 카운터 키가 eviction되면 `incr(key, 1, 0, ttl)`이 새 키를 생성한다. 기존 카운트가 유실되므로 일시적으로 제한이 풀린다 (fail-open). 이는 의도된 trade-off이다 -- 트래픽이 극히 높을 때 일부 요청이 제한을 우회하는 것이 전체 서비스를 차단하는 것보다 낫다.
+- **shared dict 자체 불가 (fail-closed)**: `ngx.shared.luagate_ratelimit`이 nil인 경우 (nginx.conf 설정 누락 등), **503 Service Unavailable**을 반환한다. 이는 구성 오류이므로 fail-closed가 적절하다.
+- **`incr()` 실패 (fail-open)**: `incr()` 호출이 nil을 반환하는 경우 (예상치 못한 오류), WARN 로그를 남기고 요청을 통과시킨다 (fail-open). rate limiter 오류가 정상 트래픽을 차단해서는 안 된다.
+
+**용량 산정**: 4 MB 기준 약 80,000개 키 수용 가능 (`ngx.shared.DICT` 키당 약 50 bytes 오버헤드, `rl:<15-char-ip>:<8-digit-slot>` = ~30 bytes 키 + 8 bytes 값). scope가 `client_ip`이고 활성 IP가 40,000개 이하이면 (현재 slot + 이전 slot = 2키/IP) 충분하다.
+
+### 3. 정책 규칙 `rate_limit` 필드 (선택적)
+
+```yaml
+rules:
+  - id: api-rate-limit
+    priority: 15
+    scope:
+      path: /api/v1/*
+    action: allow
+    rate_limit:                   # 선택적 필드. 없으면 rate limiting 미적용
+      requests: 100              # 윈도우 내 최대 요청 수 (양의 정수)
+      window: 60                 # 윈도우 크기 (초, 양의 정수)
+      scope: client_ip           # 카운터 scope (MVP: client_ip만 지원)
+```
+
+**필드 정의**:
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `rate_limit.requests` | integer (> 0) | Y (rate_limit 존재 시) | 윈도우 내 최대 허용 요청 수 |
+| `rate_limit.window` | integer (> 0) | Y (rate_limit 존재 시) | 윈도우 크기 (초) |
+| `rate_limit.scope` | enum | Y (rate_limit 존재 시) | 카운터 키 scope. MVP: `client_ip`만 지원 |
+
+**Scope 키 생성 규칙** (MVP):
+
+| `scope` 값 | 키 생성 | 예시 |
+|------------|---------|------|
+| `client_ip` | `rl:<src_ip>:<slot>` | `rl:192.168.1.1:42371` |
+
+> **향후 확장**: `scope`에 `path`, `header:<name>`, `api_key` 등을 추가할 수 있다. 키 스키마는 `rl:<scope_type>:<scope_value>:<slot>` 형태로 확장 가능하나, MVP에서는 `client_ip`만 지원하므로 `scope_type` prefix를 생략한다.
+
+**검증 규칙** (정책 로드 시):
+- `rate_limit` 필드가 있으면 `requests`, `window`, `scope` 모두 필수
+- `requests`와 `window`는 양의 정수
+- `scope`는 `"client_ip"` 값만 허용 (MVP)
+- `rate_limit`은 `action: allow` 규칙에서만 유효 (`action: deny` 규칙에는 rate limiting 불필요)
+- 검증 실패 시 정책 로드 자체를 거부 (ADR-003 startup-fatal 계약)
+
+### 4. 파이프라인 위치: access_by_lua, 정책 평가 후
+
+```
+access_by_lua 처리 순서:
+  1. 정책 버전 확인 (shared dict L2)
+  2. Rust FFI: 보안 스캐너
+  3. 정책 평가 (ADR-002)
+     ├── deny  → 403 반환 (rate limit 미검사)
+     └── allow → 4번으로
+  4. Rate limit 검사 (매칭된 규칙에 rate_limit 필드 있을 때만)
+     ├── 초과 → 429 반환
+     └── 통과 → proxy_pass
+```
+
+**이유**: 정책 평가 후에 rate limit을 검사하는 이유는 두 가지이다.
+
+1. **deny된 요청을 카운트하지 않음**: 정책에 의해 차단된 요청까지 rate limit 카운터에 포함하면 공격자가 deny 대상 요청을 대량 전송하여 정상 사용자의 quota를 소진시킬 수 있다.
+2. **규칙별 rate_limit 필드 참조**: rate limit 설정이 매칭된 규칙에 내장되어 있으므로, 어떤 규칙이 매칭되었는지 먼저 알아야 rate limit 파라미터를 결정할 수 있다.
+
+### 5. 응답: 429 + Rate Limit 헤더
+
+**Rate limit 초과 시 응답**:
+
+| 항목 | 값 |
+|------|-----|
+| **Status Code** | 429 Too Many Requests |
+| **Content-Type** | `application/json` |
+| **Cache-Control** | `no-store` |
+
+```json
+{
+  "error": "Too Many Requests",
+  "request_id": "<request_id>",
+  "retry_after": <seconds>
+}
+```
+
+**응답 헤더** (429 및 정상 응답 모두):
+
+| 헤더 | 설명 | 포함 조건 |
+|------|------|---------|
+| `Retry-After` | 다음 요청 가능 시점까지 대기 시간 (초) | 429 응답 시만 |
+| `X-RateLimit-Limit` | 윈도우 내 최대 허용 요청 수 | rate_limit 규칙 매칭 시 항상 |
+| `X-RateLimit-Remaining` | 현재 윈도우 잔여 허용 요청 수 | rate_limit 규칙 매칭 시 항상 |
+| `X-RateLimit-Reset` | 현재 윈도우 종료 Unix timestamp (초) | rate_limit 규칙 매칭 시 항상 |
+| `X-Request-ID` | 요청 ID | 항상 |
+
+**Remaining 계산**: `max(0, requests - ceil(weighted_count))`. 근사값이므로 0 이하로 내려갈 수 있으나 음수는 0으로 clamp한다.
+
+**Reset 계산**: `(current_slot + 1) * window`. 현재 윈도우 slot의 종료 시점이다. 정확한 sliding window 만료 시점은 아니지만, 클라이언트에게 유용한 근사값이다.
+
+### 6. 의사결정 메타데이터
+
+Rate limit에 의한 차단은 기존 http-pipeline.md의 decision 체계에 통합된다.
+
+| 항목 | 값 |
+|------|-----|
+| `decision_source` | `rate_limiter` |
+| `deny_reason` | `rate_limit_exceeded` |
+| `action` | `deny` |
+| `request_state` | `policy_denied` |
+| `matched_rule_id` | 매칭된 규칙의 `id` (rate_limit을 트리거한 규칙) |
+
+> `decision_source` 값 `rate_limiter`는 http-pipeline.md §4에 이미 예약되어 있다 (기존: "MVP 비범위" 표기).
+
+### 7. 메트릭
+
+| 메트릭 | 타입 | 설명 |
+|--------|------|------|
+| `luagate_ratelimit_rejected_total` | Counter | Rate limit에 의해 거부된 총 요청 수 |
+
+- shared dict `luagate_metrics`에 저장 (ADR-006 카디널리티 제어 준수)
+- 레이블 없음 (ADR-006: low-cardinality 원칙. 규칙별/IP별 레이블은 고카디널리티이므로 제외)
+- `safe_incr()` 패턴 사용 (실패 시 WARN 로그만, 요청 처리 계속)
+- 기존 `metrics:http:requests:deny` 카운터에도 포함 (rate limit deny도 deny의 일종)
+
+---
+
+## File Structure
+
+```
+lua/luagate/http/
+├── handler.lua            # access() 함수에 rate limit 검사 로직 추가
+└── ratelimit.lua          # data plane rate limiter 모듈 (신규)
+
+conf/
+└── nginx.conf             # lua_shared_dict luagate_ratelimit 4m; 추가
+```
+
+> `lua/luagate/http/ratelimit.lua`는 `lua/luagate/admin/ratelimit.lua`의 구조를 따르되, data plane 전용으로 설계한다. 정책 규칙에서 `requests`/`window`를 동적으로 받는 점이 Admin rate limiter(고정 30req/60s)와 다르다.
+
+---
+
+## Log Schema Changes
+
+access.log 필드 변경 없음. 기존 30필드 체계를 그대로 사용한다.
+
+- `action`: `deny` (rate limit 차단 시)
+- `decision_source`: `rate_limiter`
+- `deny_reason`: `rate_limit_exceeded`
+- `matched_rule`: 매칭된 규칙 ID
+- `status`: `429`
+
+> 신규 필드 추가 없이 기존 필드의 값 범위만 확장한다 (`decision_source`에 `rate_limiter` 값 활성화).
+
+---
+
+## Consequences
+
+### 긍정적
+
+- 정책 규칙 단위로 유연한 rate limiting 설정 가능
+- Admin rate limiter와 동일 알고리즘으로 일관성 유지 및 유지보수 비용 절감
+- shared dict 기반으로 외부 의존성 없이 멀티 worker 안전
+- 정상 응답에도 quota 헤더를 포함하여 클라이언트가 자체적으로 속도 조절 가능
+- 기존 decision_source/deny_reason 체계에 자연스럽게 통합
+
+### 부정적
+
+- shared dict 4 MB 추가 메모리 사용
+- Sliding Window Counter의 근사 오차 (~1 요청)
+- 정책 YAML 스키마 복잡도 증가 (`rate_limit` 필드 추가)
+
+### 리스크
+
+| 리스크 | 완화 |
+|--------|------|
+| shared dict eviction으로 rate limit 우회 | fail-open 허용 (가용성 우선). 4 MB로 ~40,000 활성 IP 수용. 용량 부족 시 WARN 로그 |
+| 멀티 인스턴스 배포 시 인스턴스별 카운터 분리 | shared dict는 프로세스 로컬. 인스턴스 N대일 때 실질 limit = N * requests. 분산 카운터는 Phase 2 (Redis 또는 외부 store) |
+| window가 매우 짧을 때 (예: 1초) 정밀도 저하 | 최소 window 권장값 문서화 (10초 이상). 검증에서 최소값 강제는 하지 않음 |
+| rate_limit이 있는 규칙이 많을 때 shared dict 접근 증가 | 매칭된 단일 규칙에 대해서만 2회 접근 (incr + get). O(1) 연산이므로 규칙 수와 무관 |
+
+---
+
+## Implementation Plan
+
+1. **정책 스키마 확장**: `conf/policies.yaml` 및 policy loader에 `rate_limit` 필드 추가 + 검증 로직
+2. **`lua/luagate/http/ratelimit.lua`**: data plane rate limiter 모듈 구현 (check 함수: 규칙의 rate_limit 설정 + src_ip 입력 → allow/deny 판정)
+3. **`lua/luagate/http/handler.lua`**: `access()` 함수에서 정책 allow 판정 후 rate limit 검사 호출 추가
+4. **`conf/nginx.conf`**: `lua_shared_dict luagate_ratelimit 4m;` 추가
+5. **429 응답 처리**: `do_rate_limit_deny()` 함수 구현 (JSON body + 헤더)
+6. **quota 헤더 주입**: 정상 응답(allow + rate_limit 규칙 매칭)에도 `X-RateLimit-*` 헤더 추가 (`header_filter_by_lua` 또는 `access_by_lua`에서 `ngx.header` 설정)
+7. **메트릭**: `luagate_ratelimit_rejected_total` 카운터 추가
+8. **테스트**: unit test + integration test
