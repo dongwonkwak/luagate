@@ -428,6 +428,18 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 
 > 토큰 값은 절대 로그에 포함하지 않음 (ADR-004 §6.2).
 
+**인증서 업로드 (`cert_uploaded`):**
+```json
+{
+  "timestamp": "2026-03-23T10:40:00Z",
+  "event": "cert_uploaded",
+  "actor_ip": "127.0.0.1",
+  "domain": "api.example.com"
+}
+```
+
+> `domain`: `PUT /api/v1/certs/{domain}` 경로 파라미터. 감사 로그 직렬화 실패 시 업로드 mutation은 거부된다.
+
 **서버 기동/종료 (`startup` / `shutdown`):**
 ```json
 {
