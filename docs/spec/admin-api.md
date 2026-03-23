@@ -651,7 +651,7 @@ Content-Type: application/yaml
 <패턴 YAML (bare array 또는 patterns: 래핑)>
 ```
 
-패턴 파일을 업로드한다. 설계 상세: [ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md) §5.
+패턴 파일을 업로드한다. 설계 상세: [ADR-014](../design/adr/ADR-014-scanner-pattern-hot-update.md) §6.
 
 **파일 매핑**: `conf/scanner-patterns/custom.yaml`에 저장. Bare array body는 서버가 `patterns:` top-level 키로 래핑하여 저장한다.
 
