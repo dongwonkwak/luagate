@@ -180,7 +180,7 @@ return M
 
 **호출자 계약:**
 - `M.scan(ctx)` 호출자는 반드시 `pcall(M.scan, ctx)`로 Lua-level exception을 흡수해야 한다.
-- `scanner_fail:-3`은 `budget_exceeded`, `scanner_fail:-4`와 Lua wrapper exception은 `scanner_internal_error`, `scanner_fail:-5`는 `timeout`으로 매핑한다.
+- `scanner_fail:-3`은 `budget_exceeded`, `scanner_fail:-4`와 Lua wrapper exception은 `scanner_internal_error`, `scanner_fail:-5`는 `ffi_timeout`으로 매핑한다.
 - 보안 경로에서는 위 예외를 `500`으로 전파하지 않고 `403 fail-closed`로 처리한다.
 
 ## 4. OWASP 패턴 (§5)
