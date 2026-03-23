@@ -243,7 +243,7 @@ lua/luagate/http/
 └── ratelimit.lua          # data plane rate limiter 모듈 (신규)
 
 conf/
-└── nginx.conf             # lua_shared_dict luagate_ratelimit 4m; 추가
+└── nginx.conf             # lua_shared_dict luagate_ratelimit 8m; 추가
 ```
 
 > `lua/luagate/http/ratelimit.lua`는 `lua/luagate/admin/ratelimit.lua`의 구조를 따르되, data plane 전용으로 설계한다. 정책 규칙에서 `requests`/`window`를 동적으로 받는 점이 Admin rate limiter(고정 30req/60s)와 다르다.

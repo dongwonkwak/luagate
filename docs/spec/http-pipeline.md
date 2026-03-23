@@ -128,7 +128,16 @@ LuaGate HTTP 파이프라인은 클라이언트 HTTP 요청을 수신하여 정�
 - 업스트림 latency 측정: `$upstream_response_time`
 - 헤더 전달: `Host`, `X-Request-ID`, `X-Forwarded-For`, `X-Real-IP` (`conf/nginx.conf`의 `proxy_set_header` 기준)
 
-### 2.5 log_by_lua (요청 완료 후 비동기 로그)
+### 2.5 header_filter_by_lua (응답 헤더 주입)
+
+**목적**: Rate limit quota 헤더 주입 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §5)
+
+- `access_by_lua`에서 rate_limit 규칙이 매칭된 경우, 계산된 quota 정보(`remaining`, `limit`, `reset`)를 `ngx.ctx.luagate`에서 읽어 `ngx.header`에 설정한다
+- 주입 헤더: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+- **proxy_pass 이후에 실행**되므로 upstream 응답 헤더와의 충돌 없이 게이트웨이 헤더를 추가/덮어쓸 수 있다
+- rate_limit 규칙 미매칭 요청에서는 아무 동작도 하지 않는다 (early return)
+
+### 2.6 log_by_lua (요청 완료 후 비동기 로그)
 
 - Nginx 응답 후 처리 (클라이언트 응답에 영향 없음)
 - **30개 필드** JSON 레코드 생성 — 상세 필드 목록: [log-schema.md](./log-schema.md) (ADR-010에서 `trace_id`, `span_id` 2개 추가)
@@ -275,10 +284,12 @@ HTTP 파이프라인 에러 분류 통일 표:
 | policy deny | — | 403 | 정책 매칭 deny |
 | upstream fail | — | 502 | proxy_pass 연결 실패 |
 | rate limit counter eviction | fail-open | — | shared_dict 용량 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
+| shared dict nil (luagate_ratelimit) | fail-closed | 503 | nginx.conf에 `lua_shared_dict luagate_ratelimit` 미선언 (구성 오류). [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
+| rate limit incr() 실패 | fail-open | — | `incr()` nil 반환 시 WARN 로그만, 요청 통과. [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
 | logging 실패 (감사 로그 직렬화) | pre-commit: fail-closed, post-commit: warn-only | — | ADR-004: pre-commit audit 실패 → 거부. post-commit → 경고. 디스크 I/O는 Nginx에 위임 |
 | native crash (worker) | process failure | — | nginx master가 재기동 |
 
-> **Hook 순서**: `access_by_lua*` → `proxy_pass(upstream)` → `log_by_lua*`
+> **Hook 순서**: `access_by_lua*` → `proxy_pass(upstream)` → `header_filter_by_lua*` → `log_by_lua*`
 > `log_by_lua`는 항상 upstream 응답 이후에 실행된다. 요청 처리 실패 시에도 log 단계는 도달한다.
 
 ## 11. Rate Limiting
