@@ -730,7 +730,8 @@ Content-Type: multipart/form-data
 - `{domain}` 경로에 해당하는 인증서/키 쌍을 `conf/certs/{domain}/`에 저장
 - Atomic write 방식: 임시 파일 → `rename()` 원자적 교체 (ADR-003 패턴)
 - 키 파일 권한 `0600` 강제
-- 업로드 후 자동으로 SSL context 캐시 무효화 (`luagate_tls_certs` shared dict의 `tls_certs_version` 증가)
+- 업로드 후 `luagate_tls_certs` shared dict의 `tls_certs_version` 증가로 worker SSL context 캐시 무효화
+- 업로드 후 `nginx -s reload` (HUP) 수행으로 SSL session cache 무효화. Session resumption에서는 `ssl_certificate_by_lua`가 스킵되므로 reload 없이는 이전 인증서가 재사용될 수 있음
 - 감사 로그: `event: cert_uploaded`, `domain: "{domain}"`
 
 **응답 200:**
