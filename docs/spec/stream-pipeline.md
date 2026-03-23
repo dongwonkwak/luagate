@@ -254,14 +254,15 @@ LuaGate Stream 파이프라인은 기본적으로 **TLS 패스스루** 모드다
 
 설계 결정은 [ADR-015: TLS Termination](../design/adr/ADR-015-tls-termination.md) 참조.
 
-### 10.1 Dual-port 구조
+### 10.1 Multi-port 구조
 
-TLS 터미네이션은 dual-port 구조로 구현한다. 하나의 `listen ssl` 블록에서는 패스스루가 불가능하기 때문이다.
+TLS 터미네이션은 multi-port 구조로 구현한다. 하나의 `listen ssl` 블록에서는 패스스루가 불가능하고, `proxy_protocol on`은 server 레벨 지시자이므로 패스스루 연결에도 적용되기 때문이다.
 
 | 포트 | 역할 | `listen` 설정 | TLS 핸드셰이크 |
 |------|------|--------------|----------------|
-| 8443 | 패스스루 + 터미네이션 라우팅 | `listen 8443` (ssl 없음) | 없음 |
-| 8444 | TLS 터미네이션 전용 (내부) | `listen 8444 ssl` | LuaGate가 수행 |
+| 8443 | 진입점 + 패스스루 | `listen 8443` (ssl 없음) | 없음 |
+| 8445 | PROXY protocol 전달 (내부) | `listen 8445` | 없음. `proxy_protocol on`으로 원본 클라이언트 메타데이터를 8444에 전달 |
+| 8444 | TLS 터미네이션 전용 (내부) | `listen 8444 ssl proxy_protocol` | LuaGate가 수행. `$proxy_protocol_addr`로 원본 클라이언트 IP 사용 |
 
 **처리 흐름:**
 
@@ -270,12 +271,17 @@ Client → Port 8443 (preread_by_lua)
              │
              ├─ tls_termination=false → 업스트림 직접 proxy_pass (패스스루)
              │
-             └─ tls_termination=true → proxy_pass 127.0.0.1:8444
+             └─ tls_termination=true → proxy_pass 127.0.0.1:8445
                                            │
-                                           ├─ ssl_certificate_by_lua: SNI 기반 인증서 선택
-                                           ├─ TLS 핸드셰이크 완료
-                                           ├─ preread_by_lua: 복호화된 데이터 처리
-                                           └─ proxy_pass: 평문 업스트림
+                                           └─ Port 8445 (proxy_protocol on)
+                                                  │
+                                                  └─ proxy_pass 127.0.0.1:8444
+                                                         │
+                                                         ├─ PROXY protocol v2로 원본 클라이언트 IP/port 수신
+                                                         ├─ ssl_certificate_by_lua: SNI 기반 인증서 선택
+                                                         ├─ TLS 핸드셰이크 완료
+                                                         ├─ preread_by_lua: 복호화된 데이터 처리
+                                                         └─ proxy_pass: 평문 업스트림
 ```
 
 ### 10.2 ssl_certificate_by_lua 단계
@@ -287,7 +293,7 @@ Port 8444 (터미네이션 서버)에서만 실행되며, TLS ClientHello의 SNI
 - **인증서 로드**: `init_by_lua`에서 `conf/certs/` 디렉토리의 모든 PEM 파일을 사전 로드하여 DER 변환 후 worker upvalue에 캐시
 - **ssl_certificate_by_lua 동작**: worker upvalue 캐시에서 SNI에 해당하는 DER 인증서/키를 조회. **파일 I/O 없음** (blocking I/O 금지 불변식 준수)
 - **캐시 miss**: `ngx.exit(ngx.ERROR)` -- fail-closed. 사전 로드되지 않은 도메인은 연결 거부
-- **인증서 갱신**: `init_worker_by_lua` 타이머가 `luagate_tls_certs` shared dict의 `tls_certs_version`을 주기적으로 확인하고, 변경 감지 시 백그라운드에서 파일 재로드
+- **인증서 갱신**: `init_worker_by_lua` 타이머(60초 주기)가 `luagate_tls_certs` shared dict의 `tls_certs_version`을 주기적으로 확인하고, 변경 감지 시 백그라운드에서 파일 재로드. 타이머 콜백 내 파일 읽기는 기술적으로 blocking이나, 인증서 파일이 수 KB로 작고 주기가 60초이므로 실질적 영향 극소 (ADR-015 참조)
 
 ### 10.3 정책 스키마: `tls_termination` 필드
 
@@ -322,7 +328,7 @@ ngx.ctx.luagate_stream = {
 
 - `ssl_session_cache shared:luagate_ssl_sessions:10m` -- 세션 재사용으로 핸드셰이크 비용 절감
 - `ssl_session_tickets off` -- ticket key 관리 복잡도 회피 (보안 우선)
-- **인증서 교체 시**: `luagate_ssl_sessions:flush_all()`로 세션 캐시 무효화. session resumption에서 `ssl_certificate_by_lua`가 스킵되므로, 캐시 flush 없이는 이전 인증서가 재사용될 수 있다.
+- **인증서 교체 시**: `ssl_session_cache`는 Nginx SSL 모듈의 내장 shared memory이며 `lua_shared_dict`가 아니므로 Lua에서 flush할 수 없다. 인증서 교체 시 `nginx -s reload` (HUP 시그널)로 worker를 graceful restart하여 SSL 세션 캐시를 자연스럽게 초기화한다. session resumption에서 `ssl_certificate_by_lua`가 스킵되므로, 캐시 무효화 없이는 이전 인증서가 재사용될 수 있다.
 
 ## 11. 타임아웃 설정
 
