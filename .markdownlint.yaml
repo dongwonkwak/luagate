@@ -13,9 +13,18 @@ MD033:
     - summary
     - br
     - img
+    - div
+    - strong
 
 # MD041 — first line should be top-level heading
+# README uses centered div hero, but other docs should have headings
+# README disables this via inline <!-- markdownlint-disable MD041 -->
 MD041: true
+
+# MD036 — emphasis as heading
+# README hero uses bold tagline, but other docs should follow this rule
+# README disables this via inline <!-- markdownlint-disable MD036 -->
+MD036: true
 
 # MD024 — no duplicate headings within a section (siblings allowed)
 MD024:
