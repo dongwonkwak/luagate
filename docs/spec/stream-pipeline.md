@@ -326,7 +326,7 @@ ngx.ctx.luagate_stream = {
 
 ### 10.6 로그/메트릭 소유권 규칙 (Multi-port 중복 방지)
 
-TLS terminate 세션은 8443과 8444 양쪽 server block에서 `log_by_lua`가 실행된다. 중복 로그/메트릭을 방지하기 위해 다음 소유권 규칙을 적용한다 (ADR-015 S9 참조):
+TLS terminate 세션은 8443과 8444 양쪽 server block에서 `log_by_lua`가 실행된다. 아래 규칙은 ADR-015 S9에서 정의한 **DON-231 목표 동작**이며, 현재 runtime에는 아직 적용되지 않았다. 현재 구현은 단일 포트 구성이며 `active_stream`도 조건 없이 증감한다.
 
 | 포트 | 조건 | 로그 | 메트릭 | 이유 |
 |------|------|------|--------|------|
@@ -334,7 +334,7 @@ TLS terminate 세션은 8443과 8444 양쪽 server block에서 `log_by_lua`가 �
 | 8443 | `tls_termination=false` (패스스루) | 정상 출력 | 정상 카운트 | 8443이 최종 처리자 |
 | 8444 | 항상 | 정상 출력 | 정상 카운트 | PROXY protocol로 전달받은 원본 IP/port 사용 |
 
-**preread_by_lua 구현 (8443):**
+**preread_by_lua 목표 구현 예시 (8443, DON-231):**
 
 ```lua
 -- 8443 preread_by_lua에서 tls_termination=true 세션은 active_stream 증가하지 않음
@@ -343,7 +343,7 @@ if not ctx.tls_termination then
 end
 ```
 
-**log_by_lua 구현 (8443):**
+**log_by_lua 목표 구현 예시 (8443, DON-231):**
 
 ```lua
 -- 8443 log_by_lua에서의 억제 로직
@@ -357,8 +357,8 @@ end
 -- 이하 기존 로그/메트릭 로직 (active_stream -1 포함)
 ```
 
-- stream metrics(`luagate_stream_connections_total`, `luagate_active_connections{type="stream"}` 등)도 동일 규칙: 8443→8444 전달 세션은 8443에서 카운트하지 않고 8444에서만 카운트
-- **active_stream gauge 누수 방지**: `tls_termination=true` 세션에서 8443이 accept 시 +1하고 log_by_lua에서 억제하면 -1이 누락되어 gauge가 무한 증가한다. 8443에서는 `tls_termination=true` 세션의 `active_stream` 증가 자체를 하지 않으며, 해당 세션의 활성 연결 추적은 8444가 전담한다
+- stream metrics(`luagate_stream_connections_total`, `luagate_active_connections{type="stream"}` 등)도 동일한 **목표 규칙**을 따른다: 8443→8444 전달 세션은 8443에서 카운트하지 않고 8444에서만 카운트
+- **active_stream gauge 누수 방지 (DON-231 목표 동작)**: `tls_termination=true` 세션에서 8443이 accept 시 +1하고 log_by_lua에서 억제하면 -1이 누락되어 gauge가 무한 증가한다. 따라서 8443에서는 `tls_termination=true` 세션의 `active_stream` 증가 자체를 하지 않고, 해당 세션의 활성 연결 추적을 8444가 전담한다
 
 ### 10.7 SSL 세션 캐시 및 무효화
 
