@@ -21,10 +21,9 @@ git과 Linear 문서가 충돌하면 **git을 기준**으로 하고 Linear를 �
 
 ```
 README.md
-  → AGENTS.md (코딩 컨벤션, 불변식)
-  → docs/spec/architecture.md (전체 구조)
-  → docs/design/adr/ (결정 배경)
+  → .claude/knowledge/architecture.md (전체 구조)
   → 관련 spec (작업 영역별)
+  → AGENTS.md (코딩 컨벤션, 불변식)
   → CLAUDE.md (Claude Code 워크플로우)
 ```
 
@@ -33,18 +32,21 @@ README.md
 ```
 docs/
 ├── design/
-│   └── adr/                       # Architecture Decision Records
-│       ├── ADR-001-*.md            # Phase 0-A 고정 결정
-│       ├── ADR-002-*.md
-│       ├── ADR-003-*.md
-│       └── ADR-004-*.md
+│   └── adr/                       # Architecture Decision Records (14개)
+│       ├── ADR-001 ~ ADR-012      # 핵심 아키텍처 결정
+│       ├── ADR-014                 # Scanner Pattern Hot Update
+│       └── ADR-015                 # TLS Termination
+├── runbook/                        # 운영 시나리오별 대응 절차
+│   ├── policy-rollback.md
+│   ├── token-rotation.md
+│   └── ...                        # (6개 runbook)
 └── spec/                           # 기술 스펙 문서 (Source of Truth)
     ├── architecture.md             # 전체 아키텍처
     ├── http-pipeline.md            # HTTP 파이프라인
     ├── stream-pipeline.md          # TCP 스트림 파이프라인
     ├── policy-engine.md            # 정책 엔진
     ├── security-scanner.md         # 보안 스캐너
-    ├── rust-ffi-modules.md          # Rust FFI 모듈
+    ├── rust-ffi-modules.md         # Rust FFI 모듈
     ├── admin-api.md                # Admin API (canonical reference)
     ├── log-schema.md               # 로그 스키마
     ├── test-strategy.md            # 테스트 전략
@@ -136,7 +138,7 @@ ADR을 supersede할 때는:
 스펙 문서는 ADR 내용을 중복 기재하지 않고 참조 링크를 사용한다:
 
 ```markdown
-> **ADR 참조**: [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-*.md)
+> **ADR 참조**: [ADR-001 실행/상태 공유 모델](../design/adr/ADR-001-execution-shared-state-model.md)
 ```
 
 ### 6.2 ADR 필요 마커
