@@ -708,6 +708,51 @@ Authorization: Bearer <token>
 
 ---
 
+### 6.14 인증서 업로드 (Phase 2)
+
+> **Phase 2 스텁**: 이 엔드포인트는 Phase 2에서 구현 예정이다. 현재는 스펙만 정의한다.
+> 설계 상세: [ADR-015 TLS Termination](../design/adr/ADR-015-tls-termination.md)
+
+```http
+PUT /api/v1/certs/{domain}
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+-- Form fields:
+-- cert: fullchain.pem (인증서 체인)
+-- key: privkey.pem (Private key)
+```
+
+**인증 필수**.
+
+**동작:**
+
+- `{domain}` 경로에 해당하는 인증서/키 쌍을 `conf/certs/{domain}/`에 저장
+- Atomic write 방식: 임시 파일 → `rename()` 원자적 교체 (ADR-003 패턴)
+- 키 파일 권한 `0600` 강제
+- 업로드 후 `luagate_tls_certs` shared dict의 `tls_certs_version` 증가로 worker SSL context 캐시 무효화
+- 업로드 후 `nginx -s reload` (HUP) 수행으로 SSL session cache 무효화. Session resumption에서는 `ssl_certificate_by_lua`가 스킵되므로 reload 없이는 이전 인증서가 재사용될 수 있음
+- 감사 로그: `event: cert_uploaded`, `domain: "{domain}"`
+
+**응답 200:**
+
+```json
+{
+  "status": "uploaded",
+  "domain": "api.example.com",
+  "cert_hash": "<sha256-of-cert>"
+}
+```
+
+**에러 응답:**
+
+| 상태 코드 | error 코드 | 조건 |
+|----------|----------|------|
+| 400 | `bad_request` | cert/key 누락, 잘못된 PEM 형식, 인증서-키 불일치 |
+| 413 | `payload_too_large` | 인증서 파일 크기 초과 |
+| 500 | `internal_error` | 파일 쓰기 실패, shared dict 오류 |
+| 500 | `audit_write_failed` | 감사 로그 직렬화 실패 → mutation 거부 |
+
 ## 7. 감사 로그 (audit.log) 섹션
 
 감사 로그 상세 스키마: [log-schema.md §5](./log-schema.md#5-감사-로그-auditlog-adr-004-63)
