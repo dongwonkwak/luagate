@@ -30,7 +30,7 @@ Sleep 1s
 Type "export LUAGATE_ADMIN_TOKEN='demo-token-at-least-32-bytes-long!!'"
 Enter
 Sleep 500ms
-Type "echo \"LUAGATE_ADMIN_TOKEN=$LUAGATE_ADMIN_TOKEN\" > .env"
+Type 'echo "LUAGATE_ADMIN_TOKEN=$LUAGATE_ADMIN_TOKEN" > .env'
 Enter
 Sleep 1s
 
