@@ -318,8 +318,14 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 
 ## 5. 감사 로그 (`audit.log`) (ADR-004 §6.3)
 
-> **감사 로그 드롭 금지**: 감사 로그 기록에 실패(디스크 full, I/O error 등)하면
-> 해당 mutation/reload를 **거부**한다. 감사 로그 없이 상태 변경을 허용하지 않는다.
+> **감사 로그 보장 범위 (pre-commit vs post-commit)**:
+>
+> - **Pre-commit audit**: 직렬화(`cjson.encode`) 실패 시 mutation/reload를 **거부**한다 (코드 불변식, 설정 우회 불가).
+> - **Post-mutation audit with rollback** (`token_rotated`): 실패 시 mutation rollback 후 거부.
+> - **Post-commit audit** (`*_success`, `*_partial`): 실패 시 경고 로그만 남김 (mutation 이미 적용됨).
+>
+> 디스크 I/O 계층(Nginx `error_log`)의 기록 보장은 운영 모니터링에 위임한다 — `ngx.log()`는
+> fire-and-forget이므로 디스크 full/I/O error는 Lua 코드에서 감지할 수 없다.
 
 ### 5.1 이벤트별 스키마
 
@@ -362,16 +368,40 @@ LuaGate는 세 가지 로그 스트림을 생성한다:
 }
 ```
 
-**정책 변경 (`policy_update`):**
+**정책 변경 시도 (`policy_update_attempt`):**
 ```json
 {
   "timestamp": "2026-03-14T07:00:02Z",
-  "event": "policy_update",
+  "event": "policy_update_attempt",
   "actor_ip": "127.0.0.1",
-  "staged_version": "b4e3f2a1...",
-  "active_http_version": "a3f2c1d4...",
-  "active_stream_version": "a3f2c1d4...",
-  "warnings_count": 0
+  "trigger": "api",
+  "new_version": "b4e3f2a1...",
+  "previous_version": "a3f2c1d4..."
+}
+```
+
+**정책 변경 성공 (`policy_update_success`):**
+```json
+{
+  "timestamp": "2026-03-14T07:00:02Z",
+  "event": "policy_update_success",
+  "actor_ip": "127.0.0.1",
+  "trigger": "api",
+  "previous_version": "a3f2c1d4...",
+  "new_version": "b4e3f2a1..."
+}
+```
+
+**정책 변경 실패 (`policy_update_failure`):**
+```json
+{
+  "timestamp": "2026-03-14T07:00:02Z",
+  "event": "policy_update_failure",
+  "actor_ip": "127.0.0.1",
+  "trigger": "api",
+  "stage": "commit",
+  "reason": "http subsystem swap failed",
+  "current_version": "a3f2c1d4..."
 }
 ```
 

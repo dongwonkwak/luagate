@@ -9,7 +9,8 @@
 --   - cjson.safe for all JSON encoding (pcall-safe).
 --   - Error responses follow admin-api.md §3 shape.
 --   - Audit log: all mutations log success/failure via [luagate:audit] prefix.
---     Audit write failure => reject mutation/reload (admin-api.md §3/§7).
+--     Pre-commit audit write failure => reject mutation/reload (admin-api.md §3/§7).
+--     Post-commit audit write failure => warn only (mutation already applied).
 --   - fail-closed: any error aborts and returns error response.
 --   - PUT canonical file write only when BOTH subsystem swaps succeed (ADR-005 §1).
 --   - Worker-unique temp file paths to prevent TOCTOU race (Codex review #1).
@@ -123,6 +124,11 @@ end
 --- Write structured audit log entry.
 -- Uses [luagate:audit] prefix for log routing (ADR-004 §6.3).
 -- Includes MCP metadata when X-MCP-Client header is present (ADR-011 §8).
+--
+-- Guarantee layers:
+--   Layer 1 (serialization): cjson.encode failure is detectable → returns false (fail-closed).
+--   Layer 2 (disk I/O via ngx.log → Nginx error_log): fire-and-forget, not detectable from Lua.
+--
 -- @param event  string  Event name (e.g. "policy_update_success")
 -- @param fields table   Additional fields to include
 -- @return boolean  true if audit write succeeded
@@ -623,14 +629,19 @@ function _M.handle_put_policies()
     -- application-level optimistic lock does not get overridden with 412.
     ngx.header["ETag"] = '"' .. if_match .. '"'
 
+    -- Post-commit audit (best-effort: no-op PUT, policy unchanged,
+    -- so encode failure only logs a warning instead of rejecting)
     if
-      not audit_or_reject("policy_update_success", {
+      not audit_log("policy_update_success", {
         trigger = "api",
         previous_version = current_source,
         new_version = new_version,
       })
     then
-      return
+      ngx.log(
+        ngx.WARN,
+        "[luagate:admin] post-commit audit encode failed for policy_update_success (no-op); mutation already applied"
+      )
     end
 
     send_json(200, {
@@ -671,15 +682,20 @@ function _M.handle_put_policies()
 
     local cur_versions = loader.get_active_versions()
 
+    -- Post-commit audit (best-effort: partial commit already happened,
+    -- so encode failure only logs a warning instead of rejecting)
     if
-      not audit_or_reject("policy_update_partial", {
+      not audit_log("policy_update_partial", {
         trigger = "api",
         http_result = result.http_ok and "committed" or "lkg_retained",
         stream_result = result.stream_ok and "committed" or "lkg_retained",
         rollback_result = rollback_result.ok and "restored" or "failed",
       })
     then
-      return
+      ngx.log(
+        ngx.WARN,
+        "[luagate:admin] post-commit audit encode failed for policy_update_partial; partial commit already applied"
+      )
     end
 
     ngx.status = 500
@@ -755,15 +771,19 @@ function _M.handle_put_policies()
     return
   end
 
-  -- Full success
+  -- Full success — post-commit audit (best-effort: mutation already applied,
+  -- so encode failure only logs a warning instead of rejecting)
   if
-    not audit_or_reject("policy_update_success", {
+    not audit_log("policy_update_success", {
       trigger = "api",
       previous_version = result.previous_http_version,
       new_version = new_version,
     })
   then
-    return
+    ngx.log(
+      ngx.WARN,
+      "[luagate:admin] post-commit audit encode failed for policy_update_success; mutation already applied"
+    )
   end
 
   -- Preserve the validated precondition token on the response to avoid Nginx
@@ -860,26 +880,34 @@ function _M.handle_post_reload()
   local http_result_str = result.http_ok and "committed" or "lkg_retained"
   local stream_result_str = result.stream_ok and "committed" or "lkg_retained"
 
+  -- Post-commit audit (best-effort: reload already applied,
+  -- so encode failure only logs a warning instead of rejecting)
   if result.http_ok and result.stream_ok then
     if
-      not audit_or_reject("policy_reload_success", {
+      not audit_log("policy_reload_success", {
         trigger = "api",
         previous_version = result.previous_http_version,
         new_version = result.new_version,
         subsystem = "all",
       })
     then
-      return
+      ngx.log(
+        ngx.WARN,
+        "[luagate:admin] post-commit audit encode failed for policy_reload_success; reload already applied"
+      )
     end
   else
     if
-      not audit_or_reject("policy_reload_partial", {
+      not audit_log("policy_reload_partial", {
         trigger = "api",
         http_result = http_result_str,
         stream_result = stream_result_str,
       })
     then
-      return
+      ngx.log(
+        ngx.WARN,
+        "[luagate:admin] post-commit audit encode failed for policy_reload_partial; reload already applied"
+      )
     end
   end
 

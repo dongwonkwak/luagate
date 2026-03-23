@@ -95,8 +95,18 @@ Retry-After: 42
 | `payload_too_large` | `request` | 413 |
 | `internal_error` | `internal` | 500 |
 
-> **감사 기록 실패 시**: mutation/reload를 **거부**한다. `audit_write_failed` 에러 반환.
-> ADR-004 드롭 비허용 원칙: 감사 로그 없이 상태 변경 불가.
+> **감사 기록 실패 시 (pre-commit vs post-commit 구분)**:
+>
+> - **Pre-commit audit** (`policy_update_attempt`, `policy_reload_attempt`):
+>   직렬화(`cjson.encode`) 실패 시 mutation/reload를 **거부**한다 (`audit_write_failed` 에러 반환).
+> - **Post-mutation audit with rollback** (`token_rotated`):
+>   mutation 후 감사 로그를 기록하고, 직렬화 실패 시 mutation을 **rollback**하여 거부한다.
+> - **Post-commit audit** (`policy_update_success`, `policy_update_partial`, `policy_reload_success`, `policy_reload_partial`):
+>   직렬화 실패 시 경고 로그만 남긴다. mutation/reload는 이미 적용되었으므로 거짓으로 실패 처리하면
+>   클라이언트가 적용된 변경을 인지하지 못하는 misleading 동작이 발생한다.
+>
+> 디스크 I/O 계층(Nginx `error_log`)의 기록 보장은 운영 모니터링(디스크 공간/I/O 에러 알림)에 위임한다.
+> ADR-004 §6.3 참조.
 
 ## 4. PUT vs POST /reload 상태 머신
 
@@ -593,16 +603,21 @@ Content-Type: application/json
 | 400 | `bad_request` | body 없음, 잘못된 JSON, new_token 누락, new_token 길이 부족 |
 | 403 | `forbidden` | grace period 토큰으로 rotation 시도 |
 | 500 | `internal_error` | shared dict 사용 불가 (fail-closed) |
-| 500 | `audit_write_failed` | 감사 로그 기록 실패 → mutation rollback (stage: `audit`) |
+| 500 | `audit_write_failed` | 감사 로그 직렬화 실패 → mutation 거부 (stage: `audit`). `cjson.encode` 실패 시 발생 |
 
 ## 7. 감사 로그 (audit.log) 섹션
 
 감사 로그 상세 스키마: [log-schema.md §5](./log-schema.md#5-감사-로그-auditlog-adr-004-63)
 
-역방향 참조: [policy-engine.md §6 Reload Audit Log](./policy-engine.md#6-reload-audit-log) ↔ 이 섹션은 감사 로그 필드 및 드롭 금지 원칙을 공유한다.
+역방향 참조: [policy-engine.md §6 Reload Audit Log](./policy-engine.md#6-reload-audit-log) ↔ 이 섹션은 감사 로그 필드 및 직렬화 실패 시 동작 원칙을 공유한다.
 
-> **감사 로그 드롭 금지**: audit 기록 실패 = mutation/reload 거부.
-> 이 규칙은 코드 불변식이며 설정으로 우회 불가.
+> **감사 로그 직렬화 실패 시 동작 (pre-commit vs post-commit)**:
+>
+> - **Pre-commit audit**: 직렬화(`cjson.encode`) 실패 = mutation/reload 거부. 코드 불변식이며 설정으로 우회 불가.
+> - **Post-mutation audit with rollback** (`token_rotated`): 실패 시 mutation rollback 후 거부.
+> - **Post-commit audit** (`*_success`, `*_partial`): 실패 시 경고 로그만 남김. mutation은 이미 적용됨.
+>
+> 디스크 I/O 계층(`ngx.log` → Nginx `error_log`)은 fire-and-forget이며, 기록 보장은 Nginx 인프라 및 운영 모니터링에 위임한다.
 
 ### Reload 이벤트 Audit Log Shape
 

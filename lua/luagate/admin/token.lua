@@ -53,6 +53,10 @@ end
 --- Write audit log for token rotation event.
 -- Token values are NEVER logged (ADR-004 ss6.2).
 -- Returns true on success, false on failure (audit-first: failure = reject mutation).
+--
+-- Guarantee layers:
+--   Layer 1 (serialization): cjson.encode failure is detectable → returns false (fail-closed).
+--   Layer 2 (disk I/O via ngx.log → Nginx error_log): fire-and-forget, not detectable from Lua.
 local function audit_log(event, actor_ip)
   -- MCP metadata (ADR-011 §8): include actor_type in all audit events
   local headers = ngx.req.get_headers()
@@ -78,6 +82,20 @@ local function audit_log(event, actor_ip)
     return false
   end
   ngx.log(ngx.ERR, "[luagate:audit] ", record)
+  return true
+end
+
+local function restore_token_state(state_dict, key, value, ttl)
+  if value == nil then
+    state_dict:delete(key)
+    return true
+  end
+
+  local ok, err = state_dict:set(key, value, ttl)
+  if not ok then
+    return false, err
+  end
+
   return true
 end
 
@@ -145,6 +163,13 @@ function _M.handle_post_rotate()
     current_token = os.getenv("LUAGATE_ADMIN_TOKEN")
   end
 
+  -- Snapshot previous old_token for rollback (best-effort TTL restoration).
+  -- Note: on rollback we reset TTL to GRACE_PERIOD_TTL rather than the
+  -- exact remaining TTL because shared dict does not expose remaining TTL.
+  -- This is acceptable as a best-effort restoration — the grace window may
+  -- be slightly extended but never shortened to zero.
+  local prev_old_token = state_dict:get(KEY_OLD_TOKEN)
+
   -- Store old token with grace period TTL — fail-closed on write error
   if current_token then
     local ok, set_err = state_dict:safe_set(KEY_OLD_TOKEN, current_token, GRACE_PERIOD_TTL)
@@ -166,13 +191,26 @@ function _M.handle_post_rotate()
   -- Audit after successful mutation (audit drop = rollback + reject)
   local audit_ok = audit_log("token_rotated")
   if not audit_ok then
+    local rollback_errors = {}
+
     -- Rollback: restore previous active token
-    if current_token then
-      state_dict:set(KEY_ACTIVE_TOKEN, current_token)
-    else
-      state_dict:delete(KEY_ACTIVE_TOKEN)
+    local restore_ok, restore_err = restore_token_state(state_dict, KEY_ACTIVE_TOKEN, current_token)
+    if not restore_ok then
+      rollback_errors[#rollback_errors + 1] = "restore active token failed: " .. tostring(restore_err)
     end
-    state_dict:delete(KEY_OLD_TOKEN)
+
+    -- Rollback: restore previous old_token (grace token from prior rotation)
+    restore_ok, restore_err = restore_token_state(state_dict, KEY_OLD_TOKEN, prev_old_token, GRACE_PERIOD_TTL)
+    if not restore_ok then
+      rollback_errors[#rollback_errors + 1] = "restore grace token failed: " .. tostring(restore_err)
+    end
+
+    if #rollback_errors > 0 then
+      ngx.log(ngx.ERR, "[luagate] token rotation rollback incomplete: ", table.concat(rollback_errors, "; "))
+      send_error(500, "audit_write_failed", "Audit log failed — rollback incomplete", "audit")
+      return
+    end
+
     send_error(500, "audit_write_failed", "Audit log failed — mutation rolled back", "audit")
     return
   end

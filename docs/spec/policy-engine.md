@@ -355,8 +355,13 @@ function detect_shadowed(rules):
 | 실패 | `timestamp`, `event="policy_reload_failure"`, `actor_ip`, `stage`, `reason`, `current_version` |
 | Partial | `timestamp`, `event="policy_reload_partial"`, `actor_ip`, `http_result`, `stream_result` |
 
-> **감사 로그 드롭 금지**: 감사 로그 기록 실패 시 reload commit 거부.
-> ([admin-api.md](./admin-api.md) 감사 실패 처리 참조)
+> **감사 로그 직렬화 실패 시 동작 (pre-commit vs post-commit)**:
+>
+> - **Pre-commit audit** (`policy_reload_attempt`): 직렬화(`cjson.encode`) 실패 시 reload commit 거부.
+> - **Post-commit audit** (`policy_reload_success`, `policy_reload_partial`): 직렬화 실패 시 경고 로그만 남김.
+>   reload는 이미 적용되었으므로 거부하지 않는다.
+>
+> 디스크 I/O 기록 보장은 Nginx `error_log` 인프라에 위임. ([admin-api.md §7](./admin-api.md#7-감사-로그-auditlog-섹션) 참조)
 
 ## 7. 관리 API 연동
 
