@@ -12,6 +12,7 @@ Output docs/assets/demo.gif
 Require echo
 Require curl
 Require make
+Require jq
 
 Set Shell "bash"
 Set FontSize 14
@@ -22,6 +23,11 @@ Set Padding 20
 
 # Title
 Type "# LuaGate - Policy-driven API Security Gateway"
+Enter
+Sleep 1s
+
+# Step 0: Create .env (Admin API token required)
+Type "echo 'LUAGATE_ADMIN_TOKEN=demo-token-at-least-32-bytes-long!!' > .env"
 Enter
 Sleep 1s
 

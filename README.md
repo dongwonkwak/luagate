@@ -39,10 +39,13 @@
 git clone https://github.com/dongwonkwak/luagate.git
 cd luagate
 
-# 2. Start
+# 2. Create .env (required — Admin API token)
+echo 'LUAGATE_ADMIN_TOKEN=your-token-here-at-least-32-bytes-long' > .env
+
+# 3. Start
 make up
 
-# 3. Verify
+# 4. Verify
 # Health check (Admin API port)
 curl http://localhost:9090/health
 
@@ -91,7 +94,7 @@ See [docs/spec/test-strategy.md](docs/spec/test-strategy.md) for details.
 | Port | Role |
 |------|------|
 | 8080 | HTTP data plane (gateway) |
-| 8443 | HTTPS data plane (TLS termination, Phase 1) |
+| 8443 | Stream entry point (TLS passthrough / termination via 8444–8445) |
 | 9090 | Admin API + /metrics + /health |
 
 ---
