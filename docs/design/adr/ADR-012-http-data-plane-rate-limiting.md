@@ -79,15 +79,16 @@ weighted_count = prev_count * (1 - elapsed_fraction) + curr_count
 | **Eviction 정책** | LRU (ngx.shared.DICT 기본) |
 
 - `<rule_id>`: 매칭된 규칙의 `id` 필드. 서로 다른 규칙이 동일한 scope_key와 window를 사용하더라도 카운터가 독립적으로 유지된다. **문자 제한**: `[a-z0-9-]+` (소문자 영숫자와 하이픈만 허용, `:` 금지). 구분자 `:`와의 충돌을 방지한다. 정책 로드 시 검증하며, 위반 시 로드 거부 (ADR-003 startup-fatal)
-- `<scope_key>`: scope에 따른 식별자 (MVP: client IP). **IPv6 주소는 bracket으로 감싸서** 구분자 `:`와의 충돌을 방지한다. 예: IPv4 `rl:api-rate-limit:192.168.1.1:42371`, IPv6 `rl:api-rate-limit:[::1]:42371`, IPv6 `rl:api-rate-limit:[2001:db8::1]:42371`
+- `<scope_key>`: scope에 따른 식별자 (MVP: client IP). **IPv6 주소는 bracket으로 감싸서** scope_key의 경계를 명시한다. 단, bracketed IPv6도 내부 `:`를 유지하므로 전체 키를 `:`로 naive split 하면 안 된다. 예: IPv4 `rl:api-rate-limit:192.168.1.1:42371`, IPv6 `rl:api-rate-limit:[::1]:42371`, IPv6 `rl:api-rate-limit:[2001:db8::1]:42371`
 - `<slot>`: `floor(now / window)` 정수값
 
 **구분자 안전성 규칙**:
 - 키 구분자는 `:`를 사용한다
 - `rule_id`에 `:`를 금지하여 구분자 충돌을 원천 차단한다
-- IPv6 주소는 `[addr]` 형태로 감싸서 주소 내 `:`가 구분자로 오인되지 않도록 한다
+- IPv6 주소는 `[addr]` 형태로 감싸서 scope_key의 시작/끝 경계를 명시한다
 - `<slot>`은 정수값이므로 `:`를 포함하지 않는다
-- 이를 통해 키의 각 필드를 `:`로 안전하게 분할(split)할 수 있다
+- bracketed IPv6도 내부 `:`를 포함하므로 전체 키를 `:`로 naive split 하는 파서는 금지한다
+- 키 introspection/cleanup이 필요하면 고정 prefix(`rl:`)와 마지막 `:<slot>` 경계를 기준으로 파싱하거나 bracket-aware parser를 사용한다
 
 **Eviction 시 동작**:
 - **카운터 키 eviction (fail-open)**: shared dict 용량 부족으로 카운터 키가 eviction되면 `incr(key, 1, 0, ttl)`이 새 키를 생성한다. 기존 카운트가 유실되므로 일시적으로 제한이 풀린다 (fail-open). 이는 의도된 trade-off이다 -- 트래픽이 극히 높을 때 일부 요청이 제한을 우회하는 것이 전체 서비스를 차단하는 것보다 낫다.
