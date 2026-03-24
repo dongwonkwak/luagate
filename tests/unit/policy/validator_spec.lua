@@ -973,6 +973,180 @@ describe("validator.validate — id uniqueness", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Tests: rate_limit field validation (ADR-012)
+-- ---------------------------------------------------------------------------
+
+describe("validator.validate — rate_limit (ADR-012)", function()
+  it("accepts HTTP allow rule with valid rate_limit", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("accepts HTTP allow rule without rate_limit (optional)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ action = "allow" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects rate_limit on deny rule", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "deny",
+        rate_limit = { requests = 100, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("rate_limit", err)
+    assert.matches("allow", err)
+  end)
+
+  it("rejects rate_limit with non-table value", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ action = "allow", rate_limit = "invalid" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("rate_limit.*must be a map", err)
+  end)
+
+  it("rejects rate_limit with missing requests", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with requests = 0", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 0, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with negative requests", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = -10, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with float requests", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 10.5, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with missing window", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("window", err)
+  end)
+
+  it("rejects rate_limit with window = 0", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 0, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("window", err)
+  end)
+
+  it("rejects rate_limit with unsupported scope", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 60, scope = "api_key" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("scope", err)
+    assert.matches("client_ip", err)
+  end)
+
+  it("rejects rate_limit with missing scope", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 60 },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("scope", err)
+  end)
+
+  it("accepts rate_limit with minimum valid values (requests=1, window=1)", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 1, window = 1, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Tests: pass-through behaviour
 -- ---------------------------------------------------------------------------
 

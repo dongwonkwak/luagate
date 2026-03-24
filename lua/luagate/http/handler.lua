@@ -575,7 +575,112 @@ function _M.access()
     return
   end
 
-  -- 9. Allow: mark as completed; log phase will finalise request_state
+  -- 9. Rate limit check (ADR-012 §4: after policy allow, before proxy_pass)
+  --    Only when matched rule has rate_limit config.
+  if result.rate_limit then
+    local ok_rl, ratelimit = pcall(require, "luagate.http.ratelimit")
+    if not ok_rl then
+      ngx.log(ngx.ERR, "[luagate] failed to load ratelimit: ", tostring(ratelimit))
+      -- fail-closed: ratelimit module load error → 503
+      ctx.action = "deny"
+      ctx.request_state = "internal_error"
+      ctx.decision_source = "rate_limiter"
+      ctx.deny_reason = "ratelimit_unavailable"
+      ngx.var.luagate_action = "deny"
+      ngx.var.luagate_decision_source = "rate_limiter"
+      ngx.var.luagate_request_state = "internal_error"
+      ngx.var.luagate_deny_reason = "ratelimit_unavailable"
+      local rid = ctx.request_id or ""
+      ngx.status = 503
+      ngx.header["Content-Type"] = "application/json"
+      ngx.header["X-Request-ID"] = rid
+      ngx.header["Cache-Control"] = "no-store"
+      local ok_enc, body = pcall(cjson.encode, { error = "Service Unavailable", request_id = rid })
+      if not ok_enc then
+        body = '{"error":"Service Unavailable"}'
+      end
+      ngx.say(body)
+      ngx.exit(503)
+      return
+    end
+
+    local rl_result =
+      ratelimit.check(result.matched_rule or "", ngx.var.luagate_src_ip or ngx.var.remote_addr, result.rate_limit)
+
+    if rl_result.err == "ratelimit_unavailable" or rl_result.err == "ratelimit_incr_failed" then
+      -- fail-closed: shared dict unavailable or incr error → 503
+      ctx.action = "deny"
+      ctx.request_state = "internal_error"
+      ctx.decision_source = "rate_limiter"
+      ctx.deny_reason = rl_result.err
+      ngx.var.luagate_action = "deny"
+      ngx.var.luagate_decision_source = "rate_limiter"
+      ngx.var.luagate_request_state = "internal_error"
+      ngx.var.luagate_deny_reason = rl_result.err
+      local rid = ctx.request_id or ""
+      ngx.status = 503
+      ngx.header["Content-Type"] = "application/json"
+      ngx.header["X-Request-ID"] = rid
+      ngx.header["Cache-Control"] = "no-store"
+      local ok_enc, body = pcall(cjson.encode, { error = "Service Unavailable", request_id = rid })
+      if not ok_enc then
+        body = '{"error":"Service Unavailable"}'
+      end
+      ngx.say(body)
+      ngx.exit(503)
+      return
+    end
+
+    -- Store quota info for header_filter (ADR-012 §6: X-RateLimit-* headers)
+    ctx.ratelimit_limit = rl_result.limit
+    ctx.ratelimit_remaining = rl_result.remaining
+    ctx.ratelimit_reset = rl_result.reset
+
+    if not rl_result.allowed then
+      -- Rate limit exceeded → 429 (ADR-012 §5)
+      ctx.action = "deny"
+      ctx.request_state = "rate_limited"
+      ctx.decision_source = "rate_limiter"
+      ctx.deny_reason = "rate_limit_exceeded"
+      ngx.var.luagate_action = "deny"
+      ngx.var.luagate_decision_source = "rate_limiter"
+      ngx.var.luagate_request_state = "rate_limited"
+      ngx.var.luagate_deny_reason = "rate_limit_exceeded"
+
+      -- Metric: luagate_ratelimit_rejected_total (ADR-012 §7)
+      local metrics_dict = ngx.shared.luagate_metrics
+      if metrics_dict then
+        local _, merr = metrics_dict:incr("luagate_ratelimit_rejected_total", 1, 0)
+        if merr then
+          ngx.log(ngx.WARN, "[luagate] ratelimit metric incr failed: ", tostring(merr))
+        end
+      end
+
+      local rid = ctx.request_id or ""
+      local retry_after = rl_result.retry_after or 1
+      ngx.status = 429
+      ngx.header["Content-Type"] = "application/json"
+      ngx.header["X-Request-ID"] = rid
+      ngx.header["Cache-Control"] = "no-store"
+      ngx.header["Retry-After"] = tostring(retry_after)
+      ngx.header["X-RateLimit-Limit"] = tostring(rl_result.limit or 0)
+      ngx.header["X-RateLimit-Remaining"] = "0"
+      ngx.header["X-RateLimit-Reset"] = tostring(rl_result.reset or 0)
+      local ok_enc, body = pcall(cjson.encode, {
+        error = "Too Many Requests",
+        request_id = rid,
+        retry_after = retry_after,
+      })
+      if not ok_enc then
+        body = '{"error":"Too Many Requests"}'
+      end
+      ngx.say(body)
+      ngx.exit(429)
+      return
+    end
+  end
+
+  -- 10. Allow: mark as completed; log phase will finalise request_state
   ctx.request_state = "completed"
 
   -- 10. Tracing: create proxy child span + inject outbound traceparent (ADR-010 §2, §7)
@@ -612,6 +717,33 @@ function _M.access()
       end
     end
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- header_filter_by_lua entry point
+-- ---------------------------------------------------------------------------
+
+--- Phase 2.5: Inject rate limit quota headers into upstream response.
+-- Called from header_filter_by_lua_block in nginx.conf (ADR-012 §5, §6).
+-- Runs after proxy_pass so headers are added to the upstream response
+-- without conflict.
+--
+-- Injects X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+-- only when the matched rule has a rate_limit config (stored in ngx.ctx).
+function _M.header_filter()
+  local ctx = ngx.ctx.luagate
+  if not ctx then
+    return
+  end
+
+  -- Only inject if rate_limit quota info was computed in access phase
+  if not ctx.ratelimit_limit then
+    return
+  end
+
+  ngx.header["X-RateLimit-Limit"] = tostring(ctx.ratelimit_limit)
+  ngx.header["X-RateLimit-Remaining"] = tostring(ctx.ratelimit_remaining or 0)
+  ngx.header["X-RateLimit-Reset"] = tostring(ctx.ratelimit_reset or 0)
 end
 
 -- ---------------------------------------------------------------------------
