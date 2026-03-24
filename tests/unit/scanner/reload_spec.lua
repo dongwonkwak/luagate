@@ -240,14 +240,14 @@ describe("luagate.scanner.ffi.reload()", function()
     assert.truthy(err and err:find("-11"))
   end)
 
-  it("returns scanner_reload_failed with validation_error on rc=-12 (compile)", function()
+  it("returns scanner_reload_failed with internal_error on rc=-12 (compile)", function()
     local scanner = load_ffi_with_reload({ reload_rc = -12 })
 
     local result, err = scanner.reload("conf/scanner-patterns")
 
     assert.is_nil(result)
     assert.truthy(err and err:find("scanner_reload_failed"))
-    assert.truthy(err and err:find("validation_error"))
+    assert.truthy(err and err:find("internal_error"))
     assert.truthy(err and err:find("-12"))
   end)
 

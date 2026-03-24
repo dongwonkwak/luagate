@@ -219,7 +219,7 @@ function M.reload(patterns_path)
     elseif rc == LUAGATE_RELOAD_PARSE_ERROR then
       err_category = "validation_error"
     elseif rc == LUAGATE_RELOAD_COMPILE_ERROR then
-      err_category = "validation_error"
+      err_category = "internal_error"
     else
       err_category = "internal_error"
     end

@@ -270,6 +270,18 @@ describe("luagate.admin.scanner", function()
       assert.equals("scanner", body.stage)
     end)
 
+    it("returns 500 on rc=-12 reload failure classified as internal", function()
+      scanner_reload_error = "scanner_reload_failed:internal_error:-12"
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_post_reload()
+
+      assert.equals(500, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("reload_failed", body.error)
+      assert.equals("scanner", body.stage)
+    end)
+
     it("returns 400 on validation reload failure", function()
       scanner_reload_error = "scanner_reload_failed:validation_error:-11"
 
