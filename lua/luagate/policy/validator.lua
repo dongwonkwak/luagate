@@ -351,9 +351,14 @@ local function validate_stream_rule(rule)
     return legacy_err
   end
 
-  -- id: required, non-empty string
+  -- id: required, non-empty string matching [a-z0-9-]+ (no colon, no underscore — policy-engine.md §2, ADR-012 §2)
   if not is_nonempty_string(rule.id) then
     return "stream rule is missing required field 'id' (must be a non-empty string)"
+  end
+  if rule.id:find("[^a-z0-9%-]") then
+    return "stream rule '"
+      .. rule.id
+      .. "': 'id' must match [a-z0-9-]+ (underscores, colons and special chars are forbidden for key safety)"
   end
 
   -- priority: required, integer

@@ -612,6 +612,37 @@ describe("validator.validate — Stream rules", function()
     assert.matches("id", err)
   end)
 
+  it("rejects stream rule.id containing colon", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "rule:bad" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("rejects stream rule.id containing uppercase", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "Rule-Bad" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("accepts stream rule.id with lowercase, digits, hyphens only", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "my-stream-rule-01" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects stream rule.id containing underscores", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "my_stream_rule" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
   it("rejects Stream rule with missing priority", function()
     local p = minimal_policy()
     p.stream_rules = { stream_rule({ priority = REMOVE }) }
