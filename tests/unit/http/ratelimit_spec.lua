@@ -401,6 +401,37 @@ describe("http/ratelimit.lua", function()
       assert.is_true(result.retry_after > 40)
     end)
 
+    it("accounts for retry request headroom in same-slot decay", function()
+      -- Scenario: previous_count=20, current_count will be 5 (4+1), limit=10, window=60
+      -- At 20s into slot (elapsed_fraction = 1/3):
+      --   weighted = 20*(2/3) + 5 = 13.33 + 5 = 18.33 (exceeds limit=10)
+      -- Same-slot retry: need prev_weight + current_count <= limit - 1
+      --   allowed_prev_weight = 10 - 5 - 1 = 4
+      --   elapsed' = 60*(1 - 4/20) = 48s
+      --   same_slot_retry = 48 - 20 = 28s
+      -- Without the -1 headroom, it would be:
+      --   allowed_prev_weight = 10 - 5 = 5
+      --   elapsed' = 60*(1 - 5/20) = 45s
+      --   same_slot_retry = 45 - 20 = 25s (too early — retry request itself tips over limit)
+      local window = 60
+      local now = 60 * 17 + 20 -- 20s into slot
+      local slot = math.floor(now / window)
+      local prev_slot = slot - 1
+
+      dict_data["rl:r1:10.0.0.1:" .. tostring(prev_slot)] = 20
+      dict_data["rl:r1:10.0.0.1:" .. tostring(slot)] = 4 -- becomes 5 after incr
+
+      local result = ratelimit.check("r1", "10.0.0.1", {
+        requests = 10,
+        window = window,
+        scope = "client_ip",
+      }, now)
+
+      assert.is_false(result.allowed)
+      -- Expected: ceil(28) = 28
+      assert.are.equal(28, result.retry_after)
+    end)
+
     it("returns minimum 1 second for retry_after", function()
       local window = 60
       -- Place now right at slot boundary so remaining = 0

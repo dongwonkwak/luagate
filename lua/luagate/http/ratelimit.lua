@@ -72,9 +72,10 @@ local function calculate_retry_after(previous_count, current_count, limit, windo
   -- Case 1: previous slot weight is decaying; check if within this slot
   -- the weighted count can drop below the limit.
   if previous_count > 0 and current_count < limit then
-    -- We need: previous_count * (1 - elapsed'/window) + current_count <= limit
-    -- Solve for elapsed': elapsed' >= window * (1 - (limit - current_count) / previous_count)
-    local allowed_previous_weight = limit - current_count
+    -- We need: previous_count * (1 - elapsed'/window) + current_count <= limit - 1
+    -- (the -1 reserves headroom for the retry request itself)
+    -- Solve for elapsed': elapsed' >= window * (1 - (limit - current_count - 1) / previous_count)
+    local allowed_previous_weight = limit - current_count - 1
     local same_slot_retry_after = (window * (1 - (allowed_previous_weight / previous_count))) - elapsed
 
     if same_slot_retry_after > 0 and same_slot_retry_after < remaining then
