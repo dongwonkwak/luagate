@@ -19,6 +19,7 @@ local auth = require("luagate.admin.auth")
 local ratelimit = require("luagate.admin.ratelimit")
 local policies = require("luagate.admin.policies")
 local token = require("luagate.admin.token")
+local scanner = require("luagate.admin.scanner")
 
 local _M = {}
 local EMPTY_JSON_ARRAY = cjson.empty_array or setmetatable({}, { __jsontype = "array" })
@@ -59,6 +60,7 @@ local SHARED_DICT_ZONES = {
   "luagate_stream_metrics",
   "luagate_connections",
   "luagate_admin_ratelimit",
+  "luagate_scanner_patterns",
 }
 
 -- Stream protocol types for protocol_detected_total
@@ -430,6 +432,13 @@ local ROUTES = {
   },
   ["/api/v1/admin/token/rotate"] = {
     POST = token.handle_post_rotate,
+  },
+  ["/api/v1/scanner/patterns"] = {
+    GET = scanner.handle_get_patterns,
+    PUT = scanner.handle_put_patterns,
+  },
+  ["/api/v1/scanner/patterns/reload"] = {
+    POST = scanner.handle_post_reload,
   },
 }
 

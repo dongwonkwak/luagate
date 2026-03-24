@@ -1,9 +1,10 @@
 # Log4Shell (CVE-2021-44228) and related JNDI injection patterns
-threat_type: "log4shell"
 patterns:
-  - name: "log4shell_jndi"
+  - threat_type: "log4shell"
+    rule_name: "log4shell_jndi"
     pattern: "(?i)\\$\\{jndi\\s*:"
     score: 1.0
-  - name: "log4shell_nested"
+  - threat_type: "log4shell"
+    rule_name: "log4shell_nested"
     pattern: "(?i)\\$\\{.*:.*\\{"
     score: 0.8
