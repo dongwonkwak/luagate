@@ -212,8 +212,24 @@ local function load_router(auth_mock)
   package.loaded["luagate.admin.router"] = nil
   package.loaded["luagate.admin.auth"] = nil
   package.loaded["luagate.admin.ratelimit"] = nil
+  package.loaded["luagate.admin.scanner"] = nil
+  package.loaded["luagate.scanner.ffi"] = nil
   package.preload["luagate.admin.auth"] = function()
     return auth_mock or make_auth_pass()
+  end
+  -- scanner.ffi requires LuaJIT ffi; provide a stub for busted (Lua 5.4)
+  package.preload["luagate.scanner.ffi"] = function()
+    return {
+      init = function()
+        return true
+      end,
+      scan = function()
+        return nil, "stub"
+      end,
+      reload = function()
+        return 0, "stub-version", 0
+      end,
+    }
   end
   return require("luagate.admin.router")
 end
@@ -225,9 +241,12 @@ teardown(function()
   _G.ngx = _saved_ngx
   package.preload["cjson.safe"] = nil
   package.preload["luagate.admin.auth"] = nil
+  package.preload["luagate.scanner.ffi"] = nil
   package.loaded["cjson.safe"] = nil
   package.loaded["luagate.admin.auth"] = nil
   package.loaded["luagate.admin.ratelimit"] = nil
+  package.loaded["luagate.admin.scanner"] = nil
+  package.loaded["luagate.scanner.ffi"] = nil
   package.loaded["luagate.admin.router"] = nil
 end)
 
