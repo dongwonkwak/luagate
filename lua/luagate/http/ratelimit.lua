@@ -51,16 +51,48 @@ local function format_scope_key(ip)
   return ip or ""
 end
 
---- Calculate Retry-After seconds (ceiling of time until current slot ends).
--- This is a conservative estimate: the client should wait until the current
--- window slot expires, at which point the previous slot's count drops off.
--- @param current_slot number  Current window slot number
--- @param window       number  Window size in seconds
--- @param now          number  Current timestamp (ngx.now())
+--- Calculate Retry-After seconds accounting for weighted count decay.
+-- When the weighted count greatly exceeds the limit, the simple "wait until
+-- current slot ends" estimate is too optimistic because the next slot may
+-- still be over-limit. This calculation mirrors admin/ratelimit.lua logic:
+-- it considers how much the previous slot weight must decay before the
+-- weighted count drops below the limit.
+-- @param previous_count number  Previous slot counter
+-- @param current_count  number  Current slot counter (post-increment)
+-- @param limit          number  Rate limit (requests per window)
+-- @param window         number  Window size in seconds
+-- @param now            number  Current timestamp (ngx.now())
+-- @param current_slot   number  Current window slot number
 -- @return number  Seconds to wait (minimum 1)
-local function calculate_retry_after(current_slot, window, now)
-  local slot_end = (current_slot + 1) * window
-  return math.max(1, math.ceil(slot_end - now))
+local function calculate_retry_after(previous_count, current_count, limit, window, now, current_slot)
+  local window_start = current_slot * window
+  local elapsed = now - window_start
+  local remaining = window - elapsed
+
+  -- Case 1: previous slot weight is decaying; check if within this slot
+  -- the weighted count can drop below the limit.
+  if previous_count > 0 and current_count < limit then
+    -- We need: previous_count * (1 - elapsed'/window) + current_count <= limit
+    -- Solve for elapsed': elapsed' >= window * (1 - (limit - current_count) / previous_count)
+    local allowed_previous_weight = limit - current_count
+    local same_slot_retry_after = (window * (1 - (allowed_previous_weight / previous_count))) - elapsed
+
+    if same_slot_retry_after > 0 and same_slot_retry_after < remaining then
+      return math.max(1, math.ceil(same_slot_retry_after))
+    end
+  end
+
+  -- Case 2: must wait until the next slot. In the next slot, the current
+  -- slot becomes "previous" and its weight decays. Calculate how far into
+  -- the next slot the client must wait for weighted count to drop below limit.
+  local next_slot_elapsed = 0
+  if current_count > (limit - 1) then
+    -- In next slot: current_count * (1 - t/window) + 0 <= limit - 1
+    -- t >= window * (1 - (limit - 1) / current_count)
+    next_slot_elapsed = window * (1 - ((limit - 1) / current_count))
+  end
+
+  return math.max(1, math.ceil(remaining + next_slot_elapsed))
 end
 
 -- ---------------------------------------------------------------------------
@@ -145,7 +177,7 @@ function _M.check(rule_id, src_ip, rate_limit, now)
   local reset = (current_slot + 1) * window
 
   if weighted_count > requests then
-    local retry_after = calculate_retry_after(current_slot, window, now)
+    local retry_after = calculate_retry_after(previous_count, new_val, requests, window, now, current_slot)
 
     ngx.log(
       ngx.WARN,

@@ -286,7 +286,7 @@ HTTP 파이프라인 에러 분류 통일 표:
 | upstream fail | — | 502 | proxy_pass 연결 실패 |
 | rate limit counter eviction | fail-open | — | shared_dict 용량 초과 ([ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md)) |
 | shared dict nil (luagate_ratelimit) | fail-closed | 503 | nginx.conf에 `lua_shared_dict luagate_ratelimit` 미선언 (구성 오류). `decision_source=rate_limiter`, `deny_reason=ratelimit_unavailable`, `request_state=internal_error`. [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
-| rate limit incr() 실패 | fail-open | — | `incr()` nil 반환 시 WARN 로그만, 요청 통과. [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
+| rate limit incr() 실패 | fail-closed | 503 | `incr()` nil 반환 시 503 반환. `decision_source=rate_limiter`, `deny_reason=ratelimit_incr_failed`. [ADR-012](../design/adr/ADR-012-http-data-plane-rate-limiting.md) §2 |
 | logging 실패 (감사 로그 직렬화) | pre-commit: fail-closed, post-commit: warn-only | — | ADR-004: pre-commit audit 실패 → 거부. post-commit → 경고. 디스크 I/O는 Nginx에 위임 |
 | native crash (worker) | process failure | — | nginx master가 재기동 |
 

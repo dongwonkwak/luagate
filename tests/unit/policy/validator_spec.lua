@@ -1175,11 +1175,19 @@ describe("validator.validate — rule.id format", function()
     assert.matches("must match", err)
   end)
 
-  it("accepts http rule.id with lowercase, digits, hyphens, underscores", function()
+  it("accepts http rule.id with lowercase, digits, hyphens (no underscores)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "my-rule-01" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects http rule.id containing underscores (policy-engine.md spec)", function()
     local p = minimal_policy()
     p.rules = { http_rule({ id = "my-rule_01" }) }
     local _, err = validator.validate(p)
-    assert.is_nil(err)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
   end)
 end)
 

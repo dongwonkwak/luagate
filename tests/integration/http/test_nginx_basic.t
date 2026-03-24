@@ -24,7 +24,7 @@ our $http_config = <<'_END_HTTP_CONFIG_';
     lua_shared_dict luagate_metrics       5m;
     lua_shared_dict luagate_connections   1m;
     lua_shared_dict luagate_state         1m;
-    lua_shared_dict luagate_rate_limit    2m;
+    lua_shared_dict luagate_ratelimit     8m;
 
     init_by_lua_block {
         local zone_names = {
@@ -32,7 +32,7 @@ our $http_config = <<'_END_HTTP_CONFIG_';
             "luagate_metrics",
             "luagate_connections",
             "luagate_state",
-            "luagate_rate_limit",
+            "luagate_ratelimit",
         }
 
         for _, zone_name in ipairs(zone_names) do

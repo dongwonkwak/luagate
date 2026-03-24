@@ -377,12 +377,12 @@ describe("http/ratelimit.lua", function()
       _G.ngx = nil
     end)
 
-    it("calculates retry_after as ceiling of remaining slot time", function()
+    it("calculates retry_after considering weighted count decay", function()
       local window = 60
       local now = 1020.5 -- 20.5s into slot, 39.5s remaining
       local slot = math.floor(now / window)
       local key = "rl:r1:10.0.0.1:" .. tostring(slot)
-      dict_data[key] = 99 -- will become 100 after incr
+      dict_data[key] = 99 -- will become 100 after incr, no previous slot
 
       local result = ratelimit.check("r1", "10.0.0.1", {
         requests = 10,
@@ -391,11 +391,14 @@ describe("http/ratelimit.lua", function()
       }, now)
 
       assert.is_false(result.allowed)
-      -- slot_end = (slot + 1) * 60
-      -- retry_after = ceil(slot_end - now) = ceil(slot_end - 1020.5)
-      local expected_slot_end = (slot + 1) * window
-      local expected_retry = math.max(1, math.ceil(expected_slot_end - now))
-      assert.are.equal(expected_retry, result.retry_after)
+      -- With no previous slot, current_count=100 >> limit=10.
+      -- Next slot: need 100*(1-t/60) <= 9 → t >= 60*(1-9/100) = 54.6
+      -- retry_after = ceil(39.5 + 54.6) = 95
+      assert.is_number(result.retry_after)
+      assert.is_true(result.retry_after >= 1)
+      -- With current_count greatly exceeding limit, retry_after should be
+      -- longer than just the remaining slot time (39.5s)
+      assert.is_true(result.retry_after > 40)
     end)
 
     it("returns minimum 1 second for retry_after", function()

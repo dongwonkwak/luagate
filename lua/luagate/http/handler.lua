@@ -650,7 +650,7 @@ function _M.access()
       -- Metric: luagate_ratelimit_rejected_total (ADR-012 §7)
       local metrics_dict = ngx.shared.luagate_metrics
       if metrics_dict then
-        local _, merr = metrics_dict:incr("luagate_ratelimit_rejected_total", 1, 0)
+        local _, merr = metrics_dict:incr("metrics:ratelimit_rejected_total", 1, 0)
         if merr then
           ngx.log(ngx.WARN, "[luagate] ratelimit metric incr failed: ", tostring(merr))
         end
