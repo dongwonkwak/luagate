@@ -1147,6 +1147,43 @@ describe("validator.validate — rate_limit (ADR-012)", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Tests: rule.id format validation (ADR-012 key safety)
+-- ---------------------------------------------------------------------------
+
+describe("validator.validate — rule.id format", function()
+  it("rejects http rule.id containing colon", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "rule:with:colons" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("colons and special chars are forbidden", err)
+  end)
+
+  it("rejects http rule.id containing uppercase", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "RuleUpper" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("rejects http rule.id containing spaces", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "rule with spaces" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("accepts http rule.id with lowercase, digits, hyphens, underscores", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "my-rule_01" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Tests: pass-through behaviour
 -- ---------------------------------------------------------------------------
 

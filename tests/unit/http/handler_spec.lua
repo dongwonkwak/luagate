@@ -139,6 +139,27 @@ package.preload["luagate.scanner.ffi"] = function()
 end
 
 -- ---------------------------------------------------------------------------
+-- ratelimit stub — check 결과 제어
+-- ---------------------------------------------------------------------------
+local _ratelimit_stub = {
+  check_result = nil, -- override ratelimit.check() return value
+}
+
+local _ratelimit_stub_module = {
+  check = function(_rule_id, _src_ip, _rate_limit, _now)
+    if _ratelimit_stub.check_result then
+      return _ratelimit_stub.check_result
+    end
+    return { allowed = true, remaining = 10, limit = 100, reset = 1710633660 }
+  end,
+  _DICT_NAME = "luagate_ratelimit",
+}
+
+package.preload["luagate.http.ratelimit"] = function()
+  return _ratelimit_stub_module
+end
+
+-- ---------------------------------------------------------------------------
 -- ngx mock 팩토리
 -- ---------------------------------------------------------------------------
 local function make_ngx(overrides)
@@ -272,12 +293,14 @@ teardown(function()
   package.preload["luagate.metrics.collector"] = nil
   package.preload["luagate.decoder.ffi"] = nil
   package.preload["luagate.scanner.ffi"] = nil
+  package.preload["luagate.http.ratelimit"] = nil
   -- loaded 캐시도 제거 (evaluator_spec이 자체 ngx=nil 환경에서 fresh require하도록)
   package.loaded["luagate.policy.evaluator"] = nil
   package.loaded["luagate.log.http"] = nil
   package.loaded["luagate.metrics.collector"] = nil
   package.loaded["luagate.decoder.ffi"] = nil
   package.loaded["luagate.scanner.ffi"] = nil
+  package.loaded["luagate.http.ratelimit"] = nil
   package.loaded["luagate.http.handler"] = nil
 end)
 
@@ -292,12 +315,14 @@ local function reset_stubs()
   _decoder_stub.normalize_path_result = nil
   _decoder_stub.normalize_query_result = nil
   _scanner_stub.scan_result = nil
+  _ratelimit_stub.check_result = nil
   -- Explicitly set package.loaded with our stub modules to prevent cross-spec
   -- contamination (e.g. decoder/ffi_spec.lua may pollute package.loaded with
   -- the real module). This ensures handler.rewrite()/access() pcall(require,...)
   -- always returns our controlled stubs.
   package.loaded["luagate.decoder.ffi"] = _decoder_stub_module
   package.loaded["luagate.scanner.ffi"] = _scanner_stub_module
+  package.loaded["luagate.http.ratelimit"] = _ratelimit_stub_module
   package.loaded["luagate.policy.evaluator"] = nil
 end
 
@@ -1686,5 +1711,138 @@ describe("handler.log_phase — tracing proxy span 상태 기록", function()
     assert.are.equal("upstream_connect_failure", proxy_span.attributes["error.type"])
     assert.are.equal((100 + 0.123) * 1e9, proxy_span.end_time_ns)
     assert.are.equal(trace_ctx, finished_trace_ctx)
+  end)
+end)
+
+-- ===========================================================================
+-- Rate Limiting 통합 테스트 (handler.access → ratelimit.check 경로)
+-- ===========================================================================
+describe("handler.access — rate limit 통합", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+
+    -- Set up policy with rate_limit config
+    _evaluator_stub.get_policy_result = {
+      global = { default_action = "allow" },
+      http = { rules = {} },
+      stream = { rules = {} },
+    }
+    _evaluator_stub.evaluate_result = {
+      action = "allow",
+      matched_rule = "test-rule-1",
+      decision_source = "rule",
+      rate_limit = { requests = 100, window = 60, scope = "client_ip" },
+    }
+  end)
+
+  it("rate limit 초과 시 429 응답 + rate_limited 상태", function()
+    _ratelimit_stub.check_result = {
+      allowed = false,
+      status = 429,
+      remaining = 0,
+      limit = 100,
+      reset = 1710633660,
+      retry_after = 30,
+      weighted_count = 105,
+    }
+
+    handler.rewrite()
+    handler.access()
+
+    assert.are.equal(429, ngx_mock.status)
+    assert.are.equal(429, ngx_mock._get_exited())
+    assert.are.equal("rate_limited", ngx_mock.ctx.luagate.request_state)
+    assert.are.equal("rate_limiter", ngx_mock.ctx.luagate.decision_source)
+    assert.are.equal("rate_limit_exceeded", ngx_mock.ctx.luagate.deny_reason)
+  end)
+
+  it("rate limit 허용 시 quota 정보가 ctx에 저장된다", function()
+    _ratelimit_stub.check_result = {
+      allowed = true,
+      remaining = 95,
+      limit = 100,
+      reset = 1710633660,
+    }
+
+    handler.rewrite()
+    handler.access()
+
+    assert.are.equal(100, ngx_mock.ctx.luagate.ratelimit_limit)
+    assert.are.equal(95, ngx_mock.ctx.luagate.ratelimit_remaining)
+    assert.are.equal(1710633660, ngx_mock.ctx.luagate.ratelimit_reset)
+    assert.is_nil(ngx_mock._get_exited())
+  end)
+
+  it("shared dict 장애 시 503 fail-closed", function()
+    _ratelimit_stub.check_result = {
+      allowed = false,
+      status = 503,
+      err = "ratelimit_unavailable",
+    }
+
+    handler.rewrite()
+    handler.access()
+
+    assert.are.equal(503, ngx_mock.status)
+    assert.are.equal(503, ngx_mock._get_exited())
+    assert.are.equal("rate_limiter", ngx_mock.ctx.luagate.decision_source)
+    assert.are.equal("ratelimit_unavailable", ngx_mock.ctx.luagate.deny_reason)
+  end)
+
+  it("rate_limit 없는 allow 규칙은 ratelimit 체크를 건너뛴다", function()
+    _evaluator_stub.evaluate_result = {
+      action = "allow",
+      matched_rule = "no-limit-rule",
+      decision_source = "rule",
+      rate_limit = nil,
+    }
+
+    handler.rewrite()
+    handler.access()
+
+    -- Should pass through without rate limit check
+    assert.is_nil(ngx_mock.ctx.luagate.ratelimit_limit)
+    assert.is_nil(ngx_mock._get_exited())
+  end)
+end)
+
+-- ===========================================================================
+-- header_filter 테스트
+-- ===========================================================================
+describe("handler.header_filter — X-RateLimit 헤더 주입", function()
+  local ngx_mock
+
+  before_each(function()
+    reset_stubs()
+    ngx_mock = make_ngx()
+    _G.ngx = ngx_mock
+  end)
+
+  it("ratelimit quota가 있으면 X-RateLimit 헤더를 주입한다", function()
+    ngx_mock.ctx.luagate = {
+      ratelimit_limit = 100,
+      ratelimit_remaining = 95,
+      ratelimit_reset = 1710633660,
+    }
+
+    handler.header_filter()
+
+    assert.are.equal("100", ngx_mock.header["X-RateLimit-Limit"])
+    assert.are.equal("95", ngx_mock.header["X-RateLimit-Remaining"])
+    assert.are.equal("1710633660", ngx_mock.header["X-RateLimit-Reset"])
+  end)
+
+  it("ratelimit quota가 없으면 헤더를 주입하지 않는다", function()
+    ngx_mock.ctx.luagate = {}
+
+    handler.header_filter()
+
+    assert.is_nil(ngx_mock.header["X-RateLimit-Limit"])
+    assert.is_nil(ngx_mock.header["X-RateLimit-Remaining"])
+    assert.is_nil(ngx_mock.header["X-RateLimit-Reset"])
   end)
 end)

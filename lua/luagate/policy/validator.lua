@@ -260,9 +260,14 @@ local function validate_http_rule(rule)
     return legacy_err
   end
 
-  -- id: required, non-empty string
+  -- id: required, non-empty string matching [a-z0-9_-]+ (no colon — ADR-012 §2 key safety)
   if not is_nonempty_string(rule.id) then
     return "http rule is missing required field 'id' (must be a non-empty string)"
+  end
+  if rule.id:find("[^a-z0-9_%-]") then
+    return "http rule '"
+      .. rule.id
+      .. "': 'id' must match [a-z0-9_-]+ (colons and special chars are forbidden for rate-limit key safety)"
   end
 
   -- priority: required, integer
