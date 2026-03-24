@@ -416,10 +416,14 @@ function _M.handle_put_patterns()
     local existing_content = existing_f:read("*all")
     existing_f:close()
     local bak_f = io.open(bak_path, "w")
-    if bak_f then
-      bak_f:write(existing_content)
-      bak_f:close()
+    if not bak_f then
+      os.remove(tmp_path)
+      release_reload_lock(owner_id)
+      send_error(500, "internal_error", "scanner", "cannot create backup file")
+      return
     end
+    bak_f:write(existing_content)
+    bak_f:close()
   end
 
   -- Capture previous version before reload

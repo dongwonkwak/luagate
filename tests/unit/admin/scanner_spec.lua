@@ -503,6 +503,61 @@ describe("luagate.admin.scanner", function()
       os.remove = orig_os_remove
     end)
 
+    it("aborts before rename when backup creation fails for existing custom.yaml", function()
+      local orig_io_open = io.open
+      local orig_os_rename = os.rename
+      local orig_os_remove = os.remove
+      local rename_attempted = false
+      local removed_paths = {}
+
+      io.open = function(path, mode)
+        if path == "conf/scanner-patterns/custom.yaml.tmp" and mode == "w" then
+          return {
+            write = function() end,
+            close = function() end,
+          }
+        end
+        if path == "conf/scanner-patterns/custom.yaml" and mode == "r" then
+          return {
+            read = function()
+              return "old content"
+            end,
+            close = function() end,
+          }
+        end
+        if path == "conf/scanner-patterns/custom.yaml.bak" and mode == "w" then
+          return nil, "permission denied"
+        end
+        return orig_io_open(path, mode)
+      end
+      os.rename = function()
+        rename_attempted = true
+        return true
+      end
+      os.remove = function(path)
+        removed_paths[#removed_paths + 1] = path
+        return true
+      end
+
+      request_body = "patterns:\n  - threat_type: sqli\n    rule_name: test\n    pattern: test\n    score: 0.9"
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_put_patterns()
+
+      assert.equals(500, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("internal_error", body.error)
+      assert.equals("scanner", body.stage)
+      assert.equals("cannot create backup file", body.details[1])
+      assert.is_false(rename_attempted)
+      assert.same({ "conf/scanner-patterns/custom.yaml.tmp" }, removed_paths)
+      assert.is_nil(mock_scanner_dict["scanner_reload_lock"])
+
+      io.open = orig_io_open
+      os.rename = orig_os_rename
+      os.remove = orig_os_remove
+    end)
+
     it("returns 200 with metadata_warning when metadata update fails after successful reload", function()
       local orig_io_open = io.open
       local orig_os_rename = os.rename
