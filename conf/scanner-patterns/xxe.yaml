@@ -1,9 +1,10 @@
 # XML External Entity (XXE) patterns (OWASP CRS-inspired)
-threat_type: "xxe"
 patterns:
-  - name: "xxe_entity_decl"
+  - threat_type: "xxe"
+    rule_name: "xxe_entity_decl"
     pattern: "(?i)(<!entity\\s)"
     score: 0.9
-  - name: "xxe_doctype_system"
+  - threat_type: "xxe"
+    rule_name: "xxe_doctype_system"
     pattern: "(?i)(<!doctype[^>]+system\\s)"
     score: 0.85

@@ -1,18 +1,22 @@
 # Cross-Site Scripting (XSS) patterns (OWASP CRS-inspired)
-threat_type: "xss"
 patterns:
-  - name: "xss_script_tag"
+  - threat_type: "xss"
+    rule_name: "xss_script_tag"
     pattern: "(?i)<\\s*script[^>]*>"
     score: 0.9
-  - name: "xss_javascript_uri"
+  - threat_type: "xss"
+    rule_name: "xss_javascript_uri"
     pattern: "(?i)javascript\\s*:"
     score: 0.85
-  - name: "xss_event_handler"
+  - threat_type: "xss"
+    rule_name: "xss_event_handler"
     pattern: "(?i)\\bon\\w+\\s*="
     score: 0.8
-  - name: "xss_img_onerror"
+  - threat_type: "xss"
+    rule_name: "xss_img_onerror"
     pattern: "(?i)<\\s*img[^>]+onerror\\s*="
     score: 0.9
-  - name: "xss_dom_sink"
+  - threat_type: "xss"
+    rule_name: "xss_dom_sink"
     pattern: "(?i)(document\\.cookie|document\\.write|eval\\s*\\()"
     score: 0.85
