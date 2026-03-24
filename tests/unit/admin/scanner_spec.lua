@@ -1,3 +1,4 @@
+-- luacheck: ignore 122
 -- tests/unit/admin/scanner_spec.lua
 --
 -- Unit tests for lua/luagate/admin/scanner.lua Admin API handlers.
@@ -44,6 +45,7 @@ local cjson = cjson_stub
 local ngx_body_parts = {}
 local ngx_log_calls = {}
 local mock_scanner_dict = {}
+local mock_dict_set_fail_key = nil -- when set, dict:set() for this key returns false
 local scanner_reload_result = nil
 local scanner_reload_error = nil
 local request_body = nil
@@ -106,6 +108,9 @@ local mock_dict_mt = {
     return mock_scanner_dict[key]
   end,
   set = function(_, key, value)
+    if mock_dict_set_fail_key and key == mock_dict_set_fail_key then
+      return false, "no memory"
+    end
     mock_scanner_dict[key] = value
     return true
   end,
@@ -138,6 +143,7 @@ local function reset_state()
   ngx_body_parts = {}
   ngx_log_calls = {}
   mock_scanner_dict = {}
+  mock_dict_set_fail_key = nil
   scanner_reload_result = { version = string.rep("a", 64), pattern_count = 24 }
   scanner_reload_error = nil
   request_body = nil
@@ -156,7 +162,7 @@ describe("luagate.admin.scanner", function()
   describe("handle_get_patterns()", function()
     it("returns current pattern metadata from shared dict", function()
       mock_scanner_dict["scanner:active_version"] = "abc123"
-      mock_scanner_dict["scanner:loaded_at"] = "2026-03-24 09:00:00"
+      mock_scanner_dict["scanner:loaded_at"] = "2026-03-24T09:00:00Z"
       mock_scanner_dict["scanner:pattern_count"] = 24
 
       local scanner_admin = require("luagate.admin.scanner")
@@ -166,7 +172,7 @@ describe("luagate.admin.scanner", function()
       assert.equals(1, #ngx_body_parts)
       local body = cjson.decode(ngx_body_parts[1])
       assert.equals("abc123", body.active_version)
-      assert.equals("2026-03-24 09:00:00", body.loaded_at)
+      assert.equals("2026-03-24T09:00:00Z", body.loaded_at)
       assert.equals(24, body.pattern_count)
       assert.is_table(body.patterns)
     end)
@@ -179,6 +185,36 @@ describe("luagate.admin.scanner", function()
       local body = cjson.decode(ngx_body_parts[1])
       assert.equals(0, body.pattern_count)
       assert.is_table(body.patterns)
+    end)
+
+    it("returns pattern metadata from shared dict when available", function()
+      local patterns_data = {
+        { threat_type = "sqli", rule_name = "sqli_union", score = 0.9 },
+      }
+      mock_scanner_dict["scanner:active_version"] = "abc123"
+      mock_scanner_dict["scanner:pattern_count"] = 1
+      mock_scanner_dict["scanner:pattern_metadata"] = cjson.encode(patterns_data)
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_get_patterns()
+
+      assert.equals(200, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals(1, #body.patterns)
+      assert.equals("sqli", body.patterns[1].threat_type)
+      assert.equals("sqli_union", body.patterns[1].rule_name)
+    end)
+
+    it("returns 503 when shared dict unavailable", function()
+      ngx.shared.luagate_scanner_patterns = nil
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_get_patterns()
+
+      assert.equals(503, ngx.status)
+
+      -- Restore for other tests
+      ngx.shared.luagate_scanner_patterns = mock_dict_mt
     end)
   end)
 
@@ -199,10 +235,15 @@ describe("luagate.admin.scanner", function()
       assert.equals(string.rep("b", 64), body.new_version)
       assert.equals(15, body.pattern_count)
       assert.equals("old_version", body.previous_version)
+      -- reloaded_at should be ISO-8601 format
+      assert.is_string(body.reloaded_at)
+      assert.truthy(body.reloaded_at:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$"))
 
       -- Verify shared dict updated
       assert.equals(string.rep("b", 64), mock_scanner_dict["scanner:active_version"])
       assert.equals(15, mock_scanner_dict["scanner:pattern_count"])
+      -- loaded_at should be ISO-8601
+      assert.truthy(mock_scanner_dict["scanner:loaded_at"]:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$"))
     end)
 
     it("returns 409 when reload lock is held", function()
@@ -263,6 +304,25 @@ describe("luagate.admin.scanner", function()
       -- Lock should be released
       assert.is_nil(mock_scanner_dict["scanner_reload_lock"])
     end)
+
+    it("returns 500 when metadata update fails (dict:set failure)", function()
+      scanner_reload_result = {
+        version = string.rep("d", 64),
+        pattern_count = 5,
+      }
+      mock_dict_set_fail_key = "scanner:active_version"
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_post_reload()
+
+      assert.equals(500, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("metadata_update_failed", body.error)
+      assert.equals("scanner", body.stage)
+
+      -- Lock should be released even on metadata failure
+      assert.is_nil(mock_scanner_dict["scanner_reload_lock"])
+    end)
   end)
 
   describe("handle_put_patterns()", function()
@@ -300,6 +360,126 @@ describe("luagate.admin.scanner", function()
       local body = cjson.decode(ngx_body_parts[1])
       assert.equals("reload_in_progress", body.error)
       assert.equals("scanner", body.stage)
+    end)
+
+    it("returns reloaded_at in ISO-8601 format on success", function()
+      -- This test requires io.open/os.rename stubs which are complex.
+      -- The PUT handler writes temp files. For this test we stub io.open
+      -- and os.rename at the global level.
+      local orig_io_open = io.open
+      local orig_os_rename = os.rename
+      local orig_os_remove = os.remove
+
+      -- Stub io.open to return a mock file handle
+      io.open = function(path, mode)
+        if mode == "w" then
+          return {
+            write = function(_, _content) end,
+            close = function() end,
+          }
+        elseif mode == "r" then
+          -- custom.yaml does not exist (new file case)
+          return nil, "no such file"
+        end
+        return orig_io_open(path, mode)
+      end
+      os.rename = function()
+        return true
+      end
+      os.remove = function()
+        return true
+      end
+
+      request_body = "patterns:\n  - threat_type: sqli\n    rule_name: test\n    pattern: test\n    score: 0.9"
+      scanner_reload_result = {
+        version = string.rep("e", 64),
+        pattern_count = 1,
+      }
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_put_patterns()
+
+      assert.equals(200, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.is_string(body.reloaded_at)
+      assert.truthy(body.reloaded_at:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$"))
+      -- Should NOT have 'message' field (replaced by reloaded_at)
+      assert.is_nil(body.message)
+
+      -- Restore
+      io.open = orig_io_open
+      os.rename = orig_os_rename
+      os.remove = orig_os_remove
+    end)
+
+    it("returns 500 when metadata update fails after successful reload", function()
+      local orig_io_open = io.open
+      local orig_os_rename = os.rename
+      local orig_os_remove = os.remove
+
+      io.open = function(path, mode)
+        if mode == "w" then
+          return {
+            write = function() end,
+            close = function() end,
+          }
+        elseif mode == "r" then
+          return nil, "no such file"
+        end
+        return orig_io_open(path, mode)
+      end
+      os.rename = function()
+        return true
+      end
+      os.remove = function()
+        return true
+      end
+
+      request_body = "patterns:\n  - threat_type: sqli\n    rule_name: test\n    pattern: test\n    score: 0.9"
+      scanner_reload_result = {
+        version = string.rep("f", 64),
+        pattern_count = 1,
+      }
+      mock_dict_set_fail_key = "scanner:active_version"
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_put_patterns()
+
+      assert.equals(500, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("metadata_update_failed", body.error)
+
+      -- Lock should be released
+      assert.is_nil(mock_scanner_dict["scanner_reload_lock"])
+
+      -- Restore
+      io.open = orig_io_open
+      os.rename = orig_os_rename
+      os.remove = orig_os_remove
+    end)
+  end)
+
+  describe("audit_log timestamps", function()
+    it("uses ISO-8601 format in audit log entries", function()
+      scanner_reload_result = {
+        version = string.rep("g", 64),
+        pattern_count = 3,
+      }
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_post_reload()
+
+      -- Check that audit log entries contain ISO-8601 timestamps
+      local found_iso = false
+      for _, entry in ipairs(ngx_log_calls) do
+        local msg = table.concat(entry.args, "")
+        -- ISO-8601 pattern: YYYY-MM-DDTHH:MM:SSZ
+        if msg:match("%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ") then
+          found_iso = true
+          break
+        end
+      end
+      assert.is_true(found_iso, "audit log should contain ISO-8601 timestamp")
     end)
   end)
 end)

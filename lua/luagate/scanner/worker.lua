@@ -29,6 +29,11 @@ local SCANNER_DICT_NAME = "luagate_scanner_patterns"
 -- Timer interval in seconds (ADR-014 §5).
 local CHECK_INTERVAL = 1
 
+-- Reload duration warning threshold in seconds (ADR-014 §7).
+-- L2 watchdog integration is deferred to a future phase; this provides
+-- observability by logging CRIT when reload exceeds the budget.
+local RELOAD_WARN_THRESHOLD = 5
+
 --- Timer callback: check shared dict version and reload if changed.
 -- @param premature boolean  true when Nginx is shutting down
 local function check_version(premature)
@@ -54,7 +59,23 @@ local function check_version(premature)
 
   -- Version changed — reload patterns in this worker
   local scanner_ffi = require("luagate.scanner.ffi")
+  local t0 = ngx.now()
   local result, err = scanner_ffi.reload(_patterns_dir)
+  local elapsed = ngx.now() - t0
+
+  if elapsed > RELOAD_WARN_THRESHOLD then
+    ngx.log(
+      ngx.CRIT,
+      "[luagate:scanner:worker] reload on worker ",
+      ngx.worker.id(),
+      " took ",
+      string.format("%.3f", elapsed),
+      "s (threshold ",
+      RELOAD_WARN_THRESHOLD,
+      "s) — ADR-014 §7 watchdog integration pending"
+    )
+  end
+
   if not result then
     ngx.log(
       ngx.WARN,
@@ -62,7 +83,9 @@ local function check_version(premature)
       ngx.worker.id(),
       ": ",
       tostring(err),
-      " (LKG preserved)"
+      " (LKG preserved, elapsed=",
+      string.format("%.3f", elapsed),
+      "s)"
     )
     return
   end
@@ -75,7 +98,10 @@ local function check_version(premature)
     " reloaded patterns: version=",
     result.version,
     " count=",
-    result.pattern_count
+    result.pattern_count,
+    " elapsed=",
+    string.format("%.3f", elapsed),
+    "s"
   )
 end
 

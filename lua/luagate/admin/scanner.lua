@@ -9,6 +9,9 @@
 --   - PUT: validate -> write tmp -> rename -> reload -> rollback on failure
 --   - ngx.ctx MUST NOT store scanner cache
 --   - ngx.worker.id() per AGENTS.md invariant
+--   - Admin plane: blocking I/O (io.open, os.rename, os.remove) permitted
+--     in content_by_lua (same pattern as policies.lua — admin port 9090 only,
+--     not data-plane hot path)
 --
 -- Implementation: lua/luagate/admin/scanner.lua
 -- Tests: tests/unit/admin/scanner_spec.lua
@@ -100,7 +103,7 @@ end
 -- @return boolean  true if audit write succeeded
 local function audit_log(event, fields)
   fields = fields or {}
-  fields.timestamp = ngx.utctime()
+  fields.timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
   fields.event = event
   fields.actor_ip = ngx.var.remote_addr or "unknown"
 
@@ -174,15 +177,33 @@ end
 -- [5] Verify stage of ADR-014 pipeline.
 -- @param version       string  SHA256 hex
 -- @param pattern_count number
+-- @return boolean  true on success, false if any set() failed
+-- @return string|nil  error message on failure
 local function update_scanner_metadata(version, pattern_count)
   local dict = get_dict()
   if not dict then
-    return
+    return false, "scanner shared dict unavailable"
   end
 
-  dict:set("scanner:active_version", version)
-  dict:set("scanner:loaded_at", ngx.utctime())
-  dict:set("scanner:pattern_count", pattern_count)
+  local ok, err = dict:set("scanner:active_version", version)
+  if not ok then
+    ngx.log(ngx.ERR, "[luagate:admin:scanner] dict:set scanner:active_version failed: ", tostring(err))
+    return false, "metadata update failed: scanner:active_version: " .. tostring(err)
+  end
+
+  local ok2, err2 = dict:set("scanner:loaded_at", os.date("!%Y-%m-%dT%H:%M:%SZ"))
+  if not ok2 then
+    ngx.log(ngx.ERR, "[luagate:admin:scanner] dict:set scanner:loaded_at failed: ", tostring(err2))
+    return false, "metadata update failed: scanner:loaded_at: " .. tostring(err2)
+  end
+
+  local ok3, err3 = dict:set("scanner:pattern_count", pattern_count)
+  if not ok3 then
+    ngx.log(ngx.ERR, "[luagate:admin:scanner] dict:set scanner:pattern_count failed: ", tostring(err3))
+    return false, "metadata update failed: scanner:pattern_count: " .. tostring(err3)
+  end
+
+  return true, nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -190,6 +211,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- GET /api/v1/scanner/patterns — return current pattern status.
+-- Returns metadata from shared dict (no filesystem I/O in GET).
 function _M.handle_get_patterns()
   local dict = get_dict()
   if not dict then
@@ -201,11 +223,22 @@ function _M.handle_get_patterns()
   local loaded_at = dict:get("scanner:loaded_at") or cjson.null
   local pattern_count = tonumber(dict:get("scanner:pattern_count")) or 0
 
+  -- Retrieve per-pattern metadata from shared dict (populated at reload time).
+  -- Stored as JSON-encoded array under scanner:pattern_metadata key.
+  local patterns = {}
+  local meta_json = dict:get("scanner:pattern_metadata")
+  if meta_json then
+    local decoded = cjson.decode(meta_json)
+    if decoded then
+      patterns = decoded
+    end
+  end
+
   send_json(200, {
     active_version = active_version,
     loaded_at = loaded_at,
     pattern_count = pattern_count,
-    patterns = {},
+    patterns = patterns,
   })
 end
 
@@ -293,6 +326,10 @@ function _M.handle_put_patterns()
   local previous_version = dict and dict:get("scanner:active_version") or nil
 
   -- [6] Atomic rename: tmp -> custom.yaml
+  -- NOTE: rename MUST happen before reload because luagate_scanner_reload()
+  -- reads the entire conf/scanner-patterns/ directory. The file must be in
+  -- canonical position for reload to see it. Rollback in [7] restores from
+  -- .bak (had_existing=true) or removes canonical (had_existing=false).
   local rename_ok, rename_err = os.rename(tmp_path, CUSTOM_YAML_PATH)
   if not rename_ok then
     os.remove(tmp_path)
@@ -341,12 +378,35 @@ function _M.handle_put_patterns()
   end
 
   -- [8] Success: update shared dict metadata
-  update_scanner_metadata(result.version, result.pattern_count)
+  local meta_ok, meta_err = update_scanner_metadata(result.version, result.pattern_count)
+  if not meta_ok then
+    -- Metadata update failure means other workers cannot sync.
+    -- fail-closed: rollback and return error.
+    if had_existing then
+      local rollback_ok = os.rename(bak_path, CUSTOM_YAML_PATH)
+      if not rollback_ok then
+        ngx.log(
+          ngx.CRIT,
+          "[luagate:admin:scanner] rollback failed after metadata error: cannot restore custom.yaml from .bak"
+        )
+      end
+    else
+      local remove_ok = os.remove(CUSTOM_YAML_PATH)
+      if not remove_ok then
+        ngx.log(ngx.CRIT, "[luagate:admin:scanner] rollback failed after metadata error: cannot remove custom.yaml")
+      end
+    end
+    release_reload_lock(owner_id)
+    send_error(500, "metadata_update_failed", "scanner", tostring(meta_err))
+    return
+  end
 
   -- Remove backup
   os.remove(bak_path)
 
   release_reload_lock(owner_id)
+
+  local reloaded_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
   -- Post-commit audit (best-effort)
   audit_log("scanner_pattern_update_success", {
@@ -359,7 +419,7 @@ function _M.handle_put_patterns()
     previous_version = previous_version,
     new_version = result.version,
     pattern_count = result.pattern_count,
-    message = "patterns updated and reloaded",
+    reloaded_at = reloaded_at,
   })
 end
 
@@ -407,9 +467,17 @@ function _M.handle_post_reload()
   end
 
   -- [4] Update shared dict metadata
-  update_scanner_metadata(result.version, result.pattern_count)
+  local meta_ok, meta_err = update_scanner_metadata(result.version, result.pattern_count)
+  if not meta_ok then
+    release_reload_lock(owner_id)
+    ngx.log(ngx.ERR, "[luagate:admin:scanner] POST reload metadata update failed: ", tostring(meta_err))
+    send_error(500, "metadata_update_failed", "scanner", tostring(meta_err))
+    return
+  end
 
   release_reload_lock(owner_id)
+
+  local reloaded_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
   -- Post-commit audit
   audit_log("scanner_pattern_reload_success", {
@@ -422,7 +490,7 @@ function _M.handle_post_reload()
     previous_version = previous_version,
     new_version = result.version,
     pattern_count = result.pattern_count,
-    reloaded_at = ngx.utctime(),
+    reloaded_at = reloaded_at,
   })
 end
 
