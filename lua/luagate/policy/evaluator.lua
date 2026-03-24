@@ -329,6 +329,7 @@ end
 --     action          = "allow" | "deny",
 --     matched_rule    = rule.id string or nil (nil when default_action fires),
 --     decision_source = "rule" | "default",
+--     rate_limit      = table or nil (ADR-012: matched rule's rate_limit config),
 --   }
 --
 -- On internal error the function returns a fail-closed deny result so the
@@ -338,17 +339,17 @@ end
 -- @param request_ctx    table   Request context: { path, host, method, src_ip,
 --                               query_param, header }
 -- @param default_action string  "allow" | "deny" — from policy.global.default_action
--- @return table  { action, matched_rule, decision_source }
+-- @return table  { action, matched_rule, decision_source, rate_limit }
 function _M.evaluate(rules, request_ctx, default_action)
   -- Fail-closed guard: invalid arguments → deny
   if type(rules) ~= "table" or type(request_ctx) ~= "table" then
-    return { action = "deny", matched_rule = nil, decision_source = "error" }
+    return { action = "deny", matched_rule = nil, decision_source = "error", rate_limit = nil }
   end
 
   if default_action ~= "allow" and default_action ~= "deny" then
     -- global.default_action is mandatory (validator enforces this);
     -- if somehow missing, fail-closed.
-    return { action = "deny", matched_rule = nil, decision_source = "error" }
+    return { action = "deny", matched_rule = nil, decision_source = "error", rate_limit = nil }
   end
 
   local ok, result = pcall(function()
@@ -359,6 +360,7 @@ function _M.evaluate(rules, request_ctx, default_action)
           action = rule.action,
           matched_rule = rule.id,
           decision_source = "rule",
+          rate_limit = rule.rate_limit,
         }
       end
     end
@@ -367,12 +369,13 @@ function _M.evaluate(rules, request_ctx, default_action)
       action = default_action,
       matched_rule = nil,
       decision_source = "default",
+      rate_limit = nil,
     }
   end)
 
   if not ok then
     -- Unexpected error in matching logic → fail-closed
-    return { action = "deny", matched_rule = nil, decision_source = "error" }
+    return { action = "deny", matched_rule = nil, decision_source = "error", rate_limit = nil }
   end
 
   return result

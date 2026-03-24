@@ -612,6 +612,37 @@ describe("validator.validate — Stream rules", function()
     assert.matches("id", err)
   end)
 
+  it("rejects stream rule.id containing colon", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "rule:bad" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("rejects stream rule.id containing uppercase", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "Rule-Bad" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("accepts stream rule.id with lowercase, digits, hyphens only", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "my-stream-rule-01" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects stream rule.id containing underscores", function()
+    local p = minimal_policy()
+    p.stream_rules = { stream_rule({ id = "my_stream_rule" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
   it("rejects Stream rule with missing priority", function()
     local p = minimal_policy()
     p.stream_rules = { stream_rule({ priority = REMOVE }) }
@@ -969,6 +1000,225 @@ describe("validator.validate — id uniqueness", function()
     p.stream_rules = { stream_rule({ id = "stream-1" }) }
     local _, err = validator.validate(p)
     assert.is_nil(err)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: rate_limit field validation (ADR-012)
+-- ---------------------------------------------------------------------------
+
+describe("validator.validate — rate_limit (ADR-012)", function()
+  it("accepts HTTP allow rule with valid rate_limit", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("accepts HTTP allow rule without rate_limit (optional)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ action = "allow" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects rate_limit on deny rule", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "deny",
+        rate_limit = { requests = 100, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("rate_limit", err)
+    assert.matches("allow", err)
+  end)
+
+  it("rejects rate_limit with non-table value", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ action = "allow", rate_limit = "invalid" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("rate_limit.*must be a map", err)
+  end)
+
+  it("rejects rate_limit with missing requests", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with requests = 0", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 0, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with negative requests", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = -10, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with float requests", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 10.5, window = 60, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("requests", err)
+  end)
+
+  it("rejects rate_limit with missing window", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("window", err)
+  end)
+
+  it("rejects rate_limit with window = 0", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 0, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("window", err)
+  end)
+
+  it("rejects rate_limit with unsupported scope", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 60, scope = "api_key" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("scope", err)
+    assert.matches("client_ip", err)
+  end)
+
+  it("rejects rate_limit with missing scope", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 100, window = 60 },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(_)
+    assert.is_string(err)
+    assert.matches("scope", err)
+  end)
+
+  it("accepts rate_limit with minimum valid values (requests=1, window=1)", function()
+    local p = minimal_policy()
+    p.rules = {
+      http_rule({
+        action = "allow",
+        rate_limit = { requests = 1, window = 1, scope = "client_ip" },
+      }),
+    }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: rule.id format validation (ADR-012 key safety)
+-- ---------------------------------------------------------------------------
+
+describe("validator.validate — rule.id format", function()
+  it("rejects http rule.id containing colon", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "rule:with:colons" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("colons and special chars are forbidden", err)
+  end)
+
+  it("rejects http rule.id containing uppercase", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "RuleUpper" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("rejects http rule.id containing spaces", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "rule with spaces" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
+  end)
+
+  it("accepts http rule.id with lowercase, digits, hyphens (no underscores)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "my-rule-01" }) }
+    local _, err = validator.validate(p)
+    assert.is_nil(err)
+  end)
+
+  it("rejects http rule.id containing underscores (policy-engine.md spec)", function()
+    local p = minimal_policy()
+    p.rules = { http_rule({ id = "my-rule_01" }) }
+    local _, err = validator.validate(p)
+    assert.is_not_nil(err)
+    assert.matches("must match", err)
   end)
 end)
 

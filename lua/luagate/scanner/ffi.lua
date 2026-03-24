@@ -29,6 +29,11 @@ int luagate_scan_http(
     double *score_out
 );
 int luagate_scanner_init(const char *patterns_path, size_t patterns_path_len);
+int luagate_scanner_reload(
+    const char *patterns_path, size_t patterns_path_len,
+    char *version_out, size_t version_out_cap,
+    size_t *pattern_count_out
+);
 ]])
 
 -- Load the shared library.  ffi.load resolves via LD_LIBRARY_PATH / RPATH.
@@ -46,12 +51,22 @@ end
 -- Must be >= the longest possible threat_type / rule_name string in lib.rs.
 local THREAT_BUF_CAP = 64
 local RULE_BUF_CAP = 128
+local VERSION_BUF_CAP = 65 -- 64-char SHA256 hex + NUL
 
 -- Error code constants (docs/spec/rust-ffi-modules.md)
 local LUAGATE_BUFFER_TOO_SMALL = -2
 local LUAGATE_BUDGET_EXCEEDED = -3
 local LUAGATE_INTERNAL_ERROR = -4
+-- NOTE: LUAGATE_TIMEOUT is defined in the ABI but not yet returned by
+-- luagate_scanner_reload() in Rust.  ADR-009 Layer 2 watchdog integration
+-- (detached thread timeout) is deferred to Phase 3-Reliability (DON-232).
+-- The scan path handles it defensively; reload path logs CRIT via worker.lua.
 local LUAGATE_TIMEOUT = -5
+
+-- Reload-specific error codes (must match src/scanner/src/lib.rs)
+local LUAGATE_RELOAD_IO_ERROR = -10
+local LUAGATE_RELOAD_PARSE_ERROR = -11
+local LUAGATE_RELOAD_COMPILE_ERROR = -12
 
 --- Increment per-worker FFI timeout leak counter in shared dict.
 -- ADR-009 Layer 2: tracks detached watchdog threads per worker.
@@ -169,6 +184,55 @@ function M.init(patterns_path)
     return false, "scanner_init_failed:" .. rc
   end
   return true, nil
+end
+
+--- Reload scanner patterns from a directory at runtime (ADR-014 §1).
+--
+-- 5-stage pipeline: Read -> Parse -> Compile -> Swap -> Verify.
+-- On failure, last-known-good patterns are preserved.
+--
+-- @param patterns_path string  Path to YAML pattern directory.
+-- @return table|nil  { version = string, pattern_count = number } on success
+-- @return string|nil  Error description on failure
+function M.reload(patterns_path)
+  if not patterns_path or patterns_path == "" then
+    return nil, "scanner_reload_failed:empty_path"
+  end
+
+  local version_buf = ffi.new("char[?]", VERSION_BUF_CAP)
+  local count_out = ffi.new("size_t[1]")
+
+  local ok, rc = pcall(function()
+    return lib.luagate_scanner_reload(patterns_path, #patterns_path, version_buf, VERSION_BUF_CAP, count_out)
+  end)
+
+  if not ok then
+    return nil, "scanner_reload_ffi_error:" .. tostring(rc)
+  end
+
+  if rc ~= 0 then
+    -- Classify reload error by return code for caller (admin API) to
+    -- distinguish validation errors (400) from internal errors (500).
+    local err_category
+    if rc == LUAGATE_RELOAD_IO_ERROR then
+      err_category = "io_error"
+    elseif rc == LUAGATE_RELOAD_PARSE_ERROR then
+      err_category = "validation_error"
+    elseif rc == LUAGATE_RELOAD_COMPILE_ERROR then
+      err_category = "internal_error"
+    else
+      err_category = "internal_error"
+    end
+    return nil, "scanner_reload_failed:" .. err_category .. ":" .. rc
+  end
+
+  local version = ffi.string(version_buf)
+  local pattern_count = tonumber(count_out[0]) or 0
+
+  return {
+    version = version,
+    pattern_count = pattern_count,
+  }, nil
 end
 
 return M

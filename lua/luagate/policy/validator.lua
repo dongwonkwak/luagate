@@ -260,9 +260,14 @@ local function validate_http_rule(rule)
     return legacy_err
   end
 
-  -- id: required, non-empty string
+  -- id: required, non-empty string matching [a-z0-9-]+ (no colon, no underscore — policy-engine.md §2, ADR-012 §2)
   if not is_nonempty_string(rule.id) then
     return "http rule is missing required field 'id' (must be a non-empty string)"
+  end
+  if rule.id:find("[^a-z0-9%-]") then
+    return "http rule '"
+      .. rule.id
+      .. "': 'id' must match [a-z0-9-]+ (underscores, colons and special chars are forbidden for key safety)"
   end
 
   -- priority: required, integer
@@ -303,6 +308,37 @@ local function validate_http_rule(rule)
     return scope_err
   end
 
+  -- rate_limit: optional map (ADR-012)
+  -- Only valid on action=allow rules. When present, requests/window/scope are all required.
+  if rule.rate_limit ~= nil then
+    if type(rule.rate_limit) ~= "table" then
+      return "http rule '" .. rule.id .. "': 'rate_limit' must be a map"
+    end
+
+    -- rate_limit is only valid on allow rules (ADR-012 §3)
+    if rule.action ~= "allow" then
+      return "http rule '" .. rule.id .. "': 'rate_limit' is only valid on action='allow' rules"
+    end
+
+    -- requests: required positive integer
+    if not is_integer(rule.rate_limit.requests) or rule.rate_limit.requests <= 0 then
+      return "http rule '" .. rule.id .. "': 'rate_limit.requests' must be a positive integer"
+    end
+
+    -- window: required positive integer
+    if not is_integer(rule.rate_limit.window) or rule.rate_limit.window <= 0 then
+      return "http rule '" .. rule.id .. "': 'rate_limit.window' must be a positive integer"
+    end
+
+    -- scope: required, MVP only supports "client_ip"
+    if rule.rate_limit.scope ~= "client_ip" then
+      return "http rule '"
+        .. rule.id
+        .. "': 'rate_limit.scope' must be 'client_ip', got: "
+        .. tostring(rule.rate_limit.scope)
+    end
+  end
+
   return nil
 end
 
@@ -315,9 +351,14 @@ local function validate_stream_rule(rule)
     return legacy_err
   end
 
-  -- id: required, non-empty string
+  -- id: required, non-empty string matching [a-z0-9-]+ (no colon, no underscore — policy-engine.md §2, ADR-012 §2)
   if not is_nonempty_string(rule.id) then
     return "stream rule is missing required field 'id' (must be a non-empty string)"
+  end
+  if rule.id:find("[^a-z0-9%-]") then
+    return "stream rule '"
+      .. rule.id
+      .. "': 'id' must match [a-z0-9-]+ (underscores, colons and special chars are forbidden for key safety)"
   end
 
   -- priority: required, integer

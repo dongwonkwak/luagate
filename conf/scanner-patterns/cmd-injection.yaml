@@ -1,12 +1,14 @@
 # Command Injection patterns (OWASP CRS-inspired)
-threat_type: "cmd_injection"
 patterns:
-  - name: "cmd_injection_shell_cmd"
+  - threat_type: "cmd_injection"
+    rule_name: "cmd_injection_shell_cmd"
     pattern: "[;&|`]\\s*(ls|cat|id|whoami|uname|wget|curl|chmod|bash|sh)\\b"
     score: 0.9
-  - name: "cmd_injection_subshell"
+  - threat_type: "cmd_injection"
+    rule_name: "cmd_injection_subshell"
     pattern: "(?i)\\$\\(.*\\)"
     score: 0.85
-  - name: "cmd_injection_backtick"
+  - threat_type: "cmd_injection"
+    rule_name: "cmd_injection_backtick"
     pattern: "`[^`]+`"
     score: 0.8

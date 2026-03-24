@@ -1,8 +1,14 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::sync::Mutex;
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
 #[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 
 // Return codes (ABI contract — docs/spec/rust-ffi-modules.md §4)
@@ -11,8 +17,16 @@ const LUAGATE_BUFFER_TOO_SMALL: i32 = -2;
 const LUAGATE_BUDGET_EXCEEDED: i32 = -3;
 const LUAGATE_INTERNAL_ERROR: i32 = -4;
 
+// Reload-specific error codes (ADR-014 §6: Codex feedback — differentiated errors)
+const LUAGATE_RELOAD_IO_ERROR: i32 = -10;
+const LUAGATE_RELOAD_PARSE_ERROR: i32 = -11;
+const LUAGATE_RELOAD_COMPILE_ERROR: i32 = -12;
+
 // Per-request budget: 5 ms
 const BUDGET_NS: u128 = 5_000_000;
+
+// Reload budget: 100 ms (ADR-014 §7)
+const RELOAD_BUDGET_NS: u128 = 100_000_000;
 
 // Test-only budget override.  When non-zero, budget_exceeded uses this value
 // instead of BUDGET_NS so that timing-sensitive tests can run without flaking.
@@ -22,9 +36,12 @@ static TEST_BUDGET_NS_OVERRIDE: AtomicU64 = AtomicU64::new(0);
 // Input size limits: 8 KB per field
 const MAX_FIELD_LEN: usize = 8 * 1024;
 
+// Maximum pattern file size: 1 MB (ADR-014 risk mitigation)
+const MAX_PATTERN_FILE_SIZE: u64 = 1_048_576;
+
 struct ThreatPattern {
-    threat_type: &'static str,
-    rule_name: &'static str,
+    threat_type: String,
+    rule_name: String,
     pattern: Regex,
     score: f64,
 }
@@ -33,16 +50,40 @@ struct Scanner {
     patterns: Vec<ThreatPattern>,
 }
 
-// Global scanner instance, initialised at most once.
-static SCANNER: Lazy<Mutex<Option<Scanner>>> = Lazy::new(|| Mutex::new(None));
+// Global scanner instance — RwLock per ADR-014 §2.
+// luagate_scan_http() uses try_read() for contention-free access in normal state.
+// luagate_scanner_init() and luagate_scanner_reload() use write() for exclusive access.
+static SCANNER: Lazy<RwLock<Option<Scanner>>> = Lazy::new(|| RwLock::new(None));
+
+// ADR-014 §7: Per-worker flag set when reload timeout occurs.
+// When true, all luagate_scan_http() calls return INTERNAL_ERROR.
+// Reset to false only on next successful reload.
+static SCANNER_RELOAD_FAILED: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
-// Default (hardcoded) patterns — used when init is not called or file load
-// fails.  These are the OWASP CRS-inspired rules described in the spec.
+// YAML schema for pattern files (ADR-014 §8)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct PatternFile {
+    patterns: Vec<PatternEntry>,
+}
+
+#[derive(Deserialize)]
+struct PatternEntry {
+    threat_type: String,
+    rule_name: String,
+    pattern: String,
+    score: f64,
+}
+
+// ---------------------------------------------------------------------------
+// Default (hardcoded) patterns — used when init is not called with a valid
+// patterns directory or YAML loading fails.
 // ---------------------------------------------------------------------------
 
 fn build_default_scanner() -> Scanner {
-    let raw_patterns: &[(&'static str, &'static str, &'static str, f64)] = &[
+    let raw_patterns: &[(&str, &str, &str, f64)] = &[
         // sqli
         (
             "sqli",
@@ -148,7 +189,7 @@ fn build_default_scanner() -> Scanner {
         // log4shell
         ("log4shell", "log4shell_jndi", r"(?i)\$\{jndi\s*:", 1.0),
         ("log4shell", "log4shell_nested", r"(?i)\$\{.*:.*\{", 0.8),
-        // scanner (automated scanner detection — matches common UA strings embedded in params)
+        // scanner (automated scanner detection)
         (
             "scanner",
             "scanner_tool",
@@ -161,8 +202,8 @@ fn build_default_scanner() -> Scanner {
         .iter()
         .filter_map(|(threat_type, rule_name, pat, score)| {
             Regex::new(pat).ok().map(|r| ThreatPattern {
-                threat_type,
-                rule_name,
+                threat_type: threat_type.to_string(),
+                rule_name: rule_name.to_string(),
                 pattern: r,
                 score: *score,
             })
@@ -184,12 +225,171 @@ fn budget_exceeded(elapsed: Duration) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// YAML pattern loader (ADR-014 §3: Read → Parse → Compile)
+// ---------------------------------------------------------------------------
+
+/// Error category for pattern loading — allows reload to return differentiated
+/// error codes (Codex feedback: -10 IO, -11 parse, -12 compile).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PatternLoadErrorKind {
+    Io,
+    Parse,
+    Compile,
+}
+
+#[derive(Debug)]
+struct PatternLoadError {
+    kind: PatternLoadErrorKind,
+    message: String,
+}
+
+impl std::fmt::Display for PatternLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+/// Load patterns from YAML files in a directory.
+/// Returns (Scanner, pattern_count, sha256_hex) on success.
+/// Returns Err(PatternLoadError) on any failure (Read/Parse/Compile).
+fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), PatternLoadError> {
+    let start = Instant::now();
+    let dir = Path::new(dir_path);
+
+    // Helper macro: build a PatternLoadError
+    macro_rules! ple {
+        ($kind:expr, $($arg:tt)*) => {
+            PatternLoadError { kind: $kind, message: format!($($arg)*) }
+        };
+    }
+
+    if !dir.is_dir() {
+        return Err(ple!(PatternLoadErrorKind::Io, "patterns directory does not exist: {}", dir_path));
+    }
+
+    // [1] Read: collect all .yaml files, sorted by filename (ADR-014 §4)
+    let mut yaml_files: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| ple!(PatternLoadErrorKind::Io, "cannot read patterns directory: {}", e))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
+        })
+        .collect();
+    yaml_files.sort_by_key(|e| e.file_name());
+
+    if yaml_files.is_empty() {
+        return Err(ple!(PatternLoadErrorKind::Io, "no .yaml files found in patterns directory"));
+    }
+
+    // SHA256 hasher: concatenate all file contents in sorted order (ADR-014 §4)
+    let mut hasher = Sha256::new();
+    let mut all_entries: Vec<PatternEntry> = Vec::new();
+
+    for entry in &yaml_files {
+        let path = entry.path();
+
+        // File size check (ADR-014 risk: YAML parsing memory explosion)
+        let metadata = fs::metadata(&path)
+            .map_err(|e| ple!(PatternLoadErrorKind::Io, "cannot stat {}: {}", path.display(), e))?;
+        if metadata.len() > MAX_PATTERN_FILE_SIZE {
+            return Err(ple!(PatternLoadErrorKind::Io, "pattern file {} exceeds 1MB limit ({})", path.display(), metadata.len()));
+        }
+
+        let content = fs::read(&path)
+            .map_err(|e| ple!(PatternLoadErrorKind::Io, "cannot read {}: {}", path.display(), e))?;
+
+        // Feed into SHA256
+        hasher.update(&content);
+
+        // [2] Parse
+        let pf: PatternFile = serde_yaml::from_slice(&content)
+            .map_err(|e| ple!(PatternLoadErrorKind::Parse, "YAML parse error in {}: {}", path.display(), e))?;
+
+        all_entries.extend(pf.patterns);
+    }
+
+    // Allowed threat_type values (docs/spec/security-scanner.md §2)
+    const VALID_THREAT_TYPES: &[&str] = &[
+        "sqli",
+        "xss",
+        "path_traversal",
+        "cmd_injection",
+        "ssrf",
+        "xxe",
+        "log4shell",
+        "scanner",
+    ];
+
+    // Validation: duplicate rule_name check (ADR-014 §8)
+    let mut seen_names = HashSet::new();
+    for entry in &all_entries {
+        if !seen_names.insert(&entry.rule_name) {
+            return Err(ple!(PatternLoadErrorKind::Parse, "duplicate rule_name: {}", entry.rule_name));
+        }
+        // threat_type enum check (security-scanner.md §2)
+        if !VALID_THREAT_TYPES.contains(&entry.threat_type.as_str()) {
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule '{}': invalid threat_type '{}' (allowed: {})", entry.rule_name, entry.threat_type, VALID_THREAT_TYPES.join(", ")));
+        }
+        // rule_name format: [a-z0-9_]+, max 64 chars
+        if entry.rule_name.len() > 64 {
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule_name '{}' exceeds 64 char limit", entry.rule_name));
+        }
+        if !entry
+            .rule_name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule_name '{}' contains invalid characters (must be [a-z0-9_]+)", entry.rule_name));
+        }
+        // score range check
+        if !(0.0..=1.0).contains(&entry.score) {
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule '{}': score {} out of range [0.0, 1.0]", entry.rule_name, entry.score));
+        }
+    }
+
+    // Budget check before compile
+    if start.elapsed().as_nanos() > RELOAD_BUDGET_NS {
+        return Err(ple!(PatternLoadErrorKind::Compile, "reload budget exceeded during read/parse"));
+    }
+
+    // [3] Compile: regex compilation. 1 failure = entire reload aborted.
+    let mut patterns = Vec::with_capacity(all_entries.len());
+    for entry in all_entries {
+        let regex = Regex::new(&entry.pattern)
+            .map_err(|e| ple!(PatternLoadErrorKind::Compile, "regex compile failed for '{}': {}", entry.rule_name, e))?;
+
+        patterns.push(ThreatPattern {
+            threat_type: entry.threat_type,
+            rule_name: entry.rule_name,
+            pattern: regex,
+            score: entry.score,
+        });
+
+        // Budget check per pattern
+        if start.elapsed().as_nanos() > RELOAD_BUDGET_NS {
+            return Err(ple!(PatternLoadErrorKind::Compile, "reload budget exceeded during regex compilation"));
+        }
+    }
+
+    let pattern_count = patterns.len();
+    let sha256_hex = format!("{:x}", hasher.finalize());
+
+    Ok((Scanner { patterns }, pattern_count, sha256_hex))
+}
+
+// ---------------------------------------------------------------------------
 // Public C API
 // ---------------------------------------------------------------------------
 
 /// Initialise the scanner.  Called once from `init_by_lua`.
 ///
 /// `patterns_path` may be empty ("") to use hardcoded defaults.
+/// When a valid directory path is provided, loads YAML patterns from that
+/// directory.  Falls back to hardcoded defaults on YAML load failure.
+///
 /// Returns LUAGATE_OK (0) on success, LUAGATE_INTERNAL_ERROR (-4) on failure.
 ///
 /// # Safety
@@ -198,35 +398,140 @@ fn budget_exceeded(elapsed: Duration) -> bool {
 #[no_mangle]
 pub extern "C" fn luagate_scanner_init(patterns_path: *const i8, patterns_path_len: usize) -> i32 {
     let scanner = if !patterns_path.is_null() && patterns_path_len > 0 {
-        // Attempt to load patterns from the supplied directory.  Fall back to
-        // hardcoded defaults on any error so the scanner is always available.
         let bytes =
             unsafe { std::slice::from_raw_parts(patterns_path as *const u8, patterns_path_len) };
         let path_str = match std::str::from_utf8(bytes) {
             Ok(s) => s,
             Err(_) => return LUAGATE_INTERNAL_ERROR,
         };
-        // For now the YAML loader is a stub that always falls back to the
-        // hardcoded patterns.  A full YAML parser would read the files under
-        // `path_str` and merge them.  We keep the interface correct so the
-        // caller does not need to change when YAML loading is added.
-        eprintln!(
-            "[luagate_scanner] WARNING: patterns_path '{}' specified but YAML loader is not yet \
-             implemented. Using built-in hardcoded patterns only.",
-            path_str
-        );
-        build_default_scanner()
+
+        // ADR-014: init failure is startup-fatal — no fallback to hardcoded.
+        // Lua init_by_lua must detect INTERNAL_ERROR and abort Nginx startup.
+        match load_patterns_from_dir(path_str) {
+            Ok((scanner, count, _sha)) => {
+                eprintln!(
+                    "[luagate_scanner] loaded {} patterns from '{}'",
+                    count, path_str
+                );
+                scanner
+            }
+            Err(e) => {
+                eprintln!(
+                    "[luagate_scanner] FATAL: YAML load from '{}' failed: {}",
+                    path_str, e
+                );
+                return LUAGATE_INTERNAL_ERROR;
+            }
+        }
     } else {
         build_default_scanner()
     };
 
-    match SCANNER.lock() {
+    match SCANNER.write() {
         Ok(mut guard) => {
             *guard = Some(scanner);
             LUAGATE_OK
         }
         Err(_) => LUAGATE_INTERNAL_ERROR,
     }
+}
+
+/// Runtime pattern reload (ADR-014 §1).
+///
+/// 5-stage pipeline: Read → Parse → Compile → Swap → Verify
+/// On failure, LKG is preserved and LUAGATE_INTERNAL_ERROR is returned.
+///
+/// `patterns_path` must point to the scanner-patterns directory.
+///
+/// On success, writes the SHA256 hex (64 bytes + NUL) into `version_out`
+/// if `version_out` is not NULL and `version_out_cap` >= 65.
+///
+/// Returns:
+///   LUAGATE_OK (0) on success
+///   LUAGATE_INTERNAL_ERROR (-4) on failure (LKG preserved)
+///
+/// # Safety
+/// `patterns_path` must be a valid pointer to `patterns_path_len` bytes.
+/// `version_out` may be NULL.
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn luagate_scanner_reload(
+    patterns_path: *const i8,
+    patterns_path_len: usize,
+    version_out: *mut i8,
+    version_out_cap: usize,
+    pattern_count_out: *mut usize,
+) -> i32 {
+    // Check SCANNER_RELOAD_FAILED flag — if a previous reload timed out,
+    // we still allow new reload attempts to recover.
+
+    if patterns_path.is_null() || patterns_path_len == 0 {
+        return LUAGATE_INTERNAL_ERROR;
+    }
+
+    let bytes =
+        unsafe { std::slice::from_raw_parts(patterns_path as *const u8, patterns_path_len) };
+    let path_str = match std::str::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return LUAGATE_INTERNAL_ERROR,
+    };
+
+    // [1-3] Read → Parse → Compile (outside write lock)
+    // Returns differentiated error codes per Codex feedback:
+    //   -10 (IO), -11 (parse/validation), -12 (compile)
+    let (new_scanner, count, sha256_hex) = match load_patterns_from_dir(path_str) {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("[luagate_scanner] reload failed: {}", e);
+            return match e.kind {
+                PatternLoadErrorKind::Io => LUAGATE_RELOAD_IO_ERROR,
+                PatternLoadErrorKind::Parse => LUAGATE_RELOAD_PARSE_ERROR,
+                PatternLoadErrorKind::Compile => LUAGATE_RELOAD_COMPILE_ERROR,
+            };
+        }
+    };
+
+    // [4] Swap: acquire write lock and replace scanner
+    match SCANNER.write() {
+        Ok(mut guard) => {
+            *guard = Some(new_scanner);
+        }
+        Err(_) => {
+            eprintln!("[luagate_scanner] reload failed: write lock poisoned");
+            return LUAGATE_INTERNAL_ERROR;
+        }
+    }
+
+    // Successful reload: clear SCANNER_RELOAD_FAILED flag (ADR-014 §7)
+    SCANNER_RELOAD_FAILED.store(false, Ordering::Release);
+
+    // [5] Verify: write version and pattern count to output buffers
+    if !version_out.is_null() && version_out_cap >= 65 {
+        let sha_bytes = sha256_hex.as_bytes();
+        let copy_len = sha_bytes.len().min(version_out_cap - 1);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                sha_bytes.as_ptr() as *const i8,
+                version_out,
+                copy_len,
+            );
+            *version_out.add(copy_len) = 0; // NUL terminator
+        }
+    }
+
+    if !pattern_count_out.is_null() {
+        unsafe {
+            *pattern_count_out = count;
+        }
+    }
+
+    eprintln!(
+        "[luagate_scanner] reload success: {} patterns, version={}",
+        count,
+        &sha256_hex[..8]
+    );
+
+    LUAGATE_OK
 }
 
 /// Scan an HTTP request for threats.
@@ -244,6 +549,7 @@ pub extern "C" fn luagate_scanner_init(patterns_path: *const i8, patterns_path_l
 /// All non-NULL pointer arguments must be valid for the stated length.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn luagate_scan_http(
     path_raw: *const i8,
     path_raw_len: usize,
@@ -264,6 +570,11 @@ pub extern "C" fn luagate_scan_http(
     score_out: *mut f64,
 ) -> i32 {
     let start = Instant::now();
+
+    // ADR-014 §7: Check SCANNER_RELOAD_FAILED flag first
+    if SCANNER_RELOAD_FAILED.load(Ordering::Acquire) {
+        return LUAGATE_INTERNAL_ERROR;
+    }
 
     // Validate output pointer requirements.
     if threat_type_out.is_null()
@@ -322,8 +633,10 @@ pub extern "C" fn luagate_scan_http(
     // MVP: body scanning is skipped when body_len == 0.
     let _ = (body, body_len);
 
-    // Acquire the scanner.
-    let guard = match SCANNER.lock() {
+    // Acquire the scanner via RwLock try_read() (ADR-014 §2).
+    // try_read() returns immediately — during reload (write lock held),
+    // it fails and we return INTERNAL_ERROR (fail-closed).
+    let guard = match SCANNER.try_read() {
         Ok(g) => g,
         Err(_) => return LUAGATE_INTERNAL_ERROR,
     };
@@ -331,9 +644,6 @@ pub extern "C" fn luagate_scan_http(
     let scanner = match guard.as_ref() {
         Some(s) => s,
         // Scanner not initialised — fail-closed per ADR-001.
-        // Startup-fatal: init_by_lua must call luagate_scanner_init before any
-        // request is processed.  Auto-init is removed to prevent silent
-        // recovery from misconfiguration.
         None => return LUAGATE_INTERNAL_ERROR,
     };
 
@@ -405,15 +715,63 @@ pub extern "C" fn luagate_scan_http(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn init_scanner_for_test() {
+        SCANNER_RELOAD_FAILED.store(false, Ordering::Release);
+        let mut guard = SCANNER.write().unwrap();
+        *guard = Some(build_default_scanner());
+    }
+
+    /// Scan helper that does NOT reset the scanner to defaults.
+    /// Use when testing a scanner loaded from YAML.
+    fn scan_without_reset(path_raw: &str, query_raw: &str) -> (i32, String, String, f64) {
+        SCANNER_RELOAD_FAILED.store(false, Ordering::Release);
+
+        let mut threat_buf = vec![0i8; 64];
+        let mut rule_buf = vec![0i8; 128];
+        let mut threat_len: usize = 0;
+        let mut rule_len: usize = 0;
+        let mut score: f64 = 0.0;
+
+        let rc = luagate_scan_http(
+            path_raw.as_ptr() as *const i8,
+            path_raw.len(),
+            path_raw.as_ptr() as *const i8,
+            path_raw.len(),
+            query_raw.as_ptr() as *const i8,
+            query_raw.len(),
+            query_raw.as_ptr() as *const i8,
+            query_raw.len(),
+            std::ptr::null(),
+            0,
+            threat_buf.as_mut_ptr(),
+            64,
+            &mut threat_len,
+            rule_buf.as_mut_ptr(),
+            128,
+            &mut rule_len,
+            &mut score,
+        );
+
+        let threat = if threat_len > 0 {
+            let bytes: Vec<u8> = threat_buf[..threat_len].iter().map(|&b| b as u8).collect();
+            String::from_utf8_lossy(&bytes).to_string()
+        } else {
+            String::new()
+        };
+
+        let rule = if rule_len > 0 {
+            let bytes: Vec<u8> = rule_buf[..rule_len].iter().map(|&b| b as u8).collect();
+            String::from_utf8_lossy(&bytes).to_string()
+        } else {
+            String::new()
+        };
+
+        (rc, threat, rule, score)
+    }
 
     fn make_scan_call(path_raw: &str, query_raw: &str) -> (i32, String, String, f64) {
         // Ensure scanner is initialised for unit tests.
-        {
-            let mut guard = SCANNER.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(build_default_scanner());
-            }
-        }
+        init_scanner_for_test();
 
         let mut threat_buf = vec![0i8; 64];
         let mut rule_buf = vec![0i8; 128];
@@ -506,6 +864,7 @@ mod tests {
 
     #[test]
     fn test_null_output_pointers_return_internal_error() {
+        init_scanner_for_test();
         let path = "/api/test";
         let query = "id=1";
         let mut threat_len: usize = 0;
@@ -561,13 +920,7 @@ mod tests {
 
     #[test]
     fn test_field_too_large_returns_internal_error() {
-        // Ensure scanner is initialised.
-        {
-            let mut guard = SCANNER.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(build_default_scanner());
-            }
-        }
+        init_scanner_for_test();
 
         let oversized = "A".repeat(MAX_FIELD_LEN + 1);
         let mut threat_buf = vec![0i8; 64];
@@ -600,8 +953,6 @@ mod tests {
 
     #[test]
     fn test_cmd_injection_detection() {
-        // Use a path that does not trigger path_traversal so cmd_injection is
-        // the first matching rule.
         let (rc, threat, _, _) = make_scan_call("/api/run", "; cat /tmp/data");
         assert_eq!(rc, 0);
         assert_eq!(threat, "cmd_injection");
@@ -630,15 +981,8 @@ mod tests {
 
     #[test]
     fn test_threat_type_buffer_too_small_returns_buffer_too_small() {
-        // Ensure scanner is initialised.
-        {
-            let mut guard = SCANNER.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(build_default_scanner());
-            }
-        }
+        init_scanner_for_test();
 
-        // XSS input — threat_type = "xss" (3 bytes); supply a 1-byte buffer.
         let path = "/page";
         let query = "q=<script>alert(1)</script>";
         let mut threat_buf = vec![0i8; 1]; // too small for "xss" (3 bytes)
@@ -671,19 +1015,12 @@ mod tests {
 
     #[test]
     fn test_rule_name_buffer_too_small_returns_buffer_too_small() {
-        // Ensure scanner is initialised.
-        {
-            let mut guard = SCANNER.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(build_default_scanner());
-            }
-        }
+        init_scanner_for_test();
 
-        // XSS input — rule_name = "xss_script_tag" (14 bytes); supply 1-byte buffer.
         let path = "/page";
         let query = "q=<script>alert(1)</script>";
         let mut threat_buf = vec![0i8; 64];
-        let mut rule_buf = vec![0i8; 1]; // too small for "xss_script_tag" (14 bytes)
+        let mut rule_buf = vec![0i8; 1]; // too small
         let mut threat_len: usize = 0;
         let mut rule_len: usize = 0;
         let mut score: f64 = 0.0;
@@ -711,35 +1048,39 @@ mod tests {
     }
 
     #[test]
-    fn test_init_with_patterns_path_warns_and_succeeds() {
-        // Calling init with a non-empty path should succeed (falls back to
-        // hardcoded patterns) and emit a warning to stderr.
-        // We cannot easily capture stderr here, so we just assert the return
-        // code is LUAGATE_OK to verify no regression.
-        let path = "/tmp/fake_patterns";
+    fn test_init_with_patterns_path_loads_yaml() {
+        // Create a temp directory with a valid YAML pattern file
+        let dir = std::env::temp_dir().join("luagate_test_init_yaml");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml_content = r#"patterns:
+  - threat_type: "sqli"
+    rule_name: "test_rule"
+    pattern: "(?i)test_inject"
+    score: 0.9
+"#;
+        fs::write(dir.join("test.yaml"), yaml_content).unwrap();
+
+        let path = dir.to_str().unwrap();
         let rc = luagate_scanner_init(path.as_ptr() as *const i8, path.len());
         assert_eq!(rc, LUAGATE_OK);
+
+        // Verify the loaded pattern detects (don't reset to defaults)
+        let (rc, threat, rule, _) = scan_without_reset("/", "q=test_inject");
+        assert_eq!(rc, 0);
+        assert_eq!(threat, "sqli");
+        assert_eq!(rule, "test_rule");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_non_utf8_input_uses_lossy_conversion_and_scans() {
-        // Use a generous budget (500 ms) so that lossy UTF-8 conversion
-        // overhead does not cause a spurious BUDGET_EXCEEDED on slow / loaded
-        // systems.  This test validates lossy-conversion correctness, not
-        // budget enforcement.
         TEST_BUDGET_NS_OVERRIDE.store(500_000_000, Ordering::Relaxed);
 
-        // Ensure scanner is initialised.
-        {
-            let mut guard = SCANNER.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(build_default_scanner());
-            }
-        }
+        init_scanner_for_test();
 
-        // Craft a query that contains invalid UTF-8 bytes mixed with a SQLi
-        // pattern.  The invalid byte (0xff) must not suppress pattern matching.
-        // "id=1 UNION SELECT" with a 0xff byte prepended.
         let mut query_bytes = vec![0xffu8];
         query_bytes.extend_from_slice(b"id=1 UNION SELECT * FROM users");
 
@@ -770,10 +1111,8 @@ mod tests {
             &mut score,
         );
 
-        // Reset budget override so other tests use the real 5 ms budget.
         TEST_BUDGET_NS_OVERRIDE.store(0, Ordering::Relaxed);
 
-        // Must return OK and detect sqli despite the leading invalid byte.
         assert_eq!(rc, LUAGATE_OK);
         assert!(
             threat_len > 0,
@@ -786,10 +1125,8 @@ mod tests {
 
     #[test]
     fn test_uninitialized_scanner_returns_internal_error() {
-        // Temporarily replace the scanner state with None to simulate an
-        // uninitialized scanner (as if init_by_lua was never called).
         let saved = {
-            let mut guard = SCANNER.lock().unwrap();
+            let mut guard = SCANNER.write().unwrap();
             guard.take()
         };
 
@@ -823,7 +1160,7 @@ mod tests {
 
         // Restore scanner state so other tests are not affected.
         {
-            let mut guard = SCANNER.lock().unwrap();
+            let mut guard = SCANNER.write().unwrap();
             *guard = saved;
         }
 
@@ -831,5 +1168,319 @@ mod tests {
             rc, LUAGATE_INTERNAL_ERROR,
             "uninitialized scanner must return INTERNAL_ERROR, not auto-init"
         );
+    }
+
+    #[test]
+    fn test_reload_from_yaml_dir() {
+        init_scanner_for_test();
+
+        let dir = std::env::temp_dir().join("luagate_test_reload");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "sqli"
+    rule_name: "reload_test_rule"
+    pattern: "(?i)reload_inject"
+    score: 0.95
+"#;
+        fs::write(dir.join("custom.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let mut version_buf = vec![0i8; 65];
+        let mut pattern_count: usize = 0;
+
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            version_buf.as_mut_ptr(),
+            65,
+            &mut pattern_count,
+        );
+
+        assert_eq!(rc, LUAGATE_OK);
+        assert_eq!(pattern_count, 1);
+
+        // version_buf should contain a 64-char hex string
+        let version_str = unsafe {
+            std::ffi::CStr::from_ptr(version_buf.as_ptr())
+                .to_str()
+                .unwrap()
+        };
+        assert_eq!(version_str.len(), 64);
+
+        // Verify the reloaded pattern works (don't reset to defaults)
+        let (rc, threat, rule, score) = scan_without_reset("/", "q=reload_inject");
+        assert_eq!(rc, 0);
+        assert_eq!(threat, "sqli");
+        assert_eq!(rule, "reload_test_rule");
+        assert_eq!(score, 0.95);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_invalid_yaml_preserves_lkg() {
+        init_scanner_for_test();
+
+        // Verify current scanner works
+        let (rc, threat, _, _) = make_scan_call("/page", "q=<script>alert(1)</script>");
+        assert_eq!(rc, 0);
+        assert_eq!(threat, "xss");
+
+        // Reload with invalid YAML
+        let dir = std::env::temp_dir().join("luagate_test_reload_invalid");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("bad.yaml"), "this is not valid yaml: [[[").unwrap();
+
+        let path = dir.to_str().unwrap();
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
+
+        // LKG preserved — old scanner still works
+        let (rc, threat, _, _) = make_scan_call("/page", "q=<script>alert(1)</script>");
+        assert_eq!(rc, 0);
+        assert_eq!(threat, "xss");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_duplicate_rule_name_rejected() {
+        init_scanner_for_test();
+
+        let dir = std::env::temp_dir().join("luagate_test_reload_dup");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "sqli"
+    rule_name: "dup_rule"
+    pattern: "(?i)inject1"
+    score: 0.9
+  - threat_type: "xss"
+    rule_name: "dup_rule"
+    pattern: "(?i)inject2"
+    score: 0.8
+"#;
+        fs::write(dir.join("dup.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_invalid_regex_rejected() {
+        init_scanner_for_test();
+
+        let dir = std::env::temp_dir().join("luagate_test_reload_badregex");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "sqli"
+    rule_name: "bad_regex_rule"
+    pattern: "(?P<unclosed"
+    score: 0.9
+"#;
+        fs::write(dir.join("badregex.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+
+        assert_eq!(rc, LUAGATE_RELOAD_COMPILE_ERROR);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_score_out_of_range_rejected() {
+        init_scanner_for_test();
+
+        let dir = std::env::temp_dir().join("luagate_test_reload_score");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "sqli"
+    rule_name: "bad_score_rule"
+    pattern: "(?i)inject"
+    score: 1.5
+"#;
+        fs::write(dir.join("score.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_invalid_threat_type_rejected() {
+        init_scanner_for_test();
+
+        let dir = std::env::temp_dir().join("luagate_test_reload_bad_threat");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "rce"
+    rule_name: "bad_threat_rule"
+    pattern: "(?i)inject"
+    score: 0.9
+"#;
+        fs::write(dir.join("bad_threat.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_scanner_reload_failed_flag_blocks_scan() {
+        init_scanner_for_test();
+
+        // Set the flag
+        SCANNER_RELOAD_FAILED.store(true, Ordering::Release);
+
+        let mut threat_buf = vec![0i8; 64];
+        let mut rule_buf = vec![0i8; 128];
+        let mut threat_len: usize = 0;
+        let mut rule_len: usize = 0;
+        let mut score: f64 = 0.0;
+
+        let path = "/api/test";
+        let rc = luagate_scan_http(
+            path.as_ptr() as *const i8,
+            path.len(),
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            threat_buf.as_mut_ptr(),
+            64,
+            &mut threat_len,
+            rule_buf.as_mut_ptr(),
+            128,
+            &mut rule_len,
+            &mut score,
+        );
+
+        assert_eq!(rc, LUAGATE_INTERNAL_ERROR);
+
+        // Clear flag
+        SCANNER_RELOAD_FAILED.store(false, Ordering::Release);
+    }
+
+    #[test]
+    fn test_successful_reload_clears_failed_flag() {
+        SCANNER_RELOAD_FAILED.store(true, Ordering::Release);
+
+        let dir = std::env::temp_dir().join("luagate_test_reload_clear");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "sqli"
+    rule_name: "clear_flag_rule"
+    pattern: "(?i)test"
+    score: 0.5
+"#;
+        fs::write(dir.join("test.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+
+        assert_eq!(rc, LUAGATE_OK);
+        assert!(!SCANNER_RELOAD_FAILED.load(Ordering::Acquire));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_null_path_returns_internal_error() {
+        let rc = luagate_scanner_reload(
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+        assert_eq!(rc, LUAGATE_INTERNAL_ERROR);
+    }
+
+    #[test]
+    fn test_load_patterns_sha256_is_deterministic() {
+        let dir = std::env::temp_dir().join("luagate_test_sha256");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "sqli"
+    rule_name: "sha_test"
+    pattern: "(?i)test"
+    score: 0.5
+"#;
+        fs::write(dir.join("test.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let (_, _, sha1) = load_patterns_from_dir(path).unwrap();
+        let (_, _, sha2) = load_patterns_from_dir(path).unwrap();
+
+        assert_eq!(sha1, sha2);
+        assert_eq!(sha1.len(), 64);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

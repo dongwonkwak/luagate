@@ -131,9 +131,8 @@ fn decode_html_entities(input: &str) -> String {
             let end = (i + 1..len).take(10).find(|&j| chars[j] == ';');
             if let Some(end_pos) = end {
                 let entity_body: String = chars[i + 1..end_pos].iter().collect();
-                let replacement = if entity_body.starts_with('#') {
+                let replacement = if let Some(rest) = entity_body.strip_prefix('#') {
                     // Numeric entity: &#NNN; or &#xHH;
-                    let rest = &entity_body[1..];
                     let codepoint = if rest.starts_with('x') || rest.starts_with('X') {
                         u32::from_str_radix(&rest[1..], 16).ok()
                     } else {
