@@ -33,18 +33,20 @@ local MAX_BODY_SIZE = 1048576 -- 1 MB (ADR-014 risk mitigation)
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
---- Send a JSON error response.
+--- Send a JSON error response (admin-api.md §3 shape with stage field).
 -- @param status  number  HTTP status code
--- @param code    string  Error code
+-- @param code    string  Error code (snake_case)
+-- @param stage   string  Pipeline stage (e.g. "scanner", "internal")
 -- @param message string  Detail message
-local function send_error(status, code, message)
+local function send_error(status, code, stage, message)
   ngx.status = status
   ngx.header["Content-Type"] = "application/json"
   local body = cjson.encode({
     error = code,
+    stage = stage,
     details = { message },
   })
-  ngx.say(body or '{"error":"encode_failed"}')
+  ngx.say(body or '{"error":"encode_failed","stage":"internal","details":["JSON encode error"]}')
   ngx.exit(status)
 end
 
@@ -123,7 +125,7 @@ end
 local function audit_or_reject(event, fields)
   local ok = audit_log(event, fields)
   if not ok then
-    send_error(500, "audit_write_failed", "failed to write audit log; mutation rejected")
+    send_error(500, "audit_write_failed", "scanner", "failed to write audit log; mutation rejected")
     return false
   end
   return true
@@ -191,7 +193,7 @@ end
 function _M.handle_get_patterns()
   local dict = get_dict()
   if not dict then
-    send_error(503, "scanner_unavailable", "scanner shared dict not available")
+    send_error(503, "scanner_unavailable", "scanner", "scanner shared dict not available")
     return
   end
 
@@ -203,6 +205,7 @@ function _M.handle_get_patterns()
     active_version = active_version,
     loaded_at = loaded_at,
     pattern_count = pattern_count,
+    patterns = {},
   })
 end
 
@@ -226,12 +229,12 @@ function _M.handle_put_patterns()
   end
 
   if not body or #body == 0 then
-    send_error(400, "empty_body", "request body is empty")
+    send_error(400, "empty_body", "scanner", "request body is empty")
     return
   end
 
   if #body > MAX_BODY_SIZE then
-    send_error(413, "payload_too_large", "body exceeds 1MB limit")
+    send_error(413, "payload_too_large", "scanner", "body exceeds 1MB limit")
     return
   end
 
@@ -245,7 +248,7 @@ function _M.handle_put_patterns()
   local tmp_path = CUSTOM_YAML_PATH .. ".tmp"
   local wf, write_err = io.open(tmp_path, "w")
   if not wf then
-    send_error(500, "internal_error", "cannot write temp file: " .. tostring(write_err))
+    send_error(500, "internal_error", "scanner", "cannot write temp file: " .. tostring(write_err))
     return
   end
   wf:write(yaml_body)
@@ -256,9 +259,9 @@ function _M.handle_put_patterns()
   if not owner_id then
     os.remove(tmp_path)
     if lock_err == "ReloadInProgress" then
-      send_error(409, "ReloadInProgress", "another reload is already in progress")
+      send_error(409, "reload_in_progress", "scanner", "another reload is already in progress")
     else
-      send_error(500, "internal_error", lock_err or "lock acquisition failed")
+      send_error(500, "internal_error", "scanner", lock_err or "lock acquisition failed")
     end
     return
   end
@@ -270,10 +273,12 @@ function _M.handle_put_patterns()
     return
   end
 
-  -- [5] Backup existing custom.yaml
+  -- [5] Backup existing custom.yaml (may not exist for new files)
   local bak_path = CUSTOM_YAML_PATH .. ".bak"
+  local had_existing = false
   local existing_f = io.open(CUSTOM_YAML_PATH, "r")
   if existing_f then
+    had_existing = true
     local existing_content = existing_f:read("*all")
     existing_f:close()
     local bak_f = io.open(bak_path, "w")
@@ -283,46 +288,54 @@ function _M.handle_put_patterns()
     end
   end
 
+  -- Capture previous version before reload
+  local dict = get_dict()
+  local previous_version = dict and dict:get("scanner:active_version") or nil
+
   -- [6] Atomic rename: tmp -> custom.yaml
   local rename_ok, rename_err = os.rename(tmp_path, CUSTOM_YAML_PATH)
   if not rename_ok then
     os.remove(tmp_path)
     release_reload_lock(owner_id)
-    send_error(500, "internal_error", "cannot rename temp file: " .. tostring(rename_err))
+    send_error(500, "internal_error", "scanner", "cannot rename temp file: " .. tostring(rename_err))
     return
   end
 
   -- [7] Reload all patterns (entire conf/scanner-patterns/ directory)
   local result, reload_err = scanner_ffi.reload(PATTERNS_DIR)
   if not result then
-    -- Rollback: restore from .bak
-    local rollback_ok = os.rename(bak_path, CUSTOM_YAML_PATH)
-    if not rollback_ok then
-      ngx.log(ngx.CRIT, "[luagate:admin:scanner] rollback failed: cannot restore custom.yaml from .bak")
+    -- Rollback: restore from .bak if existed, otherwise remove canonical
+    -- (Codex feedback: when custom.yaml didn't exist before, .bak is absent
+    -- and rollback must delete the newly created canonical file)
+    if had_existing then
+      local rollback_ok = os.rename(bak_path, CUSTOM_YAML_PATH)
+      if not rollback_ok then
+        ngx.log(ngx.CRIT, "[luagate:admin:scanner] rollback failed: cannot restore custom.yaml from .bak")
+      end
+    else
+      local remove_ok = os.remove(CUSTOM_YAML_PATH)
+      if not remove_ok then
+        ngx.log(ngx.CRIT, "[luagate:admin:scanner] rollback failed: cannot remove newly created custom.yaml")
+      end
     end
 
     release_reload_lock(owner_id)
 
-    -- Distinguish parse/compile failure (400) from other errors
-    local is_validation = reload_err
-      and (
-        reload_err:find("YAML parse")
-        or reload_err:find("regex compile")
-        or reload_err:find("duplicate rule_name")
-        or reload_err:find("score")
-      )
+    -- Classify error by ffi error code pattern (Codex feedback: use error
+    -- code category from ffi.reload instead of substring matching)
+    local is_validation = reload_err and reload_err:find("validation_error")
     if is_validation then
       audit_log("scanner_pattern_update_failure", {
         trigger = "api",
         reason = reload_err,
       })
-      send_error(400, "validation_failed", tostring(reload_err))
+      send_error(400, "validation_failed", "scanner", tostring(reload_err))
     else
       audit_log("scanner_pattern_update_failure", {
         trigger = "api",
         reason = reload_err or "unknown",
       })
-      send_error(500, "reload_failed", tostring(reload_err))
+      send_error(500, "reload_failed", "scanner", tostring(reload_err))
     end
     return
   end
@@ -343,7 +356,8 @@ function _M.handle_put_patterns()
   })
 
   send_json(200, {
-    version = result.version,
+    previous_version = previous_version,
+    new_version = result.version,
     pattern_count = result.pattern_count,
     message = "patterns updated and reloaded",
   })
@@ -355,9 +369,9 @@ function _M.handle_post_reload()
   local owner_id, lock_err = acquire_reload_lock()
   if not owner_id then
     if lock_err == "ReloadInProgress" then
-      send_error(409, "ReloadInProgress", "another reload is already in progress")
+      send_error(409, "reload_in_progress", "scanner", "another reload is already in progress")
     else
-      send_error(500, "internal_error", lock_err or "lock acquisition failed")
+      send_error(500, "internal_error", "scanner", lock_err or "lock acquisition failed")
     end
     return
   end
@@ -367,6 +381,10 @@ function _M.handle_post_reload()
     release_reload_lock(owner_id)
     return
   end
+
+  -- Capture previous version before reload
+  local dict = get_dict()
+  local previous_version = dict and dict:get("scanner:active_version") or nil
 
   -- [3] Reload
   local result, reload_err = scanner_ffi.reload(PATTERNS_DIR)
@@ -378,17 +396,12 @@ function _M.handle_post_reload()
       reason = reload_err or "unknown",
     })
 
-    local is_validation = reload_err
-      and (
-        reload_err:find("YAML parse")
-        or reload_err:find("regex compile")
-        or reload_err:find("duplicate rule_name")
-        or reload_err:find("score")
-      )
+    -- Classify error by ffi error code category
+    local is_validation = reload_err and reload_err:find("validation_error")
     if is_validation then
-      send_error(400, "validation_failed", tostring(reload_err))
+      send_error(400, "validation_failed", "scanner", tostring(reload_err))
     else
-      send_error(500, "reload_failed", tostring(reload_err))
+      send_error(500, "reload_failed", "scanner", tostring(reload_err))
     end
     return
   end
@@ -406,7 +419,8 @@ function _M.handle_post_reload()
   })
 
   send_json(200, {
-    version = result.version,
+    previous_version = previous_version,
+    new_version = result.version,
     pattern_count = result.pattern_count,
     reloaded_at = ngx.utctime(),
   })

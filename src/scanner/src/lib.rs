@@ -17,6 +17,11 @@ const LUAGATE_BUFFER_TOO_SMALL: i32 = -2;
 const LUAGATE_BUDGET_EXCEEDED: i32 = -3;
 const LUAGATE_INTERNAL_ERROR: i32 = -4;
 
+// Reload-specific error codes (ADR-014 §6: Codex feedback — differentiated errors)
+const LUAGATE_RELOAD_IO_ERROR: i32 = -10;
+const LUAGATE_RELOAD_PARSE_ERROR: i32 = -11;
+const LUAGATE_RELOAD_COMPILE_ERROR: i32 = -12;
+
 // Per-request budget: 5 ms
 const BUDGET_NS: u128 = 5_000_000;
 
@@ -223,20 +228,48 @@ fn budget_exceeded(elapsed: Duration) -> bool {
 // YAML pattern loader (ADR-014 §3: Read → Parse → Compile)
 // ---------------------------------------------------------------------------
 
+/// Error category for pattern loading — allows reload to return differentiated
+/// error codes (Codex feedback: -10 IO, -11 parse, -12 compile).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PatternLoadErrorKind {
+    Io,
+    Parse,
+    Compile,
+}
+
+#[derive(Debug)]
+struct PatternLoadError {
+    kind: PatternLoadErrorKind,
+    message: String,
+}
+
+impl std::fmt::Display for PatternLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 /// Load patterns from YAML files in a directory.
 /// Returns (Scanner, pattern_count, sha256_hex) on success.
-/// Returns Err(message) on any failure (Read/Parse/Compile).
-fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), String> {
+/// Returns Err(PatternLoadError) on any failure (Read/Parse/Compile).
+fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), PatternLoadError> {
     let start = Instant::now();
     let dir = Path::new(dir_path);
 
+    // Helper macro: build a PatternLoadError
+    macro_rules! ple {
+        ($kind:expr, $($arg:tt)*) => {
+            PatternLoadError { kind: $kind, message: format!($($arg)*) }
+        };
+    }
+
     if !dir.is_dir() {
-        return Err(format!("patterns directory does not exist: {}", dir_path));
+        return Err(ple!(PatternLoadErrorKind::Io, "patterns directory does not exist: {}", dir_path));
     }
 
     // [1] Read: collect all .yaml files, sorted by filename (ADR-014 §4)
     let mut yaml_files: Vec<_> = fs::read_dir(dir)
-        .map_err(|e| format!("cannot read patterns directory: {}", e))?
+        .map_err(|e| ple!(PatternLoadErrorKind::Io, "cannot read patterns directory: {}", e))?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry
@@ -248,7 +281,7 @@ fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), St
     yaml_files.sort_by_key(|e| e.file_name());
 
     if yaml_files.is_empty() {
-        return Err("no .yaml files found in patterns directory".to_string());
+        return Err(ple!(PatternLoadErrorKind::Io, "no .yaml files found in patterns directory"));
     }
 
     // SHA256 hasher: concatenate all file contents in sorted order (ADR-014 §4)
@@ -260,24 +293,20 @@ fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), St
 
         // File size check (ADR-014 risk: YAML parsing memory explosion)
         let metadata = fs::metadata(&path)
-            .map_err(|e| format!("cannot stat {}: {}", path.display(), e))?;
+            .map_err(|e| ple!(PatternLoadErrorKind::Io, "cannot stat {}: {}", path.display(), e))?;
         if metadata.len() > MAX_PATTERN_FILE_SIZE {
-            return Err(format!(
-                "pattern file {} exceeds 1MB limit ({})",
-                path.display(),
-                metadata.len()
-            ));
+            return Err(ple!(PatternLoadErrorKind::Io, "pattern file {} exceeds 1MB limit ({})", path.display(), metadata.len()));
         }
 
         let content = fs::read(&path)
-            .map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
+            .map_err(|e| ple!(PatternLoadErrorKind::Io, "cannot read {}: {}", path.display(), e))?;
 
         // Feed into SHA256
         hasher.update(&content);
 
         // [2] Parse
         let pf: PatternFile = serde_yaml::from_slice(&content)
-            .map_err(|e| format!("YAML parse error in {}: {}", path.display(), e))?;
+            .map_err(|e| ple!(PatternLoadErrorKind::Parse, "YAML parse error in {}: {}", path.display(), e))?;
 
         all_entries.extend(pf.patterns);
     }
@@ -286,44 +315,35 @@ fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), St
     let mut seen_names = HashSet::new();
     for entry in &all_entries {
         if !seen_names.insert(&entry.rule_name) {
-            return Err(format!("duplicate rule_name: {}", entry.rule_name));
+            return Err(ple!(PatternLoadErrorKind::Parse, "duplicate rule_name: {}", entry.rule_name));
         }
         // rule_name format: [a-z0-9_]+, max 64 chars
         if entry.rule_name.len() > 64 {
-            return Err(format!(
-                "rule_name '{}' exceeds 64 char limit",
-                entry.rule_name
-            ));
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule_name '{}' exceeds 64 char limit", entry.rule_name));
         }
         if !entry
             .rule_name
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
         {
-            return Err(format!(
-                "rule_name '{}' contains invalid characters (must be [a-z0-9_]+)",
-                entry.rule_name
-            ));
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule_name '{}' contains invalid characters (must be [a-z0-9_]+)", entry.rule_name));
         }
         // score range check
         if !(0.0..=1.0).contains(&entry.score) {
-            return Err(format!(
-                "rule '{}': score {} out of range [0.0, 1.0]",
-                entry.rule_name, entry.score
-            ));
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule '{}': score {} out of range [0.0, 1.0]", entry.rule_name, entry.score));
         }
     }
 
     // Budget check before compile
     if start.elapsed().as_nanos() > RELOAD_BUDGET_NS {
-        return Err("reload budget exceeded during read/parse".to_string());
+        return Err(ple!(PatternLoadErrorKind::Compile, "reload budget exceeded during read/parse"));
     }
 
     // [3] Compile: regex compilation. 1 failure = entire reload aborted.
     let mut patterns = Vec::with_capacity(all_entries.len());
     for entry in all_entries {
         let regex = Regex::new(&entry.pattern)
-            .map_err(|e| format!("regex compile failed for '{}': {}", entry.rule_name, e))?;
+            .map_err(|e| ple!(PatternLoadErrorKind::Compile, "regex compile failed for '{}': {}", entry.rule_name, e))?;
 
         patterns.push(ThreatPattern {
             threat_type: entry.threat_type,
@@ -334,7 +354,7 @@ fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), St
 
         // Budget check per pattern
         if start.elapsed().as_nanos() > RELOAD_BUDGET_NS {
-            return Err("reload budget exceeded during regex compilation".to_string());
+            return Err(ple!(PatternLoadErrorKind::Compile, "reload budget exceeded during regex compilation"));
         }
     }
 
@@ -369,7 +389,8 @@ pub extern "C" fn luagate_scanner_init(patterns_path: *const i8, patterns_path_l
             Err(_) => return LUAGATE_INTERNAL_ERROR,
         };
 
-        // Attempt YAML loading; fall back to hardcoded on failure
+        // ADR-014: init failure is startup-fatal — no fallback to hardcoded.
+        // Lua init_by_lua must detect INTERNAL_ERROR and abort Nginx startup.
         match load_patterns_from_dir(path_str) {
             Ok((scanner, count, _sha)) => {
                 eprintln!(
@@ -380,10 +401,10 @@ pub extern "C" fn luagate_scanner_init(patterns_path: *const i8, patterns_path_l
             }
             Err(e) => {
                 eprintln!(
-                    "[luagate_scanner] WARNING: YAML load from '{}' failed ({}). Using hardcoded patterns.",
+                    "[luagate_scanner] FATAL: YAML load from '{}' failed: {}",
                     path_str, e
                 );
-                build_default_scanner()
+                return LUAGATE_INTERNAL_ERROR;
             }
         }
     } else {
@@ -440,11 +461,17 @@ pub extern "C" fn luagate_scanner_reload(
     };
 
     // [1-3] Read → Parse → Compile (outside write lock)
+    // Returns differentiated error codes per Codex feedback:
+    //   -10 (IO), -11 (parse/validation), -12 (compile)
     let (new_scanner, count, sha256_hex) = match load_patterns_from_dir(path_str) {
         Ok(result) => result,
         Err(e) => {
             eprintln!("[luagate_scanner] reload failed: {}", e);
-            return LUAGATE_INTERNAL_ERROR;
+            return match e.kind {
+                PatternLoadErrorKind::Io => LUAGATE_RELOAD_IO_ERROR,
+                PatternLoadErrorKind::Parse => LUAGATE_RELOAD_PARSE_ERROR,
+                PatternLoadErrorKind::Compile => LUAGATE_RELOAD_COMPILE_ERROR,
+            };
         }
     };
 
@@ -1200,7 +1227,7 @@ mod tests {
             std::ptr::null_mut(),
         );
 
-        assert_eq!(rc, LUAGATE_INTERNAL_ERROR);
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
 
         // LKG preserved — old scanner still works
         let (rc, threat, _, _) = make_scan_call("/page", "q=<script>alert(1)</script>");
@@ -1239,7 +1266,7 @@ mod tests {
             std::ptr::null_mut(),
         );
 
-        assert_eq!(rc, LUAGATE_INTERNAL_ERROR);
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1269,7 +1296,7 @@ mod tests {
             std::ptr::null_mut(),
         );
 
-        assert_eq!(rc, LUAGATE_INTERNAL_ERROR);
+        assert_eq!(rc, LUAGATE_RELOAD_COMPILE_ERROR);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1299,7 +1326,7 @@ mod tests {
             std::ptr::null_mut(),
         );
 
-        assert_eq!(rc, LUAGATE_INTERNAL_ERROR);
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
 
         let _ = fs::remove_dir_all(&dir);
     }

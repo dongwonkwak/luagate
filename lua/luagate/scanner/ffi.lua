@@ -59,6 +59,11 @@ local LUAGATE_BUDGET_EXCEEDED = -3
 local LUAGATE_INTERNAL_ERROR = -4
 local LUAGATE_TIMEOUT = -5
 
+-- Reload-specific error codes (must match src/scanner/src/lib.rs)
+local LUAGATE_RELOAD_IO_ERROR = -10
+local LUAGATE_RELOAD_PARSE_ERROR = -11
+local LUAGATE_RELOAD_COMPILE_ERROR = -12
+
 --- Increment per-worker FFI timeout leak counter in shared dict.
 -- ADR-009 Layer 2: tracks detached watchdog threads per worker.
 -- Uses ngx.worker.id() per AGENTS.md invariant.
@@ -202,7 +207,19 @@ function M.reload(patterns_path)
   end
 
   if rc ~= 0 then
-    return nil, "scanner_reload_failed:" .. rc
+    -- Classify reload error by return code for caller (admin API) to
+    -- distinguish validation errors (400) from internal errors (500).
+    local err_category
+    if rc == LUAGATE_RELOAD_IO_ERROR then
+      err_category = "io_error"
+    elseif rc == LUAGATE_RELOAD_PARSE_ERROR then
+      err_category = "validation_error"
+    elseif rc == LUAGATE_RELOAD_COMPILE_ERROR then
+      err_category = "validation_error"
+    else
+      err_category = "internal_error"
+    end
+    return nil, "scanner_reload_failed:" .. err_category .. ":" .. rc
   end
 
   local version = ffi.string(version_buf)

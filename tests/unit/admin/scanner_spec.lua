@@ -168,6 +168,7 @@ describe("luagate.admin.scanner", function()
       assert.equals("abc123", body.active_version)
       assert.equals("2026-03-24 09:00:00", body.loaded_at)
       assert.equals(24, body.pattern_count)
+      assert.is_table(body.patterns)
     end)
 
     it("returns 0 pattern_count when not set", function()
@@ -177,6 +178,7 @@ describe("luagate.admin.scanner", function()
       assert.equals(200, ngx.status)
       local body = cjson.decode(ngx_body_parts[1])
       assert.equals(0, body.pattern_count)
+      assert.is_table(body.patterns)
     end)
   end)
 
@@ -186,14 +188,17 @@ describe("luagate.admin.scanner", function()
         version = string.rep("b", 64),
         pattern_count = 15,
       }
+      -- Set initial version to verify previous_version in response
+      mock_scanner_dict["scanner:active_version"] = "old_version"
 
       local scanner_admin = require("luagate.admin.scanner")
       scanner_admin.handle_post_reload()
 
       assert.equals(200, ngx.status)
       local body = cjson.decode(ngx_body_parts[1])
-      assert.equals(string.rep("b", 64), body.version)
+      assert.equals(string.rep("b", 64), body.new_version)
       assert.equals(15, body.pattern_count)
+      assert.equals("old_version", body.previous_version)
 
       -- Verify shared dict updated
       assert.equals(string.rep("b", 64), mock_scanner_dict["scanner:active_version"])
@@ -208,11 +213,12 @@ describe("luagate.admin.scanner", function()
 
       assert.equals(409, ngx.status)
       local body = cjson.decode(ngx_body_parts[1])
-      assert.equals("ReloadInProgress", body.error)
+      assert.equals("reload_in_progress", body.error)
+      assert.equals("scanner", body.stage)
     end)
 
-    it("returns 500 on reload failure", function()
-      scanner_reload_error = "scanner_reload_failed:-4"
+    it("returns 500 on internal reload failure", function()
+      scanner_reload_error = "scanner_reload_failed:internal_error:-4"
 
       local scanner_admin = require("luagate.admin.scanner")
       scanner_admin.handle_post_reload()
@@ -220,6 +226,19 @@ describe("luagate.admin.scanner", function()
       assert.equals(500, ngx.status)
       local body = cjson.decode(ngx_body_parts[1])
       assert.equals("reload_failed", body.error)
+      assert.equals("scanner", body.stage)
+    end)
+
+    it("returns 400 on validation reload failure", function()
+      scanner_reload_error = "scanner_reload_failed:validation_error:-11"
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_post_reload()
+
+      assert.equals(400, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("validation_failed", body.error)
+      assert.equals("scanner", body.stage)
     end)
 
     it("releases reload lock after success", function()
@@ -256,6 +275,7 @@ describe("luagate.admin.scanner", function()
       assert.equals(400, ngx.status)
       local body = cjson.decode(ngx_body_parts[1])
       assert.equals("empty_body", body.error)
+      assert.equals("scanner", body.stage)
     end)
 
     it("returns 413 on oversized body", function()
@@ -265,6 +285,8 @@ describe("luagate.admin.scanner", function()
       scanner_admin.handle_put_patterns()
 
       assert.equals(413, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("scanner", body.stage)
     end)
 
     it("returns 409 when reload lock is held", function()
@@ -275,6 +297,9 @@ describe("luagate.admin.scanner", function()
       scanner_admin.handle_put_patterns()
 
       assert.equals(409, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("reload_in_progress", body.error)
+      assert.equals("scanner", body.stage)
     end)
   end)
 end)

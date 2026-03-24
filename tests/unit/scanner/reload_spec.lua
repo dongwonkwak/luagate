@@ -218,14 +218,48 @@ describe("luagate.scanner.ffi.reload()", function()
     assert.truthy(err and err:find("empty_path"))
   end)
 
-  it("returns scanner_reload_failed on non-zero rc", function()
+  it("returns scanner_reload_failed with internal_error on rc=-4", function()
     local scanner = load_ffi_with_reload({ reload_rc = -4 })
 
     local result, err = scanner.reload("conf/scanner-patterns")
 
     assert.is_nil(result)
     assert.truthy(err and err:find("scanner_reload_failed"))
+    assert.truthy(err and err:find("internal_error"))
     assert.truthy(err and err:find("-4"))
+  end)
+
+  it("returns scanner_reload_failed with validation_error on rc=-11 (parse)", function()
+    local scanner = load_ffi_with_reload({ reload_rc = -11 })
+
+    local result, err = scanner.reload("conf/scanner-patterns")
+
+    assert.is_nil(result)
+    assert.truthy(err and err:find("scanner_reload_failed"))
+    assert.truthy(err and err:find("validation_error"))
+    assert.truthy(err and err:find("-11"))
+  end)
+
+  it("returns scanner_reload_failed with validation_error on rc=-12 (compile)", function()
+    local scanner = load_ffi_with_reload({ reload_rc = -12 })
+
+    local result, err = scanner.reload("conf/scanner-patterns")
+
+    assert.is_nil(result)
+    assert.truthy(err and err:find("scanner_reload_failed"))
+    assert.truthy(err and err:find("validation_error"))
+    assert.truthy(err and err:find("-12"))
+  end)
+
+  it("returns scanner_reload_failed with io_error on rc=-10", function()
+    local scanner = load_ffi_with_reload({ reload_rc = -10 })
+
+    local result, err = scanner.reload("conf/scanner-patterns")
+
+    assert.is_nil(result)
+    assert.truthy(err and err:find("scanner_reload_failed"))
+    assert.truthy(err and err:find("io_error"))
+    assert.truthy(err and err:find("-10"))
   end)
 
   it("returns scanner_reload_ffi_error when FFI raises", function()
