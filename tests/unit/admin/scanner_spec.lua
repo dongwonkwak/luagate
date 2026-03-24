@@ -430,6 +430,29 @@ describe("luagate.admin.scanner", function()
       assert.equals("scanner", body.stage)
     end)
 
+    it("does not write the shared temp file when reload lock is already held", function()
+      local orig_io_open = io.open
+      local write_attempted = false
+
+      io.open = function(path, mode)
+        if path == "conf/scanner-patterns/custom.yaml.tmp" and mode == "w" then
+          write_attempted = true
+        end
+        return orig_io_open(path, mode)
+      end
+
+      request_body = "- threat_type: sqli\n  rule_name: test\n  pattern: test\n  score: 0.9"
+      mock_scanner_dict["scanner_reload_lock"] = "other_worker"
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_put_patterns()
+
+      assert.equals(409, ngx.status)
+      assert.is_false(write_attempted)
+
+      io.open = orig_io_open
+    end)
+
     it("returns reloaded_at in ISO-8601 format on success", function()
       -- This test requires io.open/os.rename stubs which are complex.
       -- The PUT handler writes temp files. For this test we stub io.open

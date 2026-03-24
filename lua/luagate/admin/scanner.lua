@@ -378,20 +378,9 @@ function _M.handle_put_patterns()
     yaml_body = "patterns:\n" .. body:gsub("([^\n]+)", "  %1")
   end
 
-  -- [2] Write to temp file for validation
-  local tmp_path = CUSTOM_YAML_PATH .. ".tmp"
-  local wf, write_err = io.open(tmp_path, "w")
-  if not wf then
-    send_error(500, "internal_error", "scanner", "cannot write temp file: " .. tostring(write_err))
-    return
-  end
-  wf:write(yaml_body)
-  wf:close()
-
-  -- [3] Acquire reload lock
+  -- [2] Acquire reload lock before touching the shared temp path.
   local owner_id, lock_err = acquire_reload_lock()
   if not owner_id then
-    os.remove(tmp_path)
     if lock_err == "ReloadInProgress" then
       send_error(409, "reload_in_progress", "scanner", "another reload is already in progress")
     else
@@ -399,6 +388,17 @@ function _M.handle_put_patterns()
     end
     return
   end
+
+  -- [3] Write to temp file for validation
+  local tmp_path = CUSTOM_YAML_PATH .. ".tmp"
+  local wf, write_err = io.open(tmp_path, "w")
+  if not wf then
+    release_reload_lock(owner_id)
+    send_error(500, "internal_error", "scanner", "cannot write temp file: " .. tostring(write_err))
+    return
+  end
+  wf:write(yaml_body)
+  wf:close()
 
   -- [4] Pre-commit audit
   if not audit_or_reject("scanner_pattern_update_attempt", { trigger = "api" }) then
