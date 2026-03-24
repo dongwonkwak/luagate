@@ -233,12 +233,16 @@ local function collect_pattern_metadata(patterns_dir)
       for line in content:gmatch("[^\r\n]+") do
         local tt = line:match("threat_type:%s*(.+)")
         if tt then
-          current = { threat_type = tt:gsub("^%s+", ""):gsub("%s+$", "") }
+          local val = tt:gsub("^%s+", ""):gsub("%s+$", "")
+          val = val:match('^"(.*)"$') or val:match("^'(.*)'$") or val
+          current = { threat_type = val }
         end
         if current then
           local rn = line:match("rule_name:%s*(.+)")
           if rn then
-            current.rule_name = rn:gsub("^%s+", ""):gsub("%s+$", "")
+            local val = rn:gsub("^%s+", ""):gsub("%s+$", "")
+            val = val:match('^"(.*)"$') or val:match("^'(.*)'$") or val
+            current.rule_name = val
           end
           local sc = line:match("score:%s*([%d%.]+)")
           if sc then

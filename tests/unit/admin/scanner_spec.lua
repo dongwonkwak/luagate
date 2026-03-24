@@ -325,12 +325,12 @@ describe("luagate.admin.scanner", function()
         }
       end
 
-      -- io.open for the yaml file returns pattern content; return nil for
-      -- any other path so that only our stub file is parsed.
+      -- io.open for the yaml file returns pattern content with quoted values
+      -- to verify quote stripping in collect_pattern_metadata().
       io.open = function(path, mode)
         if path and path:find("sqli%.yaml") and (not mode or mode == "r") then
-          local content = "patterns:\n  - threat_type: sqli\n"
-            .. "    rule_name: sqli_union\n    pattern: test\n    score: 0.9\n"
+          local content = 'patterns:\n  - threat_type: "sqli"\n'
+            .. '    rule_name: "sqli_union"\n    pattern: test\n    score: 0.9\n'
           return {
             read = function(_, fmt)
               if fmt == "*all" or fmt == "*a" then

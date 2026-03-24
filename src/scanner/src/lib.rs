@@ -311,11 +311,27 @@ fn load_patterns_from_dir(dir_path: &str) -> Result<(Scanner, usize, String), Pa
         all_entries.extend(pf.patterns);
     }
 
+    // Allowed threat_type values (docs/spec/security-scanner.md §2)
+    const VALID_THREAT_TYPES: &[&str] = &[
+        "sqli",
+        "xss",
+        "path_traversal",
+        "cmd_injection",
+        "ssrf",
+        "xxe",
+        "log4shell",
+        "scanner",
+    ];
+
     // Validation: duplicate rule_name check (ADR-014 §8)
     let mut seen_names = HashSet::new();
     for entry in &all_entries {
         if !seen_names.insert(&entry.rule_name) {
             return Err(ple!(PatternLoadErrorKind::Parse, "duplicate rule_name: {}", entry.rule_name));
+        }
+        // threat_type enum check (security-scanner.md §2)
+        if !VALID_THREAT_TYPES.contains(&entry.threat_type.as_str()) {
+            return Err(ple!(PatternLoadErrorKind::Parse, "rule '{}': invalid threat_type '{}' (allowed: {})", entry.rule_name, entry.threat_type, VALID_THREAT_TYPES.join(", ")));
         }
         // rule_name format: [a-z0-9_]+, max 64 chars
         if entry.rule_name.len() > 64 {
@@ -1316,6 +1332,36 @@ mod tests {
     score: 1.5
 "#;
         fs::write(dir.join("score.yaml"), yaml).unwrap();
+
+        let path = dir.to_str().unwrap();
+        let rc = luagate_scanner_reload(
+            path.as_ptr() as *const i8,
+            path.len(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+
+        assert_eq!(rc, LUAGATE_RELOAD_PARSE_ERROR);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_invalid_threat_type_rejected() {
+        init_scanner_for_test();
+
+        let dir = std::env::temp_dir().join("luagate_test_reload_bad_threat");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"patterns:
+  - threat_type: "rce"
+    rule_name: "bad_threat_rule"
+    pattern: "(?i)inject"
+    score: 0.9
+"#;
+        fs::write(dir.join("bad_threat.yaml"), yaml).unwrap();
 
         let path = dir.to_str().unwrap();
         let rc = luagate_scanner_reload(
