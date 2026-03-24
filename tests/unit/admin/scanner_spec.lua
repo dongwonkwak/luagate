@@ -305,6 +305,74 @@ describe("luagate.admin.scanner", function()
       assert.is_nil(mock_scanner_dict["scanner_reload_lock"])
     end)
 
+    it("populates scanner:pattern_metadata in shared dict on successful reload", function()
+      -- Stub io.popen and io.open for collect_pattern_metadata
+      local orig_io_open = io.open
+      local orig_io_popen = io.popen
+
+      -- io.popen returns a list of yaml filenames
+      io.popen = function()
+        local lines = { "sqli.yaml" }
+        local idx = 0
+        return {
+          lines = function()
+            return function()
+              idx = idx + 1
+              return lines[idx]
+            end
+          end,
+          close = function() end,
+        }
+      end
+
+      -- io.open for the yaml file returns pattern content; return nil for
+      -- any other path so that only our stub file is parsed.
+      io.open = function(path, mode)
+        if path and path:find("sqli%.yaml") and (not mode or mode == "r") then
+          local content = "patterns:\n  - threat_type: sqli\n"
+            .. "    rule_name: sqli_union\n    pattern: test\n    score: 0.9\n"
+          return {
+            read = function(_, fmt)
+              if fmt == "*all" or fmt == "*a" then
+                return content
+              end
+              return nil
+            end,
+            close = function() end,
+          }
+        end
+        -- Return nil for other yaml files so collect_pattern_metadata skips them
+        if path and path:find("%.ya?ml") then
+          return nil, "no such file"
+        end
+        return orig_io_open(path, mode)
+      end
+
+      scanner_reload_result = {
+        version = string.rep("h", 64),
+        pattern_count = 1,
+      }
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_post_reload()
+
+      assert.equals(200, ngx.status)
+
+      -- Verify scanner:pattern_metadata was written to shared dict
+      local meta_json = mock_scanner_dict["scanner:pattern_metadata"]
+      assert.is_truthy(meta_json, "scanner:pattern_metadata should be set")
+      local meta = cjson.decode(meta_json)
+      assert.is_table(meta)
+      assert.equals(1, #meta)
+      assert.equals("sqli", meta[1].threat_type)
+      assert.equals("sqli_union", meta[1].rule_name)
+      assert.equals(0.9, meta[1].score)
+
+      -- Restore
+      io.open = orig_io_open
+      io.popen = orig_io_popen
+    end)
+
     it("returns 500 when metadata update fails (dict:set failure)", function()
       scanner_reload_result = {
         version = string.rep("d", 64),
@@ -412,7 +480,7 @@ describe("luagate.admin.scanner", function()
       os.remove = orig_os_remove
     end)
 
-    it("returns 500 when metadata update fails after successful reload", function()
+    it("returns 200 with metadata_warning when metadata update fails after successful reload", function()
       local orig_io_open = io.open
       local orig_os_rename = os.rename
       local orig_os_remove = os.remove
@@ -445,12 +513,83 @@ describe("luagate.admin.scanner", function()
       local scanner_admin = require("luagate.admin.scanner")
       scanner_admin.handle_put_patterns()
 
-      assert.equals(500, ngx.status)
+      -- Metadata failure in PUT returns 200 (not 500) because Rust scanner
+      -- already holds valid new patterns.  Response includes warning field.
+      assert.equals(200, ngx.status)
       local body = cjson.decode(ngx_body_parts[1])
-      assert.equals("metadata_update_failed", body.error)
+      assert.equals(string.rep("f", 64), body.new_version)
+      assert.equals(1, body.pattern_count)
+      assert.is_string(body.metadata_warning)
+      assert.truthy(body.metadata_warning:find("shared dict update failed"))
 
       -- Lock should be released
       assert.is_nil(mock_scanner_dict["scanner_reload_lock"])
+
+      -- CRIT log should have been emitted
+      local found_crit = false
+      for _, entry in ipairs(ngx_log_calls) do
+        if entry.level == ngx.CRIT then
+          local msg = table.concat(entry.args, "")
+          if msg:find("metadata update failed") then
+            found_crit = true
+            break
+          end
+        end
+      end
+      assert.is_true(found_crit, "should log CRIT on metadata failure in PUT")
+
+      -- Restore
+      io.open = orig_io_open
+      os.rename = orig_os_rename
+      os.remove = orig_os_remove
+    end)
+
+    it("includes rollback failure detail in error response when reload and rollback both fail", function()
+      local orig_io_open = io.open
+      local orig_os_rename = os.rename
+      local orig_os_remove = os.remove
+
+      io.open = function(path, mode)
+        if mode == "w" then
+          return {
+            write = function() end,
+            close = function() end,
+          }
+        elseif mode == "r" then
+          -- custom.yaml exists (had_existing=true)
+          return {
+            read = function()
+              return "old content"
+            end,
+            close = function() end,
+          }
+        end
+        return orig_io_open(path, mode)
+      end
+      -- First rename succeeds (tmp -> canonical), rollback rename fails
+      local rename_count = 0
+      os.rename = function()
+        rename_count = rename_count + 1
+        if rename_count == 1 then
+          return true -- tmp -> canonical
+        end
+        return false, "disk full" -- bak -> canonical rollback fails
+      end
+      os.remove = function()
+        return true
+      end
+
+      request_body = "patterns:\n  - threat_type: sqli\n    rule_name: test\n    pattern: test\n    score: 0.9"
+      scanner_reload_error = "scanner_reload_failed:internal_error:-4"
+
+      local scanner_admin = require("luagate.admin.scanner")
+      scanner_admin.handle_put_patterns()
+
+      assert.equals(500, ngx.status)
+      local body = cjson.decode(ngx_body_parts[1])
+      assert.equals("reload_failed", body.error)
+      -- Error detail should mention rollback failure
+      assert.truthy(body.details[1]:find("rollback also failed"))
 
       -- Restore
       io.open = orig_io_open

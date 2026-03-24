@@ -173,13 +173,95 @@ local function release_reload_lock(owner_id)
   end
 end
 
+--- Build per-pattern metadata array by reading YAML files from the patterns
+--- directory.  Admin plane only (blocking I/O permitted on port 9090).
+--- Returns a Lua array of {threat_type, rule_name, score} tables, or an
+--- empty table if the directory cannot be read.
+--- @param patterns_dir string  Path to scanner-patterns directory
+--- @return table  Array of pattern metadata entries
+local function collect_pattern_metadata(patterns_dir)
+  if not patterns_dir then
+    return {}
+  end
+
+  -- Use lfs (LuaFileSystem) for directory listing if available; fall back
+  -- to io.popen when lfs is absent (OpenResty bundles neither by default,
+  -- but admin plane can use either).
+  local ok_lfs, lfs = pcall(require, "lfs")
+  local filenames = {}
+
+  if ok_lfs then
+    local ok_iter, iter, dir_obj = pcall(lfs.dir, patterns_dir)
+    if ok_iter then
+      for name in iter, dir_obj do
+        if name:match("%.ya?ml$") then
+          filenames[#filenames + 1] = name
+        end
+      end
+    end
+  else
+    -- Fallback: plain Lua directory listing via io.popen (admin plane only)
+    local cmd = 'ls -1 "' .. patterns_dir .. '"/ 2>/dev/null'
+    local pipe = io.popen(cmd)
+    if pipe then
+      for line in pipe:lines() do
+        if line:match("%.ya?ml$") then
+          filenames[#filenames + 1] = line
+        end
+      end
+      pipe:close()
+    end
+  end
+
+  table.sort(filenames)
+
+  -- Parse each YAML file to extract per-pattern metadata.  We only need
+  -- threat_type, rule_name, and score for the GET response.  Use a simple
+  -- line-based parser to avoid adding a YAML dependency in Lua (the Rust
+  -- side has already validated these files during reload).
+  local patterns = {}
+  for _, fname in ipairs(filenames) do
+    local fpath = patterns_dir .. "/" .. fname
+    local fh = io.open(fpath, "r")
+    if fh then
+      local content = fh:read("*all")
+      fh:close()
+      -- Simple line parser: extract threat_type, rule_name, score fields
+      -- from YAML entries.  Each pattern block starts with "- threat_type:"
+      -- or "  - threat_type:" (under patterns: key).
+      local current = nil
+      for line in content:gmatch("[^\r\n]+") do
+        local tt = line:match("threat_type:%s*(.+)")
+        if tt then
+          current = { threat_type = tt:gsub("^%s+", ""):gsub("%s+$", "") }
+        end
+        if current then
+          local rn = line:match("rule_name:%s*(.+)")
+          if rn then
+            current.rule_name = rn:gsub("^%s+", ""):gsub("%s+$", "")
+          end
+          local sc = line:match("score:%s*([%d%.]+)")
+          if sc then
+            current.score = tonumber(sc)
+            patterns[#patterns + 1] = current
+            current = nil
+          end
+        end
+      end
+    end
+  end
+
+  return patterns
+end
+
 --- Update shared dict scanner metadata after successful reload.
 -- [5] Verify stage of ADR-014 pipeline.
 -- @param version       string  SHA256 hex
 -- @param pattern_count number
+-- @param patterns_dir  string|nil  Path to scanner-patterns directory (for metadata collection)
 -- @return boolean  true on success, false if any set() failed
 -- @return string|nil  error message on failure
-local function update_scanner_metadata(version, pattern_count)
+local function update_scanner_metadata(version, pattern_count, patterns_dir)
   local dict = get_dict()
   if not dict then
     return false, "scanner shared dict unavailable"
@@ -201,6 +283,21 @@ local function update_scanner_metadata(version, pattern_count)
   if not ok3 then
     ngx.log(ngx.ERR, "[luagate:admin:scanner] dict:set scanner:pattern_count failed: ", tostring(err3))
     return false, "metadata update failed: scanner:pattern_count: " .. tostring(err3)
+  end
+
+  -- Collect per-pattern metadata from YAML files and store as JSON in shared
+  -- dict.  This populates the GET /api/v1/scanner/patterns response.
+  -- Best-effort: metadata collection failure does not fail the overall update.
+  if patterns_dir then
+    local patterns_meta = collect_pattern_metadata(patterns_dir)
+    local meta_json = cjson.encode(patterns_meta)
+    if meta_json then
+      local ok4, err4 = dict:set("scanner:pattern_metadata", meta_json)
+      if not ok4 then
+        ngx.log(ngx.WARN, "[luagate:admin:scanner] dict:set scanner:pattern_metadata failed: ", tostring(err4))
+        -- Non-fatal: GET will return empty patterns array
+      end
+    end
   end
 
   return true, nil
@@ -338,20 +435,26 @@ function _M.handle_put_patterns()
     return
   end
 
-  -- [7] Reload all patterns (entire conf/scanner-patterns/ directory)
+  -- [7] Reload all patterns (entire conf/scanner-patterns/ directory).
+  -- rename-before-validate is required because luagate_scanner_reload()
+  -- reads the entire conf/scanner-patterns/ directory; the file must be in
+  -- canonical position for reload to see it.  Rollback guarantees restoration.
   local result, reload_err = scanner_ffi.reload(PATTERNS_DIR)
   if not result then
     -- Rollback: restore from .bak if existed, otherwise remove canonical
     -- (Codex feedback: when custom.yaml didn't exist before, .bak is absent
     -- and rollback must delete the newly created canonical file)
+    local rollback_failed = false
     if had_existing then
       local rollback_ok = os.rename(bak_path, CUSTOM_YAML_PATH)
       if not rollback_ok then
+        rollback_failed = true
         ngx.log(ngx.CRIT, "[luagate:admin:scanner] rollback failed: cannot restore custom.yaml from .bak")
       end
     else
       local remove_ok = os.remove(CUSTOM_YAML_PATH)
       if not remove_ok then
+        rollback_failed = true
         ngx.log(ngx.CRIT, "[luagate:admin:scanner] rollback failed: cannot remove newly created custom.yaml")
       end
     end
@@ -361,44 +464,44 @@ function _M.handle_put_patterns()
     -- Classify error by ffi error code pattern (Codex feedback: use error
     -- code category from ffi.reload instead of substring matching)
     local is_validation = reload_err and reload_err:find("validation_error")
+    local detail = tostring(reload_err)
+    if rollback_failed then
+      detail = detail .. " (WARNING: rollback also failed — manual intervention required)"
+    end
     if is_validation then
       audit_log("scanner_pattern_update_failure", {
         trigger = "api",
         reason = reload_err,
+        rollback_failed = rollback_failed,
       })
-      send_error(400, "validation_failed", "scanner", tostring(reload_err))
+      send_error(400, "validation_failed", "scanner", detail)
     else
       audit_log("scanner_pattern_update_failure", {
         trigger = "api",
         reason = reload_err or "unknown",
+        rollback_failed = rollback_failed,
       })
-      send_error(500, "reload_failed", "scanner", tostring(reload_err))
+      send_error(500, "reload_failed", "scanner", detail)
     end
     return
   end
 
-  -- [8] Success: update shared dict metadata
-  local meta_ok, meta_err = update_scanner_metadata(result.version, result.pattern_count)
+  -- [8] Success: update shared dict metadata.
+  -- Metadata failure does NOT warrant rollback because the Rust scanner already
+  -- holds valid new patterns and the YAML file on disk is correct.  The next
+  -- POST /reload (or worker timer) will re-sync metadata.  Returning 200 with
+  -- a warning avoids a split-brain where we roll back the file while Rust keeps
+  -- the new patterns.
+  local meta_ok, meta_err = update_scanner_metadata(result.version, result.pattern_count, PATTERNS_DIR)
+  local metadata_warning = nil
   if not meta_ok then
-    -- Metadata update failure means other workers cannot sync.
-    -- fail-closed: rollback and return error.
-    if had_existing then
-      local rollback_ok = os.rename(bak_path, CUSTOM_YAML_PATH)
-      if not rollback_ok then
-        ngx.log(
-          ngx.CRIT,
-          "[luagate:admin:scanner] rollback failed after metadata error: cannot restore custom.yaml from .bak"
-        )
-      end
-    else
-      local remove_ok = os.remove(CUSTOM_YAML_PATH)
-      if not remove_ok then
-        ngx.log(ngx.CRIT, "[luagate:admin:scanner] rollback failed after metadata error: cannot remove custom.yaml")
-      end
-    end
-    release_reload_lock(owner_id)
-    send_error(500, "metadata_update_failed", "scanner", tostring(meta_err))
-    return
+    ngx.log(
+      ngx.CRIT,
+      "[luagate:admin:scanner] metadata update failed after successful reload: ",
+      tostring(meta_err),
+      " — other workers may lag until next reload"
+    )
+    metadata_warning = "shared dict update failed, other workers may lag"
   end
 
   -- Remove backup
@@ -415,12 +518,16 @@ function _M.handle_put_patterns()
     pattern_count = result.pattern_count,
   })
 
-  send_json(200, {
+  local response = {
     previous_version = previous_version,
     new_version = result.version,
     pattern_count = result.pattern_count,
     reloaded_at = reloaded_at,
-  })
+  }
+  if metadata_warning then
+    response.metadata_warning = metadata_warning
+  end
+  send_json(200, response)
 end
 
 --- POST /api/v1/scanner/patterns/reload — reload patterns from filesystem.
@@ -467,7 +574,7 @@ function _M.handle_post_reload()
   end
 
   -- [4] Update shared dict metadata
-  local meta_ok, meta_err = update_scanner_metadata(result.version, result.pattern_count)
+  local meta_ok, meta_err = update_scanner_metadata(result.version, result.pattern_count, PATTERNS_DIR)
   if not meta_ok then
     release_reload_lock(owner_id)
     ngx.log(ngx.ERR, "[luagate:admin:scanner] POST reload metadata update failed: ", tostring(meta_err))

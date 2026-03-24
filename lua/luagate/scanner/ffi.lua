@@ -57,6 +57,10 @@ local VERSION_BUF_CAP = 65 -- 64-char SHA256 hex + NUL
 local LUAGATE_BUFFER_TOO_SMALL = -2
 local LUAGATE_BUDGET_EXCEEDED = -3
 local LUAGATE_INTERNAL_ERROR = -4
+-- NOTE: LUAGATE_TIMEOUT is defined in the ABI but not yet returned by
+-- luagate_scanner_reload() in Rust.  ADR-009 Layer 2 watchdog integration
+-- (detached thread timeout) is deferred to Phase 3-Reliability (DON-232).
+-- The scan path handles it defensively; reload path logs CRIT via worker.lua.
 local LUAGATE_TIMEOUT = -5
 
 -- Reload-specific error codes (must match src/scanner/src/lib.rs)

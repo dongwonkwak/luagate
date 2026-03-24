@@ -271,6 +271,10 @@ dict:delete("scanner_reload_lock")
 
 ### 7. Reload Budget 및 ADR-009 Watchdog 적용
 
+<!-- TODO: §7 timeout 격리 (LUAGATE_TIMEOUT(-5) 반환 경로)는 Phase 3-Reliability (DON-232)에서
+     ADR-009 Layer 2 detached thread watchdog와 통합하여 구현 예정.  현재는 Lua worker.lua에서
+     elapsed > RELOAD_WARN_THRESHOLD 시 CRIT 로그만 출력한다. -->
+
 `luagate_scanner_reload()`는 ADR-009의 L2 watchdog 계층을 적용한다.
 
 | 항목 | 값 |
